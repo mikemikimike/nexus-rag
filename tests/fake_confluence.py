@@ -85,7 +85,7 @@ class FakeSite:
         self.bin.chmod(self.bin.stat().st_mode | stat.S_IEXEC)
 
     def page(self, page_id: str, title: str, *, space: str = "ENG", parent: str | None = None,
-             version: int = 1, body: str = "", type: str = "page") -> None:
+             version: int | None = 1, body: str = "", type: str = "page") -> None:
         """Add a page, or change it: a changed page keeps its attachments and failures."""
         old = self._pages.get(page_id, {})
         self._pages[page_id] = {

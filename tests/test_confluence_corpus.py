@@ -321,3 +321,25 @@ def test_roots_are_read_from_a_file_of_ids_and_urls_with_comments(tmp_path):
 
     assert read_roots(roots) == [
         "123456789", "https://wiki.example.test/pages/viewpage.action?pageId=987654321"]
+
+
+def test_a_malformed_listing_is_a_root_failure_not_a_crash(index, site):
+    index.sync(corpus(site, "100", "200"))
+    site.bin.write_text("#!/bin/sh\necho 'not json'\n")
+
+    report = index.sync(corpus(site, "100", "200"))
+
+    assert (report.removed, report.failed) == (0, 2)
+    assert set(report.failures) == {"root 100", "root 200"}
+    assert index.get_document("200") is not None
+
+
+def test_a_page_without_a_version_cannot_be_told_unchanged_so_it_is_replaced_each_time(
+        index, site):
+    site.page("300", "Unversioned", space="ENG", version=None, body="Some text.\n")
+    index.sync(corpus(site, "300"))
+
+    report = index.sync(corpus(site, "300"))
+
+    assert (report.replaced, report.unchanged, report.failed) == (1, 0, 0)
+    assert index.get_document("300") == "Some text."

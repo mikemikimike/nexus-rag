@@ -1,5 +1,6 @@
 """A Corpus over Confluence, read through the `confluence` command (pchuri/confluence-cli)."""
 import fnmatch
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -12,6 +13,9 @@ from local_rag.extraction import MEDIA_TYPES
 
 _MAX_ERROR_LENGTH = 400
 _PAGE_FILE = "page.md"
+# The version of a page the CLI gave none for. It matches nothing indexed, so such a page
+# is fetched and replaced on every Sync instead of being taken for unchanged for good.
+_UNVERSIONED = "unversioned"
 # Attachments left out by default: images (they are only readable with OCR, which is
 # off unless enabled, and a page's screenshots would each fail as an empty Document),
 # video and archives.
@@ -65,15 +69,17 @@ class ConfluenceCorpus:
         for root in self._roots:
             try:
                 entries = self._list_root(root, failures)
-            except ConfluenceError as error:
-                failures[f"root {root}"] = str(error)
+            except Exception as error:  # a bad answer from the CLI fails the root, not the Sync
+                failures[f"root {root}"] = _describe(error)
             else:
                 self._entries.update((e.id, e) for e in entries)
         return Listing([DocumentRef(e.id, e.version) for e in self._entries.values()],
                        failures)
 
     def fetch(self, document_id: str) -> RawDocument:
-        entry = self._entries[document_id]
+        entry = self._entries.get(document_id)
+        if entry is None:
+            raise ConfluenceError(f"{document_id!r} was not in the last listing")
         with tempfile.TemporaryDirectory() as directory:
             if entry.attachment is None:
                 name, media_type = _PAGE_FILE, "text/markdown"
@@ -87,9 +93,12 @@ class ConfluenceCorpus:
                 content = (Path(directory) / name).read_bytes()
             except FileNotFoundError:
                 raise ConfluenceError(f"confluence produced no file {name!r}") from None
+        version = entry.version
+        if version == _UNVERSIONED:  # stored as what was fetched, so a change is still visible
+            version = hashlib.sha256(content).hexdigest()
         return RawDocument(
             id=entry.id, title=entry.title, url=entry.url, space=entry.space,
-            version=entry.version, content=content, media_type=media_type,
+            version=version, content=content, media_type=media_type,
             parent_id=None if entry.attachment is None else entry.page_id)
 
     def _list_root(self, root: str, failures: dict[str, str]) -> Sequence[_Entry]:
@@ -104,14 +113,15 @@ class ConfluenceCorpus:
         for page in found:
             entry = _Entry(
                 id=str(page["id"]), title=page["title"], url=page.get("url", ""),
-                space=page.get("spaceKey", ""), version=_version(page.get("version")),
+                space=page.get("spaceKey", ""),
+                version=_version(page.get("version"), default=_UNVERSIONED),
                 page_id=str(page["id"]))
             entries.append(entry)
             if self._attachments:
                 try:
                     entries += self._list_attachments(entry)
-                except ConfluenceError as error:
-                    failures[f"attachments of page {entry.id}"] = str(error)
+                except Exception as error:
+                    failures[f"attachments of page {entry.id}"] = _describe(error)
         return entries
 
     def _list_attachments(self, page: _Entry) -> Sequence[_Entry]:
@@ -151,7 +161,7 @@ def _media_type(name: str) -> str:
     return MEDIA_TYPES[Path(name).suffix.lower()]
 
 
-def _version(value, default: str = "") -> str:
+def _version(value, default: str) -> str:
     """A version as the CLI reports it: a number, or an object holding one."""
     if isinstance(value, dict):
         value = value.get("number")
@@ -166,3 +176,7 @@ def read_roots(path: Path | str) -> list[str]:
         if line and not line.startswith("#"):
             roots.append(line.split(" #")[0].strip())
     return roots
+
+
+def _describe(error: Exception) -> str:
+    return str(error) or type(error).__name__
