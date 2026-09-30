@@ -13,3 +13,5 @@ class Settings:
     sparse: SparseParams = field(default_factory=SparseParams)
     top_k: int = 6
     hybrid_candidates: int = 40
+    max_passages_per_document: int = 2  # most Passages one Document may add to a result
+    rerank: bool = False  # reorder results through the Model gateway's rerank

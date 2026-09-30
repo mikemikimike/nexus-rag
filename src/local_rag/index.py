@@ -5,6 +5,7 @@ from qdrant_client import QdrantClient, models
 
 from local_rag.corpus import Corpus, Document
 from local_rag.gateway import ModelGateway
+from local_rag.ranking import cap_per_document, rerank
 from local_rag.settings import Settings
 from local_rag.sparse import SparseEncoder
 
@@ -45,27 +46,34 @@ class KnowledgeIndex:
                 added += 1
         return SyncReport(added=added, failed=failed)
 
-    def search(self, query: str, k: int | None = None) -> list[Passage]:
+    def search(self, query: str, k: int | None = None,
+               space: str | None = None) -> list[Passage]:
         settings = self._settings
         if not self._client.collection_exists(settings.collection):
             return []
         limit = settings.top_k if k is None else k
         candidates = settings.hybrid_candidates
+        in_space = models.Filter(must=[_match("space", space)]) if space is not None else None
         prefetch = [models.Prefetch(
-            query=self._gateway.embed_query(query), using="dense", limit=candidates)]
+            query=self._gateway.embed_query(query), using="dense", limit=candidates,
+            filter=in_space)]
         sparse = self._sparse.encode_query(query)
         if sparse.indices:
             prefetch.append(models.Prefetch(
                 query=models.SparseVector(indices=sparse.indices, values=sparse.values),
-                using="bm25", limit=candidates))
+                using="bm25", limit=candidates, filter=in_space))
         points = self._client.query_points(
             settings.collection, prefetch=prefetch,
             query=models.FusionQuery(fusion=models.Fusion.RRF),
-            limit=limit, with_payload=True).points
-        return [Passage(
+            limit=max(limit, candidates), with_payload=True).points
+        passages = [Passage(
             document_id=p.payload["document_id"], title=p.payload["title"],
             url=p.payload["url"], space=p.payload["space"], text=p.payload["text"],
             score=float(p.score)) for p in points]
+        passages = cap_per_document(passages, settings.max_passages_per_document)
+        if settings.rerank:
+            passages = rerank(self._gateway, query, passages)
+        return passages[:limit]
 
     def _add(self, document: Document) -> None:
         # One Passage per Document until the chunker lands.
@@ -79,7 +87,32 @@ class KnowledgeIndex:
                 indices=sparse.indices, values=sparse.values)},
             payload={"document_id": document.id, "title": document.title,
                      "url": document.url, "space": document.space, "text": document.text},
-        )], wait=True)
+        ), _document_point(document)], wait=True)
+
+    def list_spaces(self) -> list[str]:
+        """The Spaces that have at least one indexed Document, sorted."""
+        if not self._client.collection_exists(self._settings.collection):
+            return []
+        spaces: set[str] = set()
+        offset = None
+        while True:
+            records, offset = self._client.scroll(
+                self._settings.collection, limit=256, offset=offset,
+                with_payload=["space"])
+            spaces.update(r.payload["space"] for r in records)
+            if offset is None:
+                return sorted(spaces)
+
+    def get_document(self, document_id: str) -> str | None:
+        """The full text of an indexed Document, or None if it is not indexed."""
+        if not self._client.collection_exists(self._settings.collection):
+            return None
+        records, _ = self._client.scroll(
+            self._settings.collection,
+            scroll_filter=models.Filter(must=[
+                _match("kind", _DOCUMENT_KIND), _match("document_id", document_id)]),
+            limit=1, with_payload=["full_text"])
+        return records[0].payload["full_text"] if records else None
 
     def _ensure_collection(self, dimension: int) -> None:
         name = self._settings.collection
@@ -92,6 +125,23 @@ class KnowledgeIndex:
             sparse_vectors_config={"bm25": models.SparseVectorParams(
                 modifier=models.Modifier.IDF)},
         )
+
+
+# The full text of a Document lives on its own vectorless point, so it is stored once
+# however many Passages the Document has and never appears in search results.
+_DOCUMENT_KIND = "document"
+
+
+def _match(key: str, value: str) -> models.FieldCondition:
+    return models.FieldCondition(key=key, match=models.MatchValue(value=value))
+
+
+def _document_point(document: Document) -> models.PointStruct:
+    return models.PointStruct(
+        id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document.id}#document")), vector={},
+        payload={"kind": _DOCUMENT_KIND, "document_id": document.id,
+                 "title": document.title, "url": document.url, "space": document.space,
+                 "full_text": document.text})
 
 
 def _connect(settings: Settings) -> QdrantClient:
