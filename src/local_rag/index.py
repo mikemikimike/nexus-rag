@@ -1,10 +1,11 @@
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from qdrant_client import QdrantClient, models
 
-from local_rag.corpus import Corpus, Document
+from local_rag.corpus import Corpus, Document, RawDocument
 from local_rag.exclusive import ExclusiveRun
+from local_rag.extraction import Extractor
 from local_rag.gateway import ModelGateway
 from local_rag.ranking import cap_per_document, rerank
 from local_rag.settings import Settings
@@ -28,6 +29,7 @@ class SyncReport:
     removed: int
     unchanged: int
     failed: int
+    failures: dict[str, str] = field(default_factory=dict)  # failed Document id -> why
 
 
 class KnowledgeIndex:
@@ -37,6 +39,7 @@ class KnowledgeIndex:
         self._settings = settings
         self._gateway = gateway
         self._sparse = SparseEncoder(settings.sparse)
+        self._extractor = Extractor.from_settings(settings)
         self._client = _connect(settings)
         self._exclusive = ExclusiveRun(
             self._client, f"{settings.collection}.sync-lock",
@@ -49,7 +52,8 @@ class KnowledgeIndex:
         """
         with self._exclusive.hold("Sync"):
             indexed = self._indexed_versions()
-            added = replaced = removed = unchanged = failed = 0
+            added = replaced = removed = unchanged = 0
+            failures: dict[str, str] = {}
             refs = corpus.list()
             for ref in refs:
                 versions = indexed.get(ref.id)
@@ -57,9 +61,9 @@ class KnowledgeIndex:
                     unchanged += 1
                     continue
                 try:
-                    self._add(corpus.fetch(ref.id))
-                except Exception:
-                    failed += 1
+                    self._add(self._extract(corpus.fetch(ref.id)))
+                except Exception as error:
+                    failures[ref.id] = _describe(error)
                 else:
                     if versions is None:
                         added += 1
@@ -69,12 +73,12 @@ class KnowledgeIndex:
             for document_id in indexed.keys() - current:
                 try:
                     self._remove(document_id)
-                except Exception:
-                    failed += 1
+                except Exception as error:
+                    failures[document_id] = _describe(error)
                 else:
                     removed += 1
             return SyncReport(added=added, replaced=replaced, removed=removed,
-                              unchanged=unchanged, failed=failed)
+                              unchanged=unchanged, failed=len(failures), failures=failures)
 
     def search(self, query: str, k: int | None = None,
                space: str | None = None) -> list[Passage]:
@@ -124,6 +128,11 @@ class KnowledgeIndex:
                     point.payload.get("version"))
             if offset is None:
                 return found
+
+    def _extract(self, raw: RawDocument) -> Document:
+        return Document(
+            id=raw.id, title=raw.title, url=raw.url, space=raw.space, version=raw.version,
+            text=self._extractor.extract(raw))
 
     def _add(self, document: Document) -> None:
         # One Passage per Document until the chunker lands.
@@ -194,6 +203,10 @@ class KnowledgeIndex:
         if self._settings.qdrant_location != ":memory:":  # in-process Qdrant has no indexes
             self._client.create_payload_index(
                 name, "document_id", models.PayloadSchemaType.KEYWORD)
+
+
+def _describe(error: Exception) -> str:
+    return str(error) or type(error).__name__
 
 
 def _of_document(document_id: str) -> list[models.FieldCondition]:
