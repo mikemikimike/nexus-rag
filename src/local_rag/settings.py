@@ -1,0 +1,15 @@
+from dataclasses import dataclass, field
+
+from local_rag.sparse import SparseParams
+
+
+@dataclass(frozen=True)
+class Settings:
+    """Everything the Knowledge index needs. Adapters build this from their environment."""
+
+    qdrant_location: str = ":memory:"  # ":memory:" (in-process) or a Qdrant server URL
+    qdrant_api_key: str | None = None
+    collection: str = "knowledge"
+    sparse: SparseParams = field(default_factory=SparseParams)
+    top_k: int = 6
+    hybrid_candidates: int = 40

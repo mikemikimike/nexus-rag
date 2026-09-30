@@ -8,3 +8,5 @@ wheelhouse/
 vendor/
 confluence_roots.txt
 .scratch/
+*.egg-info/
+.pytest_cache/
