@@ -20,6 +20,10 @@ _Avoid_: file, page (a page is one kind of Document from Confluence), source
 A Document that belongs to a page Document, indexed and replaced separately but citing its parent page.
 _Avoid_: file, child document
 
+**Media type**:
+The kind of content a Corpus supplies for a Document (PDF, HTML, plain text), which decides how it is turned into text before it is embedded.
+_Avoid_: mime, file type, extension
+
 **Space**:
 A named grouping of Documents (a Confluence space, or a top-level folder) that a search can be narrowed to.
 _Avoid_: project, namespace, category
@@ -39,6 +43,10 @@ _Avoid_: reindex, full refresh
 **Live index**:
 The generation of the Knowledge index that search currently reads from.
 _Avoid_: active collection, alias target
+
+**Previous index**:
+The one generation kept from before the last promotion, which an operator can switch back to if a Rebuild turns out to be bad; switching back makes it the Live index and the former Live index the Previous index.
+_Avoid_: backup, snapshot, old collection
 
 **Model gateway**:
 The network-local service (LiteLLM) through which embeddings, reranking and the chat model are reached.
