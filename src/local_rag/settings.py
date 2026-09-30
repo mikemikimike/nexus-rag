@@ -8,7 +8,7 @@ class Settings:
     """Everything the Knowledge index needs. Adapters build this from their environment."""
 
     qdrant_location: str = ":memory:"  # ":memory:" (in-process) or a Qdrant server URL
-    qdrant_api_key: str | None = None
+    qdrant_api_key: str | None = field(default=None, repr=False)
     collection: str = "knowledge"
     sparse: SparseParams = field(default_factory=SparseParams)
     top_k: int = 6

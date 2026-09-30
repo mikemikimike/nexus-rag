@@ -1,3 +1,5 @@
+import pytest
+
 from local_rag import KnowledgeIndex, Settings
 from local_rag.sparse import tokenize
 
@@ -42,3 +44,12 @@ def test_index_ignores_environment_and_working_directory(
 
     assert index.search("ORA-12154")[0].document_id == "dba/ora-12154"
     assert list(tmp_path.iterdir()) == []
+
+
+def test_settings_repr_hides_the_qdrant_api_key():
+    assert "s3cret" not in repr(Settings(qdrant_api_key="s3cret"))
+
+
+def test_index_rejects_an_unsupported_qdrant_location(gateway):
+    with pytest.raises(ValueError, match="qdrant_location"):
+        KnowledgeIndex(Settings(qdrant_location="./qdrant_data"), gateway)

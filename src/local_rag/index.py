@@ -95,7 +95,10 @@ class KnowledgeIndex:
 
 
 def _connect(settings: Settings) -> QdrantClient:
-    if settings.qdrant_location.startswith(("http://", "https://")):
-        return QdrantClient(url=settings.qdrant_location,
-                            api_key=settings.qdrant_api_key, timeout=60)
-    return QdrantClient(location=settings.qdrant_location)
+    location = settings.qdrant_location
+    if location.startswith(("http://", "https://")):
+        return QdrantClient(url=location, api_key=settings.qdrant_api_key, timeout=60)
+    if location == ":memory:":
+        return QdrantClient(location=location)
+    raise ValueError(
+        f"qdrant_location must be ':memory:' or an http(s) URL, got {location!r}")
