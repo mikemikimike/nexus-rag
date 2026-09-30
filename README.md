@@ -111,3 +111,17 @@ pytest
 ```
 
 Tests use an in-memory Corpus, a fake Model gateway and in-process Qdrant, so they need no external service.
+
+### Command line
+
+`local-rag` (or `python -m local_rag`) is a thin adapter over the Knowledge index. It reads its settings from environment variables (`QDRANT_URL`, `QDRANT_API_KEY`, `RAG_COLLECTION`, `LITELLM_BASE_URL`, `LITELLM_API_KEY`, `RAG_EMBED_MODEL`, `RAG_RERANK_MODEL`, `RAG_CHUNK_TOKENS`, `RAG_REBUILD_FAILURE_THRESHOLD`, and the other `RAG_*` names in `src/local_rag/environment.py`); `QDRANT_URL` defaults to `http://127.0.0.1:6333`.
+
+```
+local-rag sync    --folder DIR | --root PAGE [--root PAGE ...] [--roots-file FILE]
+local-rag rebuild --folder DIR | --root PAGE [--roots-file FILE]   # live only if complete enough
+local-rag switch-back                                               # previous index becomes live
+local-rag search "ORA-00942" [--space ENG] [-k 5]
+local-rag status
+```
+
+Exit codes: `0` success, `1` failure or refusal (a Sync with failed Documents, a refused Rebuild, another run in progress, an unusable index), `2` for a command line that cannot be used. Confluence reads go through `confluence-cli` (`CONFLUENCE_BIN`, `CONFLUENCE_*`).

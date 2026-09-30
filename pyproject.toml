@@ -16,6 +16,9 @@ dependencies = [
     "markdownify",  # HTML to Markdown for extraction
 ]
 
+[project.scripts]
+local-rag = "local_rag.cli:run"
+
 [dependency-groups]
 dev = [
     "pytest",
