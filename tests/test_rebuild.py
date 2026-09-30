@@ -6,7 +6,7 @@ from local_rag import KnowledgeIndex, NoPreviousIndex, Settings, SyncInProgress
 from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from conftest import DOCUMENTS
-from test_sync import FlakyCorpus, revised
+from test_sync import CountingGateway, FlakyCorpus, revised
 
 
 def test_a_rebuild_above_the_threshold_is_refused_and_the_live_index_is_untouched(index):
@@ -70,8 +70,6 @@ def test_a_rebuild_never_replaces_the_index_with_nothing():
 
 
 def test_a_rebuild_re_embeds_every_document_even_when_versions_are_unchanged():
-    from test_sync import CountingGateway
-
     gateway = CountingGateway()
     index = KnowledgeIndex(Settings(), gateway)
     index.sync(InMemoryCorpus(DOCUMENTS))
@@ -233,13 +231,10 @@ def test_cleanup_only_removes_generations_the_system_created(index):
 
     # Collections in the same Qdrant that merely look like ours by name.
     lookalikes = {"knowledge.gen-0123456789ab", "knowledge.previous-backup",
-                  "knowledge_old", "knowledge-2024", "knowledge"}
+                  "knowledge_old", "knowledge-2024", "knowledge.generations-old"}
     for name in lookalikes:
         index._client.create_collection(
             name, vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE))
-    # A real collection named "knowledge" would block the alias, so leave that one out.
-    index._client.delete_collection("knowledge")
-    lookalikes.discard("knowledge")
 
     for text in ("first", "second", "third"):
         index.rebuild(corpus_saying(text))
@@ -256,3 +251,113 @@ def test_generations_left_behind_do_not_accumulate(index):
     generations = {n for n in collections(index) if ".gen-" in n}
 
     assert len(generations) == 2
+
+
+def test_a_failed_cleanup_does_not_mask_the_error_and_is_swept_by_the_next_rebuild(
+        index, monkeypatch):
+    class Crash(BaseException):
+        pass
+
+    class CrashingCorpus(InMemoryCorpus):
+        def fetch(self, document_id):
+            if document_id == "dba/ora-12154":
+                raise Crash()
+            return super().fetch(document_id)
+
+    def broken_discard(generation):
+        raise OSError("qdrant went away")
+
+    index.rebuild(InMemoryCorpus(DOCUMENTS))
+    with monkeypatch.context() as broken:
+        broken.setattr(index._generations, "discard", broken_discard)
+        with pytest.raises(Crash):
+            index.rebuild(CrashingCorpus(DOCUMENTS))
+    assert len({n for n in collections(index) if ".gen-" in n}) == 2  # live + the stray
+
+    index.rebuild(InMemoryCorpus(DOCUMENTS))
+
+    assert len({n for n in collections(index) if ".gen-" in n}) == 2  # live + previous
+
+
+def test_a_sync_of_nothing_leaves_no_generation_behind(index):
+    index.sync(InMemoryCorpus([]))
+    index.sync(FlakyCorpus(DOCUMENTS, failing={d.id for d in DOCUMENTS}))
+
+    assert not {n for n in collections(index) if ".gen-" in n or n.endswith(".generations")}
+    assert index.sync(InMemoryCorpus(DOCUMENTS)).added == 3
+
+
+def legacy_index(index, documents):
+    """Write the plain collection that earlier versions kept, with no generation records."""
+    for document in documents:
+        index._add(document, "knowledge")
+    index._client.delete_collection("knowledge.generations")
+
+
+def test_an_index_written_by_an_earlier_version_keeps_being_served_and_synced(index):
+    legacy_index(index, DOCUMENTS)
+
+    report = index.sync(InMemoryCorpus([*DOCUMENTS[:2], revised(DOCUMENTS[2], "2", "New.")]))
+
+    assert (report.replaced, report.unchanged, report.failed) == (1, 2, 0)
+    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert index.get_document("garage/battery") == "New."
+    assert index.list_spaces() == ["DBA", "GARAGE"]
+
+
+def test_a_rebuild_replaces_an_index_written_by_an_earlier_version_and_cleans_it_up(index):
+    legacy_index(index, DOCUMENTS)
+
+    index.rebuild(corpus_saying("first"))
+    index.switch_back()
+    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert "first" != index.get_document("dba/ora-00942")
+    index.switch_back()
+    index.rebuild(corpus_saying("second"))
+
+    assert "knowledge" not in collections(index)
+    assert index.get_document("dba/ora-00942") == "second"
+
+
+def test_a_search_started_before_a_promotion_still_answers():
+    class RebuildingGateway(FakeModelGateway):
+        index = None
+        rebuilt = False
+
+        def embed_query(self, text):
+            if not self.rebuilt:  # two promotions, between finding the Live index and querying it
+                self.rebuilt = True
+                self.index.rebuild(corpus_saying("second"))
+                self.index.rebuild(corpus_saying("third"))
+            return super().embed_query(text)
+
+    gateway = RebuildingGateway()
+    index = gateway.index = KnowledgeIndex(Settings(), gateway)
+    index.sync(InMemoryCorpus(DOCUMENTS))
+
+    passages = index.search("ORA-00942")
+
+    assert passages and passages[0].text == "third"
+
+
+@pytest.mark.parametrize("threshold", [-0.1, 1.5, float("nan")])
+def test_a_rebuild_threshold_outside_zero_to_one_is_rejected(threshold):
+    with pytest.raises(ValueError, match="rebuild_failure_threshold"):
+        Settings(rebuild_failure_threshold=threshold)
+
+
+def test_a_rebuild_that_lost_the_lock_does_not_promote(index):
+    from local_rag.exclusive import LockLost
+
+    index.sync(InMemoryCorpus(DOCUMENTS))
+
+    class StallingCorpus(InMemoryCorpus):
+        def fetch(self, document_id):
+            index._client.delete_collection("knowledge.sync-lock")  # taken over meanwhile
+            return super().fetch(document_id)
+
+    with pytest.raises(LockLost):
+        index.rebuild(StallingCorpus(DOCUMENTS))
+
+    assert index.get_document("dba/ora-00942") == DOCUMENTS[0].text
+    assert len({n for n in collections(index) if ".gen-" in n}) == 1

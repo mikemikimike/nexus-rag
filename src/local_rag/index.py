@@ -1,3 +1,4 @@
+import logging
 import uuid
 from dataclasses import dataclass
 
@@ -10,6 +11,8 @@ from local_rag.generations import Generations
 from local_rag.ranking import cap_per_document, rerank
 from local_rag.settings import Settings
 from local_rag.sparse import SparseEncoder
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -24,10 +27,13 @@ class Passage:
 
 @dataclass(frozen=True)
 class RebuildReport:
-    promoted: bool
     indexed: int
     failed: int
-    reason: str | None  # why the new index was not promoted
+    reason: str | None  # why the new index was not promoted; None if it was
+
+    @property
+    def promoted(self) -> bool:
+        return self.reason is None
 
 
 @dataclass(frozen=True)
@@ -57,9 +63,9 @@ class KnowledgeIndex:
 
         Raises SyncInProgress at once if another Sync or Rebuild is running.
         """
-        with self._exclusive.hold("Sync"):
+        with self._exclusive.hold("Sync") as lease:
             live = self._generations.live()
-            target = live or self._generations.new()
+            target = live or self._generations.fresh_name()
             indexed = self._indexed_versions(live)
             added = replaced = removed = unchanged = failed = 0
             refs = corpus.list()
@@ -73,7 +79,8 @@ class KnowledgeIndex:
                 except Exception:
                     failed += 1
                 else:
-                    if live is None:  # the first Document makes the index live
+                    if live is None:  # the first Document makes a new index live
+                        lease.check()
                         self._generations.promote(target)
                         live = target
                     if versions is None:
@@ -97,8 +104,9 @@ class KnowledgeIndex:
         Searches keep reading the Live index until then. Raises SyncInProgress at once if
         another Sync or Rebuild is running.
         """
-        with self._exclusive.hold("Rebuild"):
-            generation = self._generations.new()
+        with self._exclusive.hold("Rebuild") as lease:
+            self._generations.prune()  # generations a crashed Rebuild left behind
+            generation = self._generations.fresh_name()
             promoted = False
             try:
                 refs = corpus.list()
@@ -108,16 +116,15 @@ class KnowledgeIndex:
                         self._add(corpus.fetch(ref.id), generation)
                     except Exception:
                         failed += 1
-                indexed = len(refs) - failed
                 reason = self._refusal(len(refs), failed)
                 if reason is None:
+                    lease.check()
                     self._generations.promote(generation)
                     promoted = True
             finally:
                 if not promoted:
-                    self._generations.discard(generation)
-            return RebuildReport(promoted=promoted, indexed=indexed, failed=failed,
-                                 reason=reason)
+                    self._discard(generation)
+            return RebuildReport(indexed=len(refs) - failed, failed=failed, reason=reason)
 
     def switch_back(self) -> None:
         """Make the previous index the Live index again.
@@ -130,21 +137,30 @@ class KnowledgeIndex:
 
     def _refusal(self, total: int, failed: int) -> str | None:
         """Why a Rebuild that indexed ``total - failed`` Documents must not go live."""
+        # Whatever the threshold, an index with no Documents cannot be made live: its
+        # collection is only created by the first Document.
         if total == 0:
             return "the Corpus has no Documents"
         if failed == total:
             return "no Document could be indexed"
-        threshold = self._settings.rebuild_failure_threshold
-        if failed / total > threshold:
-            return (f"{failed} of {total} Documents failed ({failed / total:.1%}), "
+        rate, threshold = failed / total, self._settings.rebuild_failure_threshold
+        if rate > threshold:
+            return (f"{failed} of {total} Documents failed ({rate:.1%}), "
                     f"above the {threshold:.1%} threshold")
         return None
+
+    def _discard(self, generation: str) -> None:
+        try:
+            self._generations.discard(generation)
+        except Exception:
+            # Not worth masking the error that got us here; the next Rebuild sweeps it.
+            log.warning("could not remove unpromoted index %s", generation, exc_info=True)
 
     def search(self, query: str, k: int | None = None,
                space: str | None = None) -> list[Passage]:
         settings = self._settings
-        live = self._generations.live()
-        if live is None:
+        serving = self._generations.serving()
+        if serving is None:
             return []
         limit = settings.top_k if k is None else k
         candidates = settings.hybrid_candidates
@@ -158,7 +174,7 @@ class KnowledgeIndex:
                 query=models.SparseVector(indices=sparse.indices, values=sparse.values),
                 using="bm25", limit=candidates, filter=in_space))
         points = self._client.query_points(
-            live, prefetch=prefetch,
+            serving, prefetch=prefetch,
             query=models.FusionQuery(fusion=models.Fusion.RRF),
             limit=max(limit, candidates), with_payload=True).points
         passages = [Passage(
@@ -170,18 +186,18 @@ class KnowledgeIndex:
             passages = rerank(self._gateway, query, passages)
         return passages[:limit]
 
-    def _indexed_versions(self, name: str | None) -> dict[str, set[str]]:
+    def _indexed_versions(self, collection: str | None) -> dict[str, set[str]]:
         """Versions found in the index per Document id.
 
         More than one version means an interrupted replace, so the Document is re-synced.
         """
         found: dict[str, set[str]] = {}
-        if name is None:
+        if collection is None:
             return found
         offset = None
         while True:
             points, offset = self._client.scroll(
-                name, limit=1000, offset=offset, with_vectors=False,
+                collection, limit=1000, offset=offset, with_vectors=False,
                 with_payload=["document_id", "version"])
             for point in points:
                 found.setdefault(point.payload["document_id"], set()).add(
@@ -221,36 +237,36 @@ class KnowledgeIndex:
 
     def list_spaces(self) -> list[str]:
         """The Spaces that have at least one indexed Document, sorted."""
-        live = self._generations.live()
-        if live is None:
+        serving = self._generations.serving()
+        if serving is None:
             return []
         spaces: set[str] = set()
         offset = None
         while True:
             records, offset = self._client.scroll(
-                live, limit=256, offset=offset,
-                with_payload=["space"])
+                serving, limit=256, offset=offset, with_payload=["space"])
             spaces.update(r.payload["space"] for r in records)
             if offset is None:
                 return sorted(spaces)
 
     def get_document(self, document_id: str) -> str | None:
         """The full text of an indexed Document, or None if it is not indexed."""
-        live = self._generations.live()
-        if live is None:
+        serving = self._generations.serving()
+        if serving is None:
             return None
         records, _ = self._client.scroll(
-            live,
+            serving,
             scroll_filter=models.Filter(must=[
                 _match("kind", _DOCUMENT_KIND), _match("document_id", document_id)]),
             limit=1, with_payload=["full_text"])
         return records[0].payload["full_text"] if records else None
 
-    def _ensure_collection(self, name: str, dimension: int) -> None:
-        if self._client.collection_exists(name):
+    def _ensure_collection(self, collection: str, dimension: int) -> None:
+        if self._client.collection_exists(collection):
             return
+        self._generations.record(collection)  # before it exists, so a crash leaves no stray
         self._client.create_collection(
-            collection_name=name,
+            collection_name=collection,
             vectors_config={"dense": models.VectorParams(
                 size=dimension, distance=models.Distance.COSINE)},
             sparse_vectors_config={"bm25": models.SparseVectorParams(
@@ -258,7 +274,7 @@ class KnowledgeIndex:
         )
         if self._settings.qdrant_location != ":memory:":  # in-process Qdrant has no indexes
             self._client.create_payload_index(
-                name, "document_id", models.PayloadSchemaType.KEYWORD)
+                collection, "document_id", models.PayloadSchemaType.KEYWORD)
 
 
 def _of_document(document_id: str) -> list[models.FieldCondition]:
