@@ -100,3 +100,14 @@ Tuning (`.env`): `RAG_HYBRID_CANDIDATES` (per retriever), `RAG_MAX_PER_DOC`, `RA
 ## Files
 
 `config.py` · `parsing.py` LiteParse+HTML · `embed.py` LiteLLM embeddings/tokenizer · `sparse.py` BM25 encoder · `store.py` Qdrant+alias · `ingest.py` · `search.py` hybrid+rerank · `mcp_server.py` HTTP MCP · `scripts/export_confluence.py` confluence-cli exporter · `scripts/` install/mirror/smoke · `deploy/` systemd, nginx, installer
+
+## Development (new package, in progress)
+
+The restructured package lives in `src/local_rag` and is being built alongside the legacy scripts in `local-rag/`. It needs Python 3.12.
+
+```
+pip install -e . --group dev   # or: uv pip install -e . --group dev
+pytest
+```
+
+Tests use an in-memory Corpus, a fake Model gateway and in-process Qdrant, so they need no external service.
