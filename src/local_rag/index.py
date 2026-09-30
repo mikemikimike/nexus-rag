@@ -6,6 +6,7 @@ from qdrant_client import QdrantClient, models
 from local_rag.corpus import Corpus, Document
 from local_rag.exclusive import ExclusiveRun
 from local_rag.gateway import ModelGateway
+from local_rag.generations import Generations
 from local_rag.ranking import cap_per_document, rerank
 from local_rag.settings import Settings
 from local_rag.sparse import SparseEncoder
@@ -19,6 +20,14 @@ class Passage:
     space: str
     text: str
     score: float
+
+
+@dataclass(frozen=True)
+class RebuildReport:
+    promoted: bool
+    indexed: int
+    failed: int
+    reason: str | None  # why the new index was not promoted
 
 
 @dataclass(frozen=True)
@@ -38,6 +47,7 @@ class KnowledgeIndex:
         self._gateway = gateway
         self._sparse = SparseEncoder(settings.sparse)
         self._client = _connect(settings)
+        self._generations = Generations(self._client, settings.collection)
         self._exclusive = ExclusiveRun(
             self._client, f"{settings.collection}.sync-lock",
             stale_after=settings.sync_lock_stale_after)
@@ -48,7 +58,9 @@ class KnowledgeIndex:
         Raises SyncInProgress at once if another Sync or Rebuild is running.
         """
         with self._exclusive.hold("Sync"):
-            indexed = self._indexed_versions()
+            live = self._generations.live()
+            target = live or self._generations.new()
+            indexed = self._indexed_versions(live)
             added = replaced = removed = unchanged = failed = 0
             refs = corpus.list()
             for ref in refs:
@@ -57,10 +69,13 @@ class KnowledgeIndex:
                     unchanged += 1
                     continue
                 try:
-                    self._add(corpus.fetch(ref.id))
+                    self._add(corpus.fetch(ref.id), target)
                 except Exception:
                     failed += 1
                 else:
+                    if live is None:  # the first Document makes the index live
+                        self._generations.promote(target)
+                        live = target
                     if versions is None:
                         added += 1
                     else:
@@ -68,7 +83,7 @@ class KnowledgeIndex:
             current = {ref.id for ref in refs}
             for document_id in indexed.keys() - current:
                 try:
-                    self._remove(document_id)
+                    self._remove(document_id, target)
                 except Exception:
                     failed += 1
                 else:
@@ -76,10 +91,60 @@ class KnowledgeIndex:
             return SyncReport(added=added, replaced=replaced, removed=removed,
                               unchanged=unchanged, failed=failed)
 
+    def rebuild(self, corpus: Corpus) -> RebuildReport:
+        """Re-embed every Document into a fresh index and make it live if it is complete enough.
+
+        Searches keep reading the Live index until then. Raises SyncInProgress at once if
+        another Sync or Rebuild is running.
+        """
+        with self._exclusive.hold("Rebuild"):
+            generation = self._generations.new()
+            promoted = False
+            try:
+                refs = corpus.list()
+                failed = 0
+                for ref in refs:
+                    try:
+                        self._add(corpus.fetch(ref.id), generation)
+                    except Exception:
+                        failed += 1
+                indexed = len(refs) - failed
+                reason = self._refusal(len(refs), failed)
+                if reason is None:
+                    self._generations.promote(generation)
+                    promoted = True
+            finally:
+                if not promoted:
+                    self._generations.discard(generation)
+            return RebuildReport(promoted=promoted, indexed=indexed, failed=failed,
+                                 reason=reason)
+
+    def switch_back(self) -> None:
+        """Make the previous index the Live index again.
+
+        Raises NoPreviousIndex if there is none, and SyncInProgress at once if a Sync or
+        Rebuild is running.
+        """
+        with self._exclusive.hold("switch-back"):
+            self._generations.switch_back()
+
+    def _refusal(self, total: int, failed: int) -> str | None:
+        """Why a Rebuild that indexed ``total - failed`` Documents must not go live."""
+        if total == 0:
+            return "the Corpus has no Documents"
+        if failed == total:
+            return "no Document could be indexed"
+        threshold = self._settings.rebuild_failure_threshold
+        if failed / total > threshold:
+            return (f"{failed} of {total} Documents failed ({failed / total:.1%}), "
+                    f"above the {threshold:.1%} threshold")
+        return None
+
     def search(self, query: str, k: int | None = None,
                space: str | None = None) -> list[Passage]:
         settings = self._settings
-        if not self._client.collection_exists(settings.collection):
+        live = self._generations.live()
+        if live is None:
             return []
         limit = settings.top_k if k is None else k
         candidates = settings.hybrid_candidates
@@ -93,7 +158,7 @@ class KnowledgeIndex:
                 query=models.SparseVector(indices=sparse.indices, values=sparse.values),
                 using="bm25", limit=candidates, filter=in_space))
         points = self._client.query_points(
-            settings.collection, prefetch=prefetch,
+            live, prefetch=prefetch,
             query=models.FusionQuery(fusion=models.Fusion.RRF),
             limit=max(limit, candidates), with_payload=True).points
         passages = [Passage(
@@ -105,14 +170,13 @@ class KnowledgeIndex:
             passages = rerank(self._gateway, query, passages)
         return passages[:limit]
 
-    def _indexed_versions(self) -> dict[str, set[str]]:
+    def _indexed_versions(self, name: str | None) -> dict[str, set[str]]:
         """Versions found in the index per Document id.
 
         More than one version means an interrupted replace, so the Document is re-synced.
         """
-        name = self._settings.collection
         found: dict[str, set[str]] = {}
-        if not self._client.collection_exists(name):
+        if name is None:
             return found
         offset = None
         while True:
@@ -125,17 +189,17 @@ class KnowledgeIndex:
             if offset is None:
                 return found
 
-    def _add(self, document: Document) -> None:
+    def _add(self, document: Document, collection: str) -> None:
         # One Passage per Document until the chunker lands.
         content = f"{document.title}\n\n{document.text}"
         [dense] = self._gateway.embed([content])
         sparse = self._sparse.encode_document(content)
-        self._ensure_collection(len(dense))
+        self._ensure_collection(collection, len(dense))
         document_point = _document_point(document)
         ids = [str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document.id}#0"))]
         # Write the new Passages first, then delete this Document's leftover old ones,
         # so a failure in between never leaves the Document missing from search.
-        self._client.upsert(self._settings.collection, points=[models.PointStruct(
+        self._client.upsert(collection, points=[models.PointStruct(
             id=ids[0],
             vector={"dense": dense, "bm25": models.SparseVector(
                 indices=sparse.indices, values=sparse.values)},
@@ -144,26 +208,27 @@ class KnowledgeIndex:
                      "space": document.space, "text": document.text},
         ), document_point], wait=True)
         self._client.delete(
-            self._settings.collection, wait=True,
+            collection, wait=True,
             points_selector=models.FilterSelector(filter=models.Filter(
                 must=_of_document(document.id),
                 must_not=[models.HasIdCondition(has_id=[*ids, document_point.id])])))
 
-    def _remove(self, document_id: str) -> None:
+    def _remove(self, document_id: str, collection: str) -> None:
         self._client.delete(
-            self._settings.collection, wait=True,
+            collection, wait=True,
             points_selector=models.FilterSelector(
                 filter=models.Filter(must=_of_document(document_id))))
 
     def list_spaces(self) -> list[str]:
         """The Spaces that have at least one indexed Document, sorted."""
-        if not self._client.collection_exists(self._settings.collection):
+        live = self._generations.live()
+        if live is None:
             return []
         spaces: set[str] = set()
         offset = None
         while True:
             records, offset = self._client.scroll(
-                self._settings.collection, limit=256, offset=offset,
+                live, limit=256, offset=offset,
                 with_payload=["space"])
             spaces.update(r.payload["space"] for r in records)
             if offset is None:
@@ -171,17 +236,17 @@ class KnowledgeIndex:
 
     def get_document(self, document_id: str) -> str | None:
         """The full text of an indexed Document, or None if it is not indexed."""
-        if not self._client.collection_exists(self._settings.collection):
+        live = self._generations.live()
+        if live is None:
             return None
         records, _ = self._client.scroll(
-            self._settings.collection,
+            live,
             scroll_filter=models.Filter(must=[
                 _match("kind", _DOCUMENT_KIND), _match("document_id", document_id)]),
             limit=1, with_payload=["full_text"])
         return records[0].payload["full_text"] if records else None
 
-    def _ensure_collection(self, dimension: int) -> None:
-        name = self._settings.collection
+    def _ensure_collection(self, name: str, dimension: int) -> None:
         if self._client.collection_exists(name):
             return
         self._client.create_collection(

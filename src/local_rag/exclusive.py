@@ -35,10 +35,10 @@ class ExclusiveRun:
         """Hold the lock for the ``with`` body, or raise SyncInProgress at once."""
         owner = uuid.uuid4().hex
         if not self._local.acquire(blocking=False):
-            raise SyncInProgress(f"another {what} is already running")
+            raise SyncInProgress(f"cannot start {what}: a Sync or Rebuild is running")
         try:
             if not self._acquire(owner):
-                raise SyncInProgress(f"another {what} is already running")
+                raise SyncInProgress(f"cannot start {what}: a Sync or Rebuild is running")
             stop = threading.Event()
             beat = threading.Thread(
                 target=self._beat, args=(owner, stop), daemon=True, name="exclusive-run")
