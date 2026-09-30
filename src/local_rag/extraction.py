@@ -15,24 +15,40 @@ from markdownify import markdownify
 from local_rag.corpus import RawDocument
 from local_rag.settings import Settings
 
-# File suffix LiteParse uses to pick a parser, per media type it is given.
-_LITEPARSE_SUFFIX = {
-    "application/pdf": ".pdf",
-    "application/msword": ".doc",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-    "application/vnd.ms-powerpoint": ".ppt",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
-    "application/vnd.ms-excel": ".xls",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/tiff": ".tiff",
+# The file types a folder Corpus recognises, with the media type each is yielded as.
+MEDIA_TYPES = {
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+    ".rst": "text/x-rst",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
 }
+# Everything that is not text or HTML goes through LiteParse, which picks its parser by
+# file suffix.
+_LITEPARSE_SUFFIX = {
+    media_type: suffix for suffix, media_type in MEDIA_TYPES.items()
+    if not media_type.startswith("text/")}
 _MAX_ERROR_LENGTH = 500
 
 
 class ExtractionError(Exception):
     pass
+
+
+class EmptyExtraction(ExtractionError):
+    """The content was read but held no text (a scanned page with OCR off, a blank file)."""
 
 
 class Extractor:
@@ -53,23 +69,24 @@ class Extractor:
         if media_type == "text/html":
             text = _html_to_markdown(document.content)
         elif media_type.startswith("text/"):
-            text = document.content.decode("utf-8", errors="replace")
+            text = document.content.decode("utf-8-sig", errors="replace")
         elif media_type in _LITEPARSE_SUFFIX:
-            text = self._liteparse(document.content, _LITEPARSE_SUFFIX[media_type])
+            text = self._liteparse(
+                document.content, _LITEPARSE_SUFFIX[media_type],
+                ocr=self._ocr or media_type.startswith("image/"))
         else:
             raise ExtractionError(f"unsupported media type {media_type}")
-        text = _tidy(text)
+        text = _normalise_whitespace(text)
         if not text:
-            raise ExtractionError("empty extraction: no text could be read")
+            raise EmptyExtraction("empty extraction: no text could be read")
         return text
 
-    def _liteparse(self, content: bytes, suffix: str) -> str:
-        command = [self._liteparse_bin, "parse"]
+    def _liteparse(self, content: bytes, suffix: str, *, ocr: bool) -> str:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / f"document{suffix}"
             path.write_bytes(content)
-            command.append(str(path))
-            if not self._ocr:
+            command = [self._liteparse_bin, "parse", str(path)]
+            if not ocr:
                 command.append("--no-ocr")
             try:
                 result = subprocess.run(
@@ -95,7 +112,7 @@ def _html_to_markdown(content: bytes) -> str:
     return markdownify(str(soup), heading_style="ATX")
 
 
-def _tidy(text: str) -> str:
+def _normalise_whitespace(text: str) -> str:
     text = text.replace("\r\n", "\n")
     text = re.sub(r"[ \t]+\n", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()

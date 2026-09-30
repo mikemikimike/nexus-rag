@@ -1,3 +1,4 @@
+import os
 import shutil
 
 import pytest
@@ -142,7 +143,7 @@ def test_an_empty_extraction_is_reported_not_indexed(index, folder):
 
     assert (report.added, report.failed) == (3, 2)
     assert {"dba/scanned.pdf", "dba/blank.md"} == set(report.failures)
-    assert all("empty" in reason for reason in report.failures.values())
+    assert all(reason.startswith("empty extraction") for reason in report.failures.values())
     assert index.get_document("dba/scanned.pdf") is None
     assert index.get_document("dba/blank.md") is None
 
@@ -177,7 +178,7 @@ def test_a_hung_liteparse_fails_the_document_after_the_timeout(make_index, folde
     assert "timed out" in report.failures["dba/failover.pdf"]
 
 
-def test_ocr_is_off_unless_enabled(make_index, folder, lit, tmp_path):
+def test_ocr_is_off_for_documents_unless_enabled(make_index, folder, lit, tmp_path):
     seen = tmp_path / "args"
     lit.write_text(f'#!/bin/sh\necho "$@" >> {seen}\necho text\n')
 
@@ -186,6 +187,42 @@ def test_ocr_is_off_unless_enabled(make_index, folder, lit, tmp_path):
 
     calls = seen.read_text().splitlines()
     assert [("--no-ocr" in call) for call in calls] == [True, True, False, False]
+
+
+def test_an_image_is_read_with_ocr_whatever_the_setting(make_index, tmp_path, lit):
+    seen = tmp_path / "args"
+    lit.write_text(f'#!/bin/sh\necho "$@" >> {seen}\necho "Whiteboard: restart the ZX-9000"\n')
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    (shots / "whiteboard.png").write_bytes(b"\x89PNG-fake")
+    index = make_index()
+
+    report = index.sync(FolderCorpus(tmp_path))
+
+    assert (report.added, report.failed) == (1, 0)
+    assert "--no-ocr" not in seen.read_text()
+    assert index.search("ZX-9000")[0].document_id == "shots/whiteboard.png"
+
+
+def test_a_utf8_byte_order_mark_is_not_part_of_the_text(index, folder):
+    (folder / "dba" / "bom.md").write_bytes(b"\xef\xbb\xbfHello from Windows")
+
+    index.sync(FolderCorpus(folder))
+
+    assert index.get_document("dba/bom.md") == "Hello from Windows"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read any file")
+def test_an_unreadable_file_counts_as_one_failed_document_and_the_rest_is_synced(
+        index, folder):
+    locked = folder / "dba" / "locked.md"
+    locked.write_text("secret")
+    locked.chmod(0)
+
+    report = index.sync(FolderCorpus(folder))
+
+    assert (report.added, report.failed) == (3, 1)
+    assert "dba/locked.md" in report.failures
 
 
 def test_an_unknown_media_type_fails_the_document(index):
