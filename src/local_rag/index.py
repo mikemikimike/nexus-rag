@@ -1,11 +1,12 @@
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from qdrant_client import QdrantClient, models
 
-from local_rag.corpus import Corpus, Document
+from local_rag.corpus import Corpus, Document, RawDocument
 from local_rag.exclusive import ExclusiveRun
+from local_rag.extraction import Extractor
 from local_rag.gateway import ModelGateway
 from local_rag.generations import Generations
 from local_rag.ranking import cap_per_document, rerank
@@ -30,6 +31,7 @@ class RebuildReport:
     indexed: int
     failed: int
     reason: str | None  # why the new index was not promoted; None if it was
+    failures: dict[str, str] = field(default_factory=dict)  # failed Document id -> why
 
     @property
     def promoted(self) -> bool:
@@ -43,6 +45,7 @@ class SyncReport:
     removed: int
     unchanged: int
     failed: int
+    failures: dict[str, str] = field(default_factory=dict)  # failed Document id -> why
 
 
 class KnowledgeIndex:
@@ -52,6 +55,7 @@ class KnowledgeIndex:
         self._settings = settings
         self._gateway = gateway
         self._sparse = SparseEncoder(settings.sparse)
+        self._extractor = Extractor.from_settings(settings)
         self._client = _connect(settings)
         self._generations = Generations(self._client, settings.collection)
         self._exclusive = ExclusiveRun(
@@ -67,7 +71,8 @@ class KnowledgeIndex:
             live = self._generations.live()
             target = live or self._generations.fresh_name()
             indexed = self._indexed_versions(live)
-            added = replaced = removed = unchanged = failed = 0
+            added = replaced = removed = unchanged = 0
+            failures: dict[str, str] = {}
             refs = corpus.list()
             for ref in refs:
                 versions = indexed.get(ref.id)
@@ -75,9 +80,9 @@ class KnowledgeIndex:
                     unchanged += 1
                     continue
                 try:
-                    self._add(corpus.fetch(ref.id), target)
-                except Exception:
-                    failed += 1
+                    self._add(self._extract(corpus.fetch(ref.id)), target)
+                except Exception as error:
+                    failures[ref.id] = _describe(error)
                 else:
                     if live is None:  # the first Document makes a new index live
                         lease.check()
@@ -91,12 +96,12 @@ class KnowledgeIndex:
             for document_id in indexed.keys() - current:
                 try:
                     self._remove(document_id, target)
-                except Exception:
-                    failed += 1
+                except Exception as error:
+                    failures[document_id] = _describe(error)
                 else:
                     removed += 1
             return SyncReport(added=added, replaced=replaced, removed=removed,
-                              unchanged=unchanged, failed=failed)
+                              unchanged=unchanged, failed=len(failures), failures=failures)
 
     def rebuild(self, corpus: Corpus) -> RebuildReport:
         """Re-embed every Document into a fresh index and make it live if it is complete enough.
@@ -110,12 +115,13 @@ class KnowledgeIndex:
             promoted = False
             try:
                 refs = corpus.list()
-                failed = 0
+                failures: dict[str, str] = {}
                 for ref in refs:
                     try:
-                        self._add(corpus.fetch(ref.id), generation)
-                    except Exception:
-                        failed += 1
+                        self._add(self._extract(corpus.fetch(ref.id)), generation)
+                    except Exception as error:
+                        failures[ref.id] = _describe(error)
+                failed = len(failures)
                 reason = self._refusal(len(refs), failed)
                 if reason is None:
                     lease.check()
@@ -124,7 +130,8 @@ class KnowledgeIndex:
             finally:
                 if not promoted:
                     self._discard(generation)
-            return RebuildReport(indexed=len(refs) - failed, failed=failed, reason=reason)
+            return RebuildReport(indexed=len(refs) - failed, failed=failed, reason=reason,
+                                 failures=failures)
 
     def switch_back(self) -> None:
         """Make the previous index the Live index again.
@@ -205,6 +212,11 @@ class KnowledgeIndex:
             if offset is None:
                 return found
 
+    def _extract(self, raw: RawDocument) -> Document:
+        return Document(
+            id=raw.id, title=raw.title, url=raw.url, space=raw.space, version=raw.version,
+            text=self._extractor.extract(raw))
+
     def _add(self, document: Document, collection: str) -> None:
         # One Passage per Document until the chunker lands.
         content = f"{document.title}\n\n{document.text}"
@@ -275,6 +287,10 @@ class KnowledgeIndex:
         if self._settings.qdrant_location != ":memory:":  # in-process Qdrant has no indexes
             self._client.create_payload_index(
                 collection, "document_id", models.PayloadSchemaType.KEYWORD)
+
+
+def _describe(error: Exception) -> str:
+    return str(error) or type(error).__name__
 
 
 def _of_document(document_id: str) -> list[models.FieldCondition]:

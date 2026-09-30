@@ -1,5 +1,6 @@
 from dataclasses import replace
 
+from conftest import DOCUMENTS
 from local_rag.corpus import InMemoryCorpus
 
 
@@ -13,7 +14,7 @@ def test_unchanged_documents_stay_unchanged_with_full_text_stored(index, corpus)
 
 def test_replaced_document_serves_its_new_full_text(index, corpus):
     index.sync(corpus)
-    changed = replace(corpus.fetch("dba/ora-00942"), version="2", text="Brand new body.")
+    changed = replace(DOCUMENTS[0], version="2", text="Brand new body.")
 
     report = index.sync(InMemoryCorpus([changed, corpus.fetch("dba/ora-12154"),
                                         corpus.fetch("garage/battery")]))
