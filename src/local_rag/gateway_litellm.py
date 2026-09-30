@@ -11,6 +11,10 @@ from local_rag.tokens import count_tokens
 RERANK_MAX_CHARS = 2000  # longer texts are cut before scoring; the head carries the topic
 
 
+# The gateway is on the local network: never route it through a proxy from the environment.
+_DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 class GatewayError(RuntimeError):
     """The Model gateway could not answer: unreachable, refused, or answered nonsense."""
 
@@ -93,7 +97,7 @@ class LiteLLMGateway:
         request = urllib.request.Request(
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
+            with _DIRECT.open(request, timeout=self._timeout) as response:
                 body = response.read()
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", "replace")[:500]

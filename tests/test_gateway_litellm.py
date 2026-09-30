@@ -159,3 +159,13 @@ def test_count_tokens_needs_no_network_and_is_conservative(server):
 def test_base_url_must_be_http(server):
     with pytest.raises(ValueError, match="http"):
         make_gateway(server, gateway_base_url="file:///etc/passwd")
+
+
+def test_gateway_ignores_proxy_environment_variables(server, monkeypatch):
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    gateway = make_gateway(server)
+
+    vectors = gateway.embed(["battery is dead"])
+
+    assert vectors == server.embedder.embed(["battery is dead"])
