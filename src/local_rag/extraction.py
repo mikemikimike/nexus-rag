@@ -1,7 +1,7 @@
 """Turns a RawDocument's content into text, by media type.
 
 PDF, Office and image files go through LiteParse (its `lit` command), HTML becomes
-Markdown, plain text is read as it is. Anything that cannot be turned into text raises
+Markdown, a draw.io diagram yields its labels, plain text is read as it is. Anything that cannot be turned into text raises
 ExtractionError, which a Sync counts as a failed Document.
 """
 import re
@@ -12,6 +12,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from markdownify import markdownify
 
+from local_rag import drawio
 from local_rag.corpus import RawDocument
 from local_rag.settings import Settings
 
@@ -29,17 +30,18 @@ MEDIA_TYPES = {
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".xls": "application/vnd.ms-excel",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".drawio": drawio.MEDIA_TYPE,
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".tif": "image/tiff",
     ".tiff": "image/tiff",
 }
-# Everything that is not text or HTML goes through LiteParse, which picks its parser by
-# file suffix.
+# Everything that is not text, HTML or a draw.io diagram goes through LiteParse, which
+# picks its parser by file suffix.
 _LITEPARSE_SUFFIX = {
     media_type: suffix for suffix, media_type in MEDIA_TYPES.items()
-    if not media_type.startswith("text/")}
+    if not media_type.startswith("text/") and media_type != drawio.MEDIA_TYPE}
 _MAX_ERROR_LENGTH = 500
 
 
@@ -68,6 +70,11 @@ class Extractor:
         media_type = document.media_type
         if media_type == "text/html":
             text = _html_to_markdown(document.content)
+        elif media_type == drawio.MEDIA_TYPE:
+            try:
+                text = drawio.text(document.content)
+            except drawio.DrawioError as error:
+                raise ExtractionError(str(error)) from None
         elif media_type.startswith("text/"):
             text = document.content.decode("utf-8-sig", errors="replace")
         elif media_type in _LITEPARSE_SUFFIX:
