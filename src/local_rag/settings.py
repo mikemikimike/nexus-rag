@@ -13,3 +13,4 @@ class Settings:
     sparse: SparseParams = field(default_factory=SparseParams)
     top_k: int = 6
     hybrid_candidates: int = 40
+    sync_lock_stale_after: float = 120.0  # seconds without a heartbeat before a crashed Sync's lock is taken over
