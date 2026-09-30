@@ -48,6 +48,22 @@ _Avoid_: active collection, alias target
 The one generation kept from before the last promotion, which an operator can switch back to if a Rebuild turns out to be bad; switching back makes it the Live index and the former Live index the Previous index.
 _Avoid_: backup, snapshot, old collection
 
+**Index format**:
+What an index records about how it was built (schema version, sparse encoder parameters, embedding model name and dimension), compared with the running code after an upgrade. An index whose format differs is served as a Read-only index if it can still be searched and refused if it cannot; it is never rebuilt automatically. An index whose records are corrupt or unreadable is reported, never treated as empty.
+_Avoid_: version, schema
+
+**Read-only index**:
+A Live index whose Index format differs from the running code but can still be searched. It is served with a warning and refuses Sync until an operator runs a Rebuild.
+_Avoid_: degraded, stale, legacy index
+
+**Status**:
+What an operator can ask of the Knowledge index: the Live index generation, Document and Passage counts, Index format, whether it is writable, and the result of the last Sync or Rebuild.
+_Avoid_: info, stats
+
+**Health**:
+Whether Qdrant and the Knowledge index can be reached, for monitoring.
+_Avoid_: liveness, ping
+
 **Model gateway**:
 The network-local service (LiteLLM) through which embeddings, reranking and the chat model are reached.
 _Avoid_: LLM server, backend
