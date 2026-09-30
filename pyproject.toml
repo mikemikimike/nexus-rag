@@ -10,6 +10,8 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "qdrant-client>=1.10",
+    "llama-index-core>=0.12",  # SentenceSplitter, used by the chunker
+    "nltk",  # its sentence boundary detection (imported directly by the chunker)
 ]
 
 [dependency-groups]

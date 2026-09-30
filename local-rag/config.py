@@ -3,10 +3,6 @@ import os
 import sys
 from pathlib import Path
 
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
-os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 ROOT = Path(os.environ.get("RAG_HOME", Path(__file__).resolve().parent)).resolve()
 
@@ -40,14 +36,10 @@ STATE_DIR = _p("RAG_STATE_DIR", "state")
 MANIFEST = STATE_DIR / "manifest.json"
 
 # Embeddings
-EMBED_BACKEND = os.environ.get("RAG_EMBED_BACKEND", "litellm")  # "litellm" | "local"
 LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://localhost:4000/v1")
 LITELLM_API_KEY = os.environ.get("LITELLM_API_KEY", "sk-local")
 EMBED_MODEL = os.environ.get("RAG_EMBED_MODEL", "embed")
 EMBED_BATCH = _i("RAG_EMBED_BATCH", 16)
-MODEL_PATH = str(_p("RAG_EMBED_MODEL_PATH", "models/embed"))  # backend=local only
-DEVICE = os.environ.get("RAG_DEVICE", "cpu")
-MAX_SEQ = _i("RAG_MAX_SEQ", 512)
 
 # Chunking
 CHUNK_TOKENS = _i("RAG_CHUNK_TOKENS", 400)
