@@ -15,3 +15,4 @@ class Settings:
     hybrid_candidates: int = 40
     max_passages_per_document: int = 2  # most Passages one Document may add to a result
     rerank: bool = False  # reorder results through the Model gateway's rerank
+    sync_lock_stale_after: float = 120.0  # seconds without a heartbeat before a crashed Sync's lock is taken over
