@@ -17,8 +17,16 @@ One unit of content from a Corpus with a stable identity, title, origin link and
 _Avoid_: file, page (a page is one kind of Document from Confluence), source
 
 **Attachment**:
-A Document that belongs to a page Document, indexed and replaced separately but citing its parent page.
+A Document that belongs to a page Document, indexed and replaced separately but citing its parent page (its title and link, and a reference to the page's id).
 _Avoid_: file, child document
+
+**Root**:
+A Confluence page, given by id or URL, whose whole subtree of pages a Confluence Corpus contributes; a Space's home page as a Root covers the Space.
+_Avoid_: seed, entry point, start page
+
+**Incomplete listing**:
+A Corpus's list of Documents that is missing a part the Corpus could not list (a Root, a page's Attachments); since a missing Document may still exist, a Sync removes nothing and a Rebuild is refused while a listing is incomplete.
+_Avoid_: partial export, listing error
 
 **Media type**:
 The kind of content a Corpus supplies for a Document (PDF, HTML, plain text), which decides how it is turned into text before it is embedded.
