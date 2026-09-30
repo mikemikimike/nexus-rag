@@ -32,11 +32,15 @@ class Journal:
                      "at": time.time()})], wait=True)
 
     def last(self) -> LastSync | None:
+        """The last result; None if there is none. Raises ValueError if it is unreadable."""
         if not self._client.collection_exists(self._name):
             return None
         points = self._client.retrieve(self._name, ids=[_POINT])
         if not points:
             return None
         p = points[0].payload
-        return LastSync(kind=p["kind"], outcome=p["outcome"], detail=p["detail"],
-                        at=datetime.fromtimestamp(p["at"], UTC))
+        try:
+            return LastSync(kind=p["kind"], outcome=p["outcome"], detail=p["detail"],
+                            at=datetime.fromtimestamp(p["at"], UTC))
+        except (KeyError, TypeError, ValueError, OverflowError) as error:
+            raise ValueError("the record of the last Sync is unreadable") from error

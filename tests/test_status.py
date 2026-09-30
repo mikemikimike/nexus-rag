@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from local_rag import IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
+from local_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
 from local_rag.corpus import InMemoryCorpus
 from local_rag.sparse import SparseParams
 from conftest import DOCUMENTS
@@ -107,3 +107,20 @@ def test_a_sync_refused_because_the_index_is_read_only_shows_in_status(index):
     last = upgraded.status().last_sync
 
     assert (last.outcome, "read-only" in last.detail) == ("failed", True)
+
+
+def test_an_unreadable_last_sync_record_is_reported_without_failing_status(index):
+    from qdrant_client import models
+
+    index.sync(InMemoryCorpus(DOCUMENTS))
+    index._client.upsert("knowledge.last-sync", points=[
+        models.PointStruct(id=1, vector=[1.0], payload={"kind": "Sync"})], wait=True)
+
+    status = index.status()
+
+    assert status.last_sync is None
+    assert any("last Sync" in warning for warning in status.warnings)
+    assert status.access == Access.READ_WRITE and status.documents == 3
+    assert index.health().ok
+    index.sync(InMemoryCorpus(DOCUMENTS))  # the next run writes a readable record again
+    assert index.status().last_sync.outcome == "completed"

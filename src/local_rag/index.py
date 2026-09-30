@@ -36,6 +36,7 @@ class RebuildReport:
     failed: int
     reason: str | None  # why the new index was not promoted; None if it was
     failures: dict[str, str] = field(default_factory=dict)  # failed Document id -> why
+    warnings: tuple[str, ...] = ()  # damage to the index's records the Rebuild had to work around
 
     @property
     def promoted(self) -> bool:
@@ -85,7 +86,8 @@ class KnowledgeIndex:
         self._sparse = SparseEncoder(settings.sparse)
         self._extractor = Extractor.from_settings(settings)
         self._client = client or _connect(settings)
-        self._assessments: dict[str, Assessment] = {}  # by generation; a generation's format is fixed
+        # By generation: a generation's format, once written, does not change.
+        self._assessments: dict[str, Assessment] = {}
         self._journal = Journal(self._client, f"{settings.collection}.last-sync")
         self._generations = Generations(self._client, settings.collection)
         self._exclusive = ExclusiveRun(
@@ -148,7 +150,7 @@ class KnowledgeIndex:
             return self._journaled("Rebuild", lambda: self._rebuild(corpus, lease))
 
     def _rebuild(self, corpus: Corpus, lease: Lease) -> RebuildReport:
-        self._sweep()  # generations a crashed Rebuild left behind
+        warnings = self._sweep()  # generations a crashed Rebuild left behind
         generation = self._generations.fresh_name()
         promoted = False
         try:
@@ -169,15 +171,20 @@ class KnowledgeIndex:
             if not promoted:
                 self._discard(generation)
         return RebuildReport(indexed=len(refs) - failed, failed=failed, reason=reason,
-                             failures=failures)
+                             failures=failures, warnings=warnings)
 
-    def _sweep(self) -> None:
+    def _sweep(self) -> tuple[str, ...]:
+        """Clean up after earlier runs, and say if the records it relies on had to be replaced."""
         try:
+            self._generations.validate_records()
             self._generations.prune()
-        except CorruptIndex:
+        except CorruptIndex as error:
             # A Rebuild is how corrupt records get replaced.
-            log.warning("replacing unreadable generation records", exc_info=True)
-            self._generations.forget_records()
+            warning = f"{error}; started new records, leaving other generations in place"
+            log.warning("%s", warning)
+            self._generations.reset_records()
+            return (warning,)
+        return ()
 
     def switch_back(self) -> None:
         """Make the previous index the Live index again.
@@ -186,6 +193,10 @@ class KnowledgeIndex:
         Rebuild is running.
         """
         with self._exclusive.hold("switch-back"):
+            previous = self._generations.previous()
+            if previous is not None and self._assessment(previous).access is Access.REFUSED:
+                raise IndexRefused(_explain(
+                    "the previous index cannot be used", self._assessment(previous)))
             self._generations.switch_back()
 
     def _journaled[R: (SyncReport, RebuildReport)](self, kind: str, run: Callable[[], R]) -> R:
@@ -202,6 +213,7 @@ class KnowledgeIndex:
                       f"{report.failed} failed")
         elif report.promoted:
             outcome, detail = "promoted", f"{report.indexed} indexed, {report.failed} failed"
+            detail = "; ".join([detail, *report.warnings])
         else:
             outcome, detail = "refused", report.reason
         self._note(kind, outcome, detail)
@@ -270,12 +282,32 @@ class KnowledgeIndex:
 
         Corrupt records are reported here rather than raised.
         """
+        return self._status(verify_dimension=True)
+
+    def health(self) -> Health:
+        """Whether Qdrant and the Knowledge index can be reached. Never raises.
+
+        Asks Qdrant only, so a monitor polling it does not depend on the Model gateway.
+        """
+        try:
+            self._client.get_collections()
+        except Exception as error:
+            return Health(False, False, (f"Qdrant is unreachable: {_describe(error)}",))
+        try:
+            status = self._status(verify_dimension=False)
+        except Exception as error:
+            return Health(
+                True, False, (f"the Knowledge index cannot be read: {_describe(error)}",))
+        return Health(True, status.access is not Access.REFUSED, status.warnings)
+
+    def _status(self, *, verify_dimension: bool) -> IndexStatus:
+        last_sync, unreadable = self._last_sync()
         try:
             live = self._generations.live()
             if live is None:
                 return IndexStatus(
-                    None, Access.READ_WRITE, 0, 0, None, (), self._journal.last())
-            assessment = self._assessment(live)
+                    None, Access.READ_WRITE, 0, 0, None, unreadable, last_sync)
+            assessment = self._assessment(live, verify_dimension=verify_dimension)
             documents = self._client.count(
                 live, count_filter=models.Filter(must=[_match("kind", _DOCUMENT_KIND)]),
                 exact=True).count
@@ -283,22 +315,17 @@ class KnowledgeIndex:
             return IndexStatus(
                 generation=live, access=assessment.access, documents=documents,
                 passages=total - documents, format=self._generations.format_of(live),
-                warnings=assessment.warnings, last_sync=self._journal.last())
+                warnings=(*assessment.warnings, *unreadable), last_sync=last_sync)
         except CorruptIndex as error:
             return IndexStatus(
-                None, Access.REFUSED, None, None, None, (str(error),), self._journal.last())
+                None, Access.REFUSED, None, None, None, (str(error), *unreadable), last_sync)
 
-    def health(self) -> Health:
-        """Whether Qdrant and the Knowledge index can be reached. Never raises."""
+    def _last_sync(self) -> tuple[LastSync | None, tuple[str, ...]]:
         try:
-            self._client.get_collections()
-        except Exception as error:
-            return Health(False, False, (f"Qdrant is unreachable: {_describe(error)}",))
-        try:
-            status = self.status()
-        except Exception as error:
-            return Health(True, False, (f"the Knowledge index cannot be read: {_describe(error)}",))
-        return Health(True, status.access is not Access.REFUSED, status.warnings)
+            return self._journal.last(), ()
+        except ValueError as error:
+            # Only a report: the next Sync or Rebuild writes a readable record again.
+            return None, (str(error),)
 
     def _readable(self) -> str | None:
         """What to query for the Live index, or None if there is none; refuses an unusable one."""
@@ -318,7 +345,7 @@ class KnowledgeIndex:
         if assessment.access is Access.REFUSED:
             raise IndexRefused(_explain("the index cannot be used", assessment))
 
-    def _assessment(self, generation: str) -> Assessment:
+    def _assessment(self, generation: str, *, verify_dimension: bool = True) -> Assessment:
         cached = self._assessments.get(generation)
         if cached is not None:
             return cached
@@ -335,16 +362,15 @@ class KnowledgeIndex:
         params = self._client.get_collection(generation).config.params
         if not (isinstance(params.vectors, dict) and "dense" in params.vectors
                 and "bm25" in (params.sparse_vectors or {})):
-            raise CorruptIndex(
-                f"{generation} is not a Knowledge index collection; "
-                "run a Rebuild to replace it (none is started automatically)")
+            raise CorruptIndex(f"{generation} is not a Knowledge index collection")
         assessment = assess(
             self._generations.format_of(generation), params.vectors["dense"].size,
-            self._settings, running_dimension)
-        if reachable:  # an unverified answer is worth asking for again
+            self._settings, running_dimension if verify_dimension else None)
+        if verify_dimension and reachable:  # an unverified answer is worth asking for again
             self._assessments[generation] = assessment
             if assessment.access is not Access.READ_WRITE:
-                log.warning("%s", _explain(f"index {generation} is {assessment.access}", assessment))
+                log.warning("%s", _explain(
+                    f"index {generation} is {assessment.access}", assessment))
         return assessment
 
     def _indexed_versions(self, collection: str | None) -> dict[str, set[str]]:

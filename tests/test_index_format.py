@@ -2,14 +2,12 @@ import dataclasses
 
 import pytest
 
-from local_rag import (
-    Access, IndexReadOnly, IndexRefused, KnowledgeIndex, Settings)
-from local_rag import index_format
+from local_rag import Access, IndexReadOnly, IndexRefused, KnowledgeIndex, Settings, index_format
 from local_rag.corpus import InMemoryCorpus
+from local_rag.fakes import FakeModelGateway
 from local_rag.sparse import SparseParams
 from conftest import DOCUMENTS
-from test_rebuild import collections
-from local_rag.fakes import FakeModelGateway
+from test_rebuild import collections, legacy_index
 from test_sync import CountingGateway, revised
 
 
@@ -124,14 +122,34 @@ def test_a_refused_index_is_replaced_by_a_rebuild_not_by_a_sync(index, monkeypat
 
     assert index.status().access == Access.READ_WRITE
     assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
-    index.switch_back()  # the refused one is still the previous index
-    with pytest.raises(IndexRefused):
-        index.search("ORA-00942")
+
+
+def test_switching_back_to_a_refused_index_is_itself_refused(index, monkeypatch):
+    index.sync(InMemoryCorpus(DOCUMENTS))
+    monkeypatch.setattr(index_format, "SCHEMA_VERSION", 2)
+    index.rebuild(InMemoryCorpus(DOCUMENTS))
+    live = index.status().generation
+
+    with pytest.raises(IndexRefused, match="previous index"):
+        index.switch_back()
+
+    assert index.status().generation == live
+    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
+
+
+def test_an_index_of_another_dimension_is_refused_even_under_the_same_model_name(index):
+    index.sync(InMemoryCorpus(DOCUMENTS))
+    upgraded = after_an_upgrade(index, FakeModelGateway(dimension=32))  # same settings
+
+    status = upgraded.status()
+
+    assert status.access == Access.REFUSED
+    assert any("dimension" in warning for warning in status.warnings)
+    with pytest.raises(IndexRefused, match="dimension"):
+        upgraded.search("ORA-00942")
 
 
 def test_an_index_without_a_recorded_format_is_refused_when_the_dimension_differs(index):
-    from test_rebuild import legacy_index
-
     legacy_index(index, DOCUMENTS)
     upgraded = after_an_upgrade(index, FakeModelGateway(dimension=32))
 

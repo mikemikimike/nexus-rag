@@ -32,8 +32,8 @@ class NoPreviousIndex(RuntimeError):
 class CorruptIndex(RuntimeError):
     """The index's own records disagree with Qdrant or cannot be read."""
 
-
-_REPAIR = "run a Rebuild to replace it (none is started automatically)"
+    def __init__(self, what: str):
+        super().__init__(f"{what}; run a Rebuild to replace it (none is started automatically)")
 
 
 @dataclass
@@ -85,15 +85,19 @@ class Generations:
         self._save(registry)
 
     def format_of(self, generation: str) -> IndexFormat | None:
-        """The format recorded for a generation; None if none was (an earlier version's)."""
-        payload = self._load().formats.get(generation)
+        """The format recorded for a generation; None if none was (an earlier version's).
+
+        Raises CorruptIndex if the registry does not know the generation at all.
+        """
+        registry = self._load()
+        self._require_known(registry, generation)
+        payload = registry.formats.get(generation)
         if payload is None:
             return None
         try:
             return IndexFormat.from_payload(payload)
         except ValueError as error:
-            raise CorruptIndex(
-                f"the recorded format of {generation} is unreadable; {_REPAIR}") from error
+            raise CorruptIndex(f"the recorded format of {generation} is unreadable") from error
 
     def promote(self, generation: str) -> None:
         """Make the generation the Live index, keep the one it replaces as previous."""
@@ -145,13 +149,36 @@ class Generations:
         registry.formats = {g: f for g, f in registry.formats.items() if g in keep}
         self._save(registry)
 
-    def forget_records(self) -> None:
-        """Drop the registry when it cannot be read, so a Rebuild can start a fresh one.
+    def previous(self) -> str | None:
+        """The collection kept for switching back to, if any."""
+        _, previous = self._live_and_previous()
+        return previous
 
-        Generations it named are no longer known to be ours, so they are left in place.
+    def validate_records(self) -> None:
+        """Raise CorruptIndex unless the registry is readable and knows the live generations."""
+        registry = self._load()
+        for generation in self._resolve(self._aliases(), strict=False):
+            if generation is not None:
+                self._require_known(registry, generation)
+
+    def _require_known(self, registry: _Registry, generation: str) -> None:
+        # A plain collection is an earlier version's and has no registry; any other
+        # generation was recorded by this module before it was created.
+        if generation != self._name and generation not in registry.generations:
+            raise CorruptIndex(f"{generation} is missing from the record of index generations")
+
+    def reset_records(self) -> None:
+        """Start a fresh registry when the old one cannot be used, for a Rebuild to repair.
+
+        Only the generations the aliases point at are adopted into it, without a format;
+        any others it named can no longer be told from collections that are not ours, so
+        they are left in place.
         """
         if self._client.collection_exists(self._registry):
             self._client.delete_collection(self._registry)
+        for generation in self._resolve(self._aliases(), strict=False):
+            if generation is not None and generation != self._name:
+                self.record(generation)
 
     def _live_and_previous(self) -> tuple[str | None, str | None]:
         return self._resolve(self._aliases())
@@ -170,7 +197,7 @@ class Generations:
             if lost is None and (recorded := self._load().live) is not None:
                 lost = f"{recorded} was the Live index"
             if lost is not None:
-                raise CorruptIndex(f"there is no Live index although {lost}; {_REPAIR}")
+                raise CorruptIndex(f"there is no Live index although {lost}")
         return live, previous
 
     def _drop_collection(self, name: str) -> None:
@@ -197,7 +224,7 @@ class Generations:
         formats, live = payload.get("formats", {}), payload.get("live")
         if not (isinstance(generations, list) and all(isinstance(g, str) for g in generations)
                 and isinstance(formats, dict) and isinstance(live, str | None)):
-            raise CorruptIndex(f"the record of index generations is unreadable; {_REPAIR}")
+            raise CorruptIndex("the record of index generations is unreadable")
         return _Registry(generations, formats, live)
 
     def _save(self, registry: _Registry) -> None:

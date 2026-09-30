@@ -76,13 +76,13 @@ _REBUILD_ADVICE = "run a Rebuild to bring it up to date (none is started automat
 
 
 def assess(recorded: IndexFormat | None, stored_dimension: int, settings: Settings,
-           running_dimension: Callable[[], int | None]) -> Assessment:
+           running_dimension: Callable[[], int | None] | None) -> Assessment:
     """Whether the running code can use an index, given the format it recorded.
 
     ``stored_dimension`` is the size of the index's dense vectors as the collection itself
     says. ``recorded`` is None for an index written before formats were recorded.
     ``running_dimension`` asks the Model gateway for the size of the vectors it returns
-    now, or None if it cannot be reached.
+    now (None if it cannot be reached); pass None instead to leave that unchecked.
     """
     if recorded is not None and recorded.schema_version != SCHEMA_VERSION:
         # A release that still reads an older schema would return READ_ONLY for it here.
@@ -101,17 +101,18 @@ def assess(recorded: IndexFormat | None, stored_dimension: int, settings: Settin
             differences.append(
                 f"embedding model differs: index built with {recorded.embed_model!r}, "
                 f"running with {settings.embed_model!r}")
-    if not differences:
-        return Assessment(Access.READ_WRITE)
-    if recorded is None or recorded.embed_model != settings.embed_model:
-        # Another model may still return vectors of the same size, which can be searched.
+    unchecked = []
+    if running_dimension is not None:
+        # Whatever the model's name, vectors of another size cannot be compared with these.
         running = running_dimension()
         if running is None:
-            differences.append("the embedding dimension could not be checked: "
-                               "the Model gateway is unreachable")
+            unchecked.append("the embedding dimension could not be checked: "
+                             "the Model gateway is unreachable")
         elif running != stored_dimension:
             return Assessment(Access.REFUSED, (
                 *differences, f"embedding dimension differs: index has {stored_dimension}, "
                 f"the Model gateway returns {running}, so queries cannot be compared with "
                 f"it; {_REBUILD_ADVICE}"))
-    return Assessment(Access.READ_ONLY, (*differences, _REBUILD_ADVICE))
+    if not differences:
+        return Assessment(Access.READ_WRITE, tuple(unchecked))
+    return Assessment(Access.READ_ONLY, (*differences, *unchecked, _REBUILD_ADVICE))

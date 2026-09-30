@@ -1,5 +1,6 @@
-from local_rag import KnowledgeIndex, Settings
+from local_rag import KnowledgeIndex, Settings, index_format
 from local_rag.corpus import InMemoryCorpus
+from local_rag.fakes import FakeModelGateway
 from conftest import DOCUMENTS
 from test_index_format import after_an_upgrade
 from test_index_state import lose_the_live_collection
@@ -57,11 +58,25 @@ def test_a_read_only_index_is_still_reachable_and_says_why(index):
 
 
 def test_a_refused_index_is_not_reachable(index, monkeypatch):
-    from local_rag import index_format
-
     index.sync(InMemoryCorpus(DOCUMENTS))
     monkeypatch.setattr(index_format, "SCHEMA_VERSION", 2)
 
     health = index.health()
 
     assert (health.qdrant, health.knowledge_index) == (True, False)
+
+
+def test_health_never_calls_the_model_gateway(index):
+    class CountingQueries(FakeModelGateway):
+        calls = 0
+
+        def embed_query(self, text):
+            CountingQueries.calls += 1
+            return super().embed_query(text)
+
+    index.sync(InMemoryCorpus(DOCUMENTS))
+    upgraded = after_an_upgrade(index, CountingQueries(), embed_model="embed-v2")
+
+    health = upgraded.health()
+
+    assert health.ok and CountingQueries.calls == 0

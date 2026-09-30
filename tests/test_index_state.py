@@ -66,6 +66,13 @@ def test_a_live_index_whose_data_is_gone_is_reported_even_with_no_previous_index
     assert_reported_not_empty(index, gateway)
 
 
+def test_a_lost_generation_registry_is_reported_not_read_as_an_earlier_version(
+        two_generations, gateway):
+    two_generations._client.delete_collection("knowledge.generations")
+
+    assert_reported_not_empty(two_generations, gateway)
+
+
 @pytest.mark.parametrize("damage", [
     lambda payload: {**payload, "formats": {n: {"garbage": 1} for n in payload["formats"]}},
     lambda payload: {"unexpected": True},
@@ -94,6 +101,7 @@ def test_a_collection_that_is_not_an_index_is_reported(two_generations, gateway)
 @pytest.mark.parametrize("damage", [
     lose_the_live_collection,
     lambda index: overwrite_registry(index, {"unexpected": True}),
+    lambda index: index._client.delete_collection("knowledge.generations"),
 ])
 def test_a_rebuild_repairs_corrupt_state(two_generations, damage):
     damage(two_generations)
@@ -104,3 +112,17 @@ def test_a_rebuild_repairs_corrupt_state(two_generations, damage):
     assert two_generations.status().access == Access.READ_WRITE
     assert two_generations.search("ORA-00942")[0].document_id == "dba/ora-00942"
     assert two_generations.sync(InMemoryCorpus(DOCUMENTS)).unchanged == 3
+
+
+def test_a_rebuild_over_an_unreadable_registry_says_so(two_generations):
+    overwrite_registry(two_generations, {"unexpected": True})
+
+    report = two_generations.rebuild(InMemoryCorpus(DOCUMENTS))
+
+    assert report.promoted
+    assert any("unreadable" in warning for warning in report.warnings)
+    assert "unreadable" in two_generations.status().last_sync.detail
+
+
+def test_a_rebuild_over_a_healthy_registry_has_nothing_to_warn_about(two_generations):
+    assert two_generations.rebuild(InMemoryCorpus(DOCUMENTS)).warnings == ()
