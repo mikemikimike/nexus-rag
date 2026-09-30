@@ -4,6 +4,7 @@ import zlib
 from collections.abc import Iterable, Mapping, Sequence
 
 from local_rag.sparse import tokenize
+from local_rag.tokens import count_tokens
 
 
 class FakeModelGateway:
@@ -25,6 +26,9 @@ class FakeModelGateway:
 
     def embed_query(self, text: str) -> list[float]:
         return self._vector(text)
+
+    def count_tokens(self, text: str) -> int:
+        return count_tokens(text)
 
     def rerank(self, query: str, texts: Sequence[str]) -> list[float]:
         """Relevance is the share of the query's words that appear in the text."""

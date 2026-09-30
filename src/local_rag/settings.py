@@ -13,6 +13,14 @@ class Settings:
     sparse: SparseParams = field(default_factory=SparseParams)
     top_k: int = 6
     hybrid_candidates: int = 40
+    gateway_base_url: str = "http://localhost:4000/v1"  # LiteLLM, OpenAI-compatible root
+    gateway_api_key: str | None = field(default=None, repr=False)  # bearer key for the gateway
+    embed_model: str = "embed"  # model name registered in the gateway for embeddings
+    rerank_model: str | None = None  # model name for /rerank; None leaves rerank off
+    embed_batch_size: int = 16  # texts per /embeddings request
+    gateway_timeout: float = 60.0  # seconds per gateway request
+    chunk_tokens: int = 400  # target Passage size
+    chunk_overlap: int = 60  # tokens shared between neighbouring Passages
     max_passages_per_document: int = 2  # most Passages one Document may add to a result
     rerank: bool = False  # reorder results through the Model gateway's rerank
     sync_lock_stale_after: float = 120.0  # seconds without a heartbeat before a crashed Sync's lock is taken over

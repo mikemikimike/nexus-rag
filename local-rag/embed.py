@@ -1,4 +1,4 @@
-"""Embedding model + tokenizer. Default: your LiteLLM gateway. No tiktoken, no internet."""
+"""Embedding model + tokenizer via your LiteLLM gateway. No tiktoken, no internet."""
 import re
 from functools import lru_cache
 
@@ -9,11 +9,6 @@ _TOKEN_RE = re.compile(r"\w+|[^\w\s]", re.UNICODE)
 
 @lru_cache(maxsize=1)
 def get_embed_model():
-    if config.EMBED_BACKEND == "local":
-        from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-        return HuggingFaceEmbedding(
-            model_name=config.MODEL_PATH, device=config.DEVICE,
-            embed_batch_size=config.EMBED_BATCH, max_length=config.MAX_SEQ)
     from llama_index.embeddings.openai_like import OpenAILikeEmbedding
     return OpenAILikeEmbedding(
         model_name=config.EMBED_MODEL,
@@ -23,20 +18,9 @@ def get_embed_model():
     )
 
 
-@lru_cache(maxsize=1)
-def _hf_tokenizer():
-    from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(config.MODEL_PATH, local_files_only=True)
-    tok.model_max_length = 10**9
-    return tok
-
-
 def token_fn():
-    """Token counter used for chunking. For the gateway backend we use a conservative
-    word/punctuation counter (slightly over-counts vs. BPE, so chunks stay safely small)."""
-    if config.EMBED_BACKEND == "local":
-        tok = _hf_tokenizer()
-        return lambda text: tok.encode(text, add_special_tokens=False)
+    """Token counter used for chunking: a conservative word/punctuation counter
+    (slightly over-counts vs. BPE, so chunks stay safely small)."""
     return lambda text: _TOKEN_RE.findall(text)
 
 
