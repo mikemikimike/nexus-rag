@@ -2,7 +2,8 @@ import dataclasses
 
 import pytest
 
-from local_rag import KnowledgeIndex, NoPreviousIndex, Settings, SyncInProgress
+from local_rag import (
+    IndexReadOnly, KnowledgeIndex, NoPreviousIndex, Settings, SyncInProgress)
 from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from conftest import DOCUMENTS
@@ -294,14 +295,14 @@ def legacy_index(index, documents):
     index._client.delete_collection("knowledge.generations")
 
 
-def test_an_index_written_by_an_earlier_version_keeps_being_served_and_synced(index):
+def test_an_index_written_by_an_earlier_version_keeps_being_served_but_not_synced(index):
     legacy_index(index, DOCUMENTS)
 
-    report = index.sync(InMemoryCorpus([*DOCUMENTS[:2], revised(DOCUMENTS[2], "2", "New.")]))
+    with pytest.raises(IndexReadOnly, match="not recorded"):
+        index.sync(InMemoryCorpus([*DOCUMENTS[:2], revised(DOCUMENTS[2], "2", "New.")]))
 
-    assert (report.replaced, report.unchanged, report.failed) == (1, 2, 0)
     assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
-    assert index.get_document("garage/battery") == "New."
+    assert index.get_document("garage/battery") == DOCUMENTS[2].text
     assert index.list_spaces() == ["DBA", "GARAGE"]
 
 
