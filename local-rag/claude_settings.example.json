@@ -1,0 +1,12 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://GATEWAY_HOST:4000",
+    "ANTHROPIC_AUTH_TOKEN": "sk-local-change-me",
+    "ANTHROPIC_MODEL": "local-main",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "local-main",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "local-main",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "local-main",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_AUTOUPDATER": "1"
+  }
+}

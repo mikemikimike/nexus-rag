@@ -1,0 +1,26 @@
+# You already run LiteLLM. This only shows what this project needs registered in it.
+model_list:
+  # 1) Chat model for Claude Code (name must match ANTHROPIC_MODEL in claude_settings.example.json)
+  - model_name: local-main
+    litellm_params:
+      model: openai/YOUR-CHAT-MODEL
+      api_base: http://LOCAL_LLM_HOST:8000/v1
+      api_key: none
+
+  # 2) Embedding model for ingest/search (name must match RAG_EMBED_MODEL in .env)
+  - model_name: local-embed
+    litellm_params:
+      model: openai/YOUR-EMBEDDING-MODEL
+      api_base: http://LOCAL_EMBED_HOST:8001/v1
+      api_key: none
+
+litellm_settings:
+  drop_params: true
+
+# 3) OPTIONAL reranker (set RAG_RERANK_MODEL=local-rerank in .env). Needs a rerank-capable backend
+#    (e.g. a bge-reranker served by an inference server that LiteLLM can route /rerank to).
+#  - model_name: local-rerank
+#    litellm_params:
+#      model: cohere/YOUR-RERANK-MODEL
+#      api_base: http://LOCAL_RERANK_HOST:8002
+#      api_key: none

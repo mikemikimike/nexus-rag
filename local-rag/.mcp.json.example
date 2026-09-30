@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "local-rag": {
+      "type": "http",
+      "url": "https://rag.corp.local/mcp",
+      "headers": { "Authorization": "Bearer ${LOCAL_RAG_TOKEN}" }
+    }
+  }
+}

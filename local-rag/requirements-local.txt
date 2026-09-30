@@ -1,0 +1,6 @@
+# OPTIONAL: only if you want embeddings computed locally instead of via LiteLLM
+# (RAG_EMBED_BACKEND=local). Also requires a model dir (RAG_EMBED_MODEL_PATH).
+llama-index-embeddings-huggingface
+sentence-transformers
+transformers
+torch

@@ -1,0 +1,6 @@
+# One root per line: a page ID or full page URL. Each root and ALL its descendants are exported.
+# To cover a whole space, use the space's home page. Find IDs with:
+#   confluence find "Home" --space ENG --json
+#   confluence spaces --json
+123456789            # ENG space home
+https://confluence.corp.local/pages/viewpage.action?pageId=987654321   # Ops runbooks

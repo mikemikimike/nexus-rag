@@ -1,0 +1,21 @@
+[Unit]
+Description=Qdrant vector database (local-rag)
+After=network.target
+
+[Service]
+Type=simple
+User=ragsvc
+Group=ragsvc
+WorkingDirectory=/var/lib/qdrant
+EnvironmentFile=/etc/local-rag/qdrant.env
+ExecStart=/opt/qdrant/qdrant
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
