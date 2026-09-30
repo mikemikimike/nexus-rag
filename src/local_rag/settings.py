@@ -21,3 +21,6 @@ class Settings:
     gateway_timeout: float = 60.0  # seconds per gateway request
     chunk_tokens: int = 400  # target Passage size
     chunk_overlap: int = 60  # tokens shared between neighbouring Passages
+    max_passages_per_document: int = 2  # most Passages one Document may add to a result
+    rerank: bool = False  # reorder results through the Model gateway's rerank
+    sync_lock_stale_after: float = 120.0  # seconds without a heartbeat before a crashed Sync's lock is taken over

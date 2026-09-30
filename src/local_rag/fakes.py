@@ -30,6 +30,11 @@ class FakeModelGateway:
     def count_tokens(self, text: str) -> int:
         return count_tokens(text)
 
+    def rerank(self, query: str, texts: Sequence[str]) -> list[float]:
+        """Relevance is the share of the query's words that appear in the text."""
+        wanted = set(tokenize(query))
+        return [len(wanted & set(tokenize(text))) / (len(wanted) or 1) for text in texts]
+
     def _vector(self, text: str) -> list[float]:
         vector = [0.0] * self.dimension
         for token in tokenize(text):
