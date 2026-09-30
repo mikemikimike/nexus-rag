@@ -14,10 +14,13 @@ dependencies = [
     "nltk",  # its sentence boundary detection (imported directly by the chunker)
     "beautifulsoup4",  # HTML parsing for extraction
     "markdownify",  # HTML to Markdown for extraction
+    "mcp>=2.2",  # the MCP server adapter (MCPServer, streamable HTTP, stdio)
+    "uvicorn",  # serves it over HTTP
 ]
 
 [project.scripts]
 local-rag = "local_rag.cli:run"
+local-rag-mcp = "local_rag.mcp_server:run"
 
 [dependency-groups]
 dev = [
