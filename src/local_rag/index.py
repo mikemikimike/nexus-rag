@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from qdrant_client import QdrantClient, models
 
-from local_rag.corpus import Corpus, Document, RawDocument
+from local_rag.corpus import Corpus, Document, RawDocument, listing_failures
 from local_rag.exclusive import ExclusiveRun
 from local_rag.extraction import Extractor
 from local_rag.gateway import ModelGateway
@@ -24,6 +24,7 @@ class Passage:
     space: str
     text: str
     score: float
+    parent_id: str | None = None  # the page an Attachment belongs to
 
 
 @dataclass(frozen=True)
@@ -72,8 +73,9 @@ class KnowledgeIndex:
             target = live or self._generations.fresh_name()
             indexed = self._indexed_versions(live)
             added = replaced = removed = unchanged = 0
-            failures: dict[str, str] = {}
             refs = corpus.list()
+            unlisted = listing_failures(refs)
+            failures = dict(unlisted)
             for ref in refs:
                 versions = indexed.get(ref.id)
                 if versions == {ref.version}:
@@ -93,7 +95,9 @@ class KnowledgeIndex:
                     else:
                         replaced += 1
             current = {ref.id for ref in refs}
-            for document_id in indexed.keys() - current:
+            # A Document missing from an incomplete listing may still exist.
+            stale = set() if unlisted else indexed.keys() - current
+            for document_id in stale:
                 try:
                     self._remove(document_id, target)
                 except Exception as error:
@@ -115,6 +119,11 @@ class KnowledgeIndex:
             promoted = False
             try:
                 refs = corpus.list()
+                if unlisted := listing_failures(refs):
+                    return RebuildReport(
+                        indexed=0, failed=len(unlisted), failures=unlisted,
+                        reason=f"the Corpus could not be listed completely "
+                               f"({', '.join(unlisted)})")
                 failures: dict[str, str] = {}
                 for ref in refs:
                     try:
@@ -187,7 +196,8 @@ class KnowledgeIndex:
         passages = [Passage(
             document_id=p.payload["document_id"], title=p.payload["title"],
             url=p.payload["url"], space=p.payload["space"], text=p.payload["text"],
-            score=float(p.score)) for p in points]
+            score=float(p.score), parent_id=p.payload.get("parent_id"))
+            for p in points]
         passages = cap_per_document(passages, settings.max_passages_per_document)
         if settings.rerank:
             passages = rerank(self._gateway, query, passages)
@@ -215,7 +225,7 @@ class KnowledgeIndex:
     def _extract(self, raw: RawDocument) -> Document:
         return Document(
             id=raw.id, title=raw.title, url=raw.url, space=raw.space, version=raw.version,
-            text=self._extractor.extract(raw))
+            text=self._extractor.extract(raw), parent_id=raw.parent_id)
 
     def _add(self, document: Document, collection: str) -> None:
         # One Passage per Document until the chunker lands.
@@ -233,7 +243,8 @@ class KnowledgeIndex:
                 indices=sparse.indices, values=sparse.values)},
             payload={"document_id": document.id, "version": document.version,
                      "title": document.title, "url": document.url,
-                     "space": document.space, "text": document.text},
+                     "space": document.space, "text": document.text,
+                     "parent_id": document.parent_id},
         ), document_point], wait=True)
         self._client.delete(
             collection, wait=True,
@@ -312,7 +323,8 @@ def _document_point(document: Document) -> models.PointStruct:
         id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document.id}#document")), vector={},
         payload={"kind": _DOCUMENT_KIND, "document_id": document.id,
                  "version": document.version, "title": document.title, "url": document.url,
-                 "space": document.space, "full_text": document.text})
+                 "space": document.space, "full_text": document.text,
+                 "parent_id": document.parent_id})
 
 
 def _connect(settings: Settings) -> QdrantClient:
