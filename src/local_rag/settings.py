@@ -24,3 +24,10 @@ class Settings:
     max_passages_per_document: int = 2  # most Passages one Document may add to a result
     rerank: bool = False  # reorder results through the Model gateway's rerank
     sync_lock_stale_after: float = 120.0  # seconds without a heartbeat before a crashed Sync's lock is taken over
+    rebuild_failure_threshold: float = 0.0  # share of Documents (0 to 1) that may fail for a Rebuild to go live
+
+    def __post_init__(self):
+        if not 0.0 <= self.rebuild_failure_threshold <= 1.0:  # also false for NaN
+            raise ValueError(
+                "rebuild_failure_threshold must be between 0 and 1, "
+                f"got {self.rebuild_failure_threshold!r}")

@@ -20,6 +20,22 @@ class SyncInProgress(RuntimeError):
     """Another Sync or Rebuild already holds the Knowledge index."""
 
 
+class LockLost(RuntimeError):
+    """The holder stalled long enough for another run to take the lock over."""
+
+
+class Lease:
+    """Proof of holding the lock, to re-check before an irreversible step."""
+
+    def __init__(self, run: "ExclusiveRun", owner: str):
+        self._run = run
+        self._owner = owner
+
+    def check(self) -> None:
+        if not self._run._owned_by(self._owner):
+            raise LockLost("the lock was taken over by another run")
+
+
 class ExclusiveRun:
     def __init__(self, client: QdrantClient, name: str, *,
                  stale_after: float = 120.0, heartbeat_every: float | None = None):
@@ -31,24 +47,27 @@ class ExclusiveRun:
         self._unstamped_since: float | None = None
 
     @contextmanager
-    def hold(self, what: str = "Sync") -> Iterator[None]:
-        """Hold the lock for the ``with`` body, or raise SyncInProgress at once."""
+    def hold(self, what: str = "Sync") -> Iterator[Lease]:
+        """Hold the lock for the ``with`` body, or raise SyncInProgress at once.
+
+        Yields a Lease whose ``check()`` raises LockLost if the lock was taken over.
+        """
         owner = uuid.uuid4().hex
         if not self._local.acquire(blocking=False):
-            raise SyncInProgress(f"another {what} is already running")
+            raise SyncInProgress(f"cannot start {what}: another run holds the lock")
         try:
             if not self._acquire(owner):
-                raise SyncInProgress(f"another {what} is already running")
+                raise SyncInProgress(f"cannot start {what}: another run holds the lock")
             stop = threading.Event()
             beat = threading.Thread(
                 target=self._beat, args=(owner, stop), daemon=True, name="exclusive-run")
             beat.start()
             try:
-                yield
+                yield Lease(self, owner)
             finally:
                 stop.set()
                 beat.join()
-                self._release()
+                self._release(owner)
         finally:
             self._local.release()
 
@@ -95,12 +114,20 @@ class ExclusiveRun:
     def _beat(self, owner: str, stop: threading.Event) -> None:
         while not stop.wait(self._heartbeat_every):
             try:
-                self._stamp(owner)
+                if self._owned_by(owner):  # never stamp over a run that took the lock over
+                    self._stamp(owner)
             except Exception:
                 pass  # a missed beat only matters if the holder is truly gone
 
-    def _release(self) -> None:
+    def _owned_by(self, owner: str) -> bool:
+        if not self._client.collection_exists(self._name):
+            return False
+        points = self._client.retrieve(self._name, ids=[_HEARTBEAT_POINT])
+        return bool(points) and points[0].payload["owner"] == owner
+
+    def _release(self, owner: str) -> None:
         try:
-            self._client.delete_collection(self._name)
+            if self._owned_by(owner):  # a holder that was taken over must not free the new one
+                self._client.delete_collection(self._name)
         except Exception:
             pass  # a leftover marker goes stale and is taken over

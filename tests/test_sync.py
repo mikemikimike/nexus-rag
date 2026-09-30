@@ -245,3 +245,27 @@ def test_exclusive_run_takes_over_the_lock_of_a_crashed_holder():
 
     with survivor.hold():
         pass
+
+
+def test_a_holder_that_was_taken_over_neither_frees_nor_stamps_over_the_new_lock():
+    from qdrant_client import QdrantClient
+
+    from local_rag import SyncInProgress
+    from local_rag.exclusive import ExclusiveRun, LockLost
+
+    client = QdrantClient(location=":memory:")
+    stalled = ExclusiveRun(client, "lock", stale_after=0.05, heartbeat_every=3600)
+    newcomer = ExclusiveRun(client, "lock", stale_after=0.05, heartbeat_every=3600)
+    holder = stalled.hold()
+    lease = holder.__enter__()
+    time.sleep(0.1)
+
+    with newcomer.hold() as taken_over:
+        with pytest.raises(LockLost):
+            lease.check()
+        taken_over.check()
+        holder.__exit__(None, None, None)  # the stalled holder wakes up and finishes
+        taken_over.check()
+        with pytest.raises(SyncInProgress):
+            with ExclusiveRun(client, "lock", stale_after=0.05).hold():
+                pytest.fail("the new holder's lock must still stand")
