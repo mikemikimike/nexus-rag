@@ -10,18 +10,37 @@ written by earlier versions. It is served as it is, and adopted as a generation 
 Rebuild replaces it.
 
 Every generation this module creates is recorded by name in a registry collection before
-it exists, and cleanup deletes only recorded names that neither alias points at. Other
-collections in the same Qdrant, however their names start, are never touched.
+it exists, together with its format, and cleanup deletes only recorded names that neither
+alias points at. Other collections in the same Qdrant, however their names start, are
+never touched. The registry also notes which generation was last made live, so that a
+Live index lost from Qdrant is reported as corrupt rather than read as a new, empty one.
 """
 import uuid
+from dataclasses import dataclass, field
 
 from qdrant_client import QdrantClient, models
+
+from local_rag.index_format import IndexFormat
 
 _REGISTRY_POINT = 1
 
 
 class NoPreviousIndex(RuntimeError):
     """There is no previous generation to switch back to."""
+
+
+class CorruptIndex(RuntimeError):
+    """The index's own records disagree with Qdrant or cannot be read."""
+
+
+_REPAIR = "run a Rebuild to replace it (none is started automatically)"
+
+
+@dataclass
+class _Registry:
+    generations: list[str] = field(default_factory=list)  # every generation the system created
+    formats: dict[str, dict] = field(default_factory=dict)  # generation -> recorded format
+    live: str | None = None  # the generation last made live, to tell "lost" from "never had one"
 
 
 class Generations:
@@ -37,25 +56,49 @@ class Generations:
         live, _ = self._live_and_previous()
         return live
 
-    def serving(self) -> str | None:
-        """What to query for the Live index: the alias, which a promotion moves atomically."""
+    def serving(self) -> tuple[str, str] | None:
+        """What to query for the Live index, and the collection that is now.
+
+        The first is the alias, which a promotion moves atomically; None before anything
+        was indexed.
+        """
         aliases = self._aliases()
-        return self._live_alias if self._live_alias in aliases else self._resolve(aliases)[0]
+        live, _ = self._resolve(aliases)
+        if live is None:
+            return None
+        return (self._live_alias if self._live_alias in aliases else live), live
 
     def fresh_name(self) -> str:
         """A name for a new generation. It is recorded when the collection is created."""
         return f"{self._name}.gen-{uuid.uuid4().hex[:12]}"
 
-    def record(self, generation: str) -> None:
-        """Note that the system is about to create this generation, so cleanup may remove it."""
-        recorded = self._recorded()
-        if generation not in recorded:
-            self._set_recorded([*recorded, generation])
+    def record(self, generation: str, index_format: IndexFormat | None = None) -> None:
+        """Note that the system is about to create this generation, so cleanup may remove it.
+
+        The format is kept with the name, so it exists before the collection does.
+        """
+        registry = self._load()
+        if generation not in registry.generations:
+            registry.generations.append(generation)
+        if index_format is not None:
+            registry.formats[generation] = index_format.to_payload()
+        self._save(registry)
+
+    def format_of(self, generation: str) -> IndexFormat | None:
+        """The format recorded for a generation; None if none was (an earlier version's)."""
+        payload = self._load().formats.get(generation)
+        if payload is None:
+            return None
+        try:
+            return IndexFormat.from_payload(payload)
+        except ValueError as error:
+            raise CorruptIndex(
+                f"the recorded format of {generation} is unreadable; {_REPAIR}") from error
 
     def promote(self, generation: str) -> None:
         """Make the generation the Live index, keep the one it replaces as previous."""
         aliases = self._aliases()
-        live, previous = self._resolve(aliases)
+        live, previous = self._resolve(aliases, strict=False)
         changes = []
         if live is not None:
             if live == self._name:
@@ -67,6 +110,7 @@ class Generations:
                 changes.append(_drop_alias(self._live_alias))
         changes.append(_create_alias(self._live_alias, generation))
         self._client.update_collection_aliases(change_aliases_operations=changes)
+        self._set_live(generation)
         self.prune()
 
     def switch_back(self) -> None:
@@ -74,33 +118,60 @@ class Generations:
         live, previous = self._live_and_previous()
         if live is None or previous is None:
             raise NoPreviousIndex("there is no previous index to switch back to")
+        registry = self._load()  # before the swap: an unreadable record is reported untouched
         self._client.update_collection_aliases(change_aliases_operations=[
             _drop_alias(self._live_alias), _drop_alias(self._previous_alias),
             _create_alias(self._live_alias, previous),
             _create_alias(self._previous_alias, live)])
+        registry.live = previous
+        self._save(registry)
 
     def discard(self, generation: str) -> None:
         """Delete a generation that was never promoted."""
         self._drop_collection(generation)
-        self._set_recorded([n for n in self._recorded() if n != generation])
+        registry = self._load()
+        registry.generations = [n for n in registry.generations if n != generation]
+        registry.formats.pop(generation, None)
+        self._save(registry)
 
     def prune(self) -> None:
         """Delete recorded generations that are neither live nor previous."""
-        keep = set(self._live_and_previous())
-        recorded = self._recorded()
-        for generation in recorded:
+        keep = set(self._resolve(self._aliases(), strict=False))
+        registry = self._load()
+        for generation in registry.generations:
             if generation not in keep:
                 self._drop_collection(generation)
-        self._set_recorded([generation for generation in recorded if generation in keep])
+        registry.generations = [g for g in registry.generations if g in keep]
+        registry.formats = {g: f for g, f in registry.formats.items() if g in keep}
+        self._save(registry)
+
+    def forget_records(self) -> None:
+        """Drop the registry when it cannot be read, so a Rebuild can start a fresh one.
+
+        Generations it named are no longer known to be ours, so they are left in place.
+        """
+        if self._client.collection_exists(self._registry):
+            self._client.delete_collection(self._registry)
 
     def _live_and_previous(self) -> tuple[str | None, str | None]:
         return self._resolve(self._aliases())
 
-    def _resolve(self, aliases: dict[str, str]) -> tuple[str | None, str | None]:
+    def _resolve(self, aliases: dict[str, str],
+                 strict: bool = True) -> tuple[str | None, str | None]:
+        """The live and previous collections. Strict also reports a Live index that was lost."""
         live = aliases.get(self._live_alias)
         if live is None and self._client.collection_exists(self._name):
             live = self._name
-        return live, aliases.get(self._previous_alias)
+        previous = aliases.get(self._previous_alias)
+        if strict and live is None:
+            # Deleting a collection takes its aliases with it, so a lost Live index
+            # leaves the previous alias, or the registry's note of it, behind.
+            lost = "a previous index exists" if previous is not None else None
+            if lost is None and (recorded := self._load().live) is not None:
+                lost = f"{recorded} was the Live index"
+            if lost is not None:
+                raise CorruptIndex(f"there is no Live index although {lost}; {_REPAIR}")
+        return live, previous
 
     def _drop_collection(self, name: str) -> None:
         if self._client.collection_exists(name):
@@ -109,19 +180,35 @@ class Generations:
     def _aliases(self) -> dict[str, str]:
         return {a.alias_name: a.collection_name for a in self._client.get_aliases().aliases}
 
-    def _recorded(self) -> list[str]:
-        if not self._client.collection_exists(self._registry):
-            return []
-        points = self._client.retrieve(self._registry, ids=[_REGISTRY_POINT])
-        return list(points[0].payload["generations"]) if points else []
+    def _set_live(self, generation: str) -> None:
+        registry = self._load()
+        registry.live = generation
+        self._save(registry)
 
-    def _set_recorded(self, generations: list[str]) -> None:
+    def _load(self) -> _Registry:
+        if not self._client.collection_exists(self._registry):
+            return _Registry()
+        points = self._client.retrieve(self._registry, ids=[_REGISTRY_POINT])
+        if not points:
+            return _Registry()
+        payload = points[0].payload
+        generations = payload.get("generations")
+        # Registries written before formats were recorded only have the names.
+        formats, live = payload.get("formats", {}), payload.get("live")
+        if not (isinstance(generations, list) and all(isinstance(g, str) for g in generations)
+                and isinstance(formats, dict) and isinstance(live, str | None)):
+            raise CorruptIndex(f"the record of index generations is unreadable; {_REPAIR}")
+        return _Registry(generations, formats, live)
+
+    def _save(self, registry: _Registry) -> None:
         if not self._client.collection_exists(self._registry):
             self._client.create_collection(
                 self._registry, vectors_config=models.VectorParams(
                     size=1, distance=models.Distance.COSINE))
         self._client.upsert(self._registry, points=[models.PointStruct(
-            id=_REGISTRY_POINT, vector=[1.0], payload={"generations": generations})], wait=True)
+            id=_REGISTRY_POINT, vector=[1.0],
+            payload={"generations": registry.generations, "formats": registry.formats,
+                     "live": registry.live})], wait=True)
 
 
 def _create_alias(alias: str, collection: str) -> models.CreateAliasOperation:
