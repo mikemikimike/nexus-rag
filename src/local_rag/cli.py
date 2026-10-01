@@ -19,10 +19,10 @@ from local_rag.corpus import Corpus
 from local_rag.environment import settings_from_environment
 from local_rag.folder import FolderCorpus
 from local_rag.gateway import ModelGateway
-from local_rag.settings import RetrievalMode
 from local_rag.gateway_litellm import gateway_from_settings
 from local_rag.index import IndexStatus, KnowledgeIndex, Passage, RebuildReport, SyncReport
 from local_rag.index_format import Access
+from local_rag.settings import RetrievalMode
 
 
 class UsageError(Exception):

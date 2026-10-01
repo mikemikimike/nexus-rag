@@ -339,7 +339,9 @@ class KnowledgeIndex:
                 vectors = self._gateway.embed(texts)
             except Exception as error:
                 self._embedding_failure = _describe(error)
-                if attempt == settings.embed_attempts or not getattr(error, "retryable", True):
+                # Only an error that says another try could help is tried again: a bug, or a
+                # wrong key, would just wait and fail the same way.
+                if attempt == settings.embed_attempts or not getattr(error, "retryable", False):
                     raise
                 wait = settings.embed_retry_backoff * 2 ** (attempt - 1)
                 log.warning("embedding failed (attempt %d of %d), trying again in %.1fs: %s",
@@ -356,8 +358,7 @@ class KnowledgeIndex:
             vector = self._gateway.embed_query(query)
         except Exception as error:
             self._embedding_failure = _describe(error)
-            log.warning("the embedding model could not be reached",
-                        exc_info=True)
+            log.warning("the embedding model could not be reached: %s", self._embedding_failure)
             return None
         self._embedding_failure = None
         return vector
@@ -386,7 +387,8 @@ class KnowledgeIndex:
         notes = status.warnings
         if self._embedding_failure:
             notes = (*notes, f"the embedding model was unreachable the last time it was used "
-                             f"({self._embedding_failure}); searches fall back to keywords")
+                             f"({self._embedding_failure}); a hybrid search falls back to "
+                             f"keywords until it answers")
         return Health(True, status.access is not Access.REFUSED, notes)
 
     def _status(self, *, verify_dimension: bool) -> IndexStatus:
@@ -458,8 +460,13 @@ class KnowledgeIndex:
                 and "bm25" in (params.sparse_vectors or {})):
             raise CorruptIndex(f"{generation} is not a Knowledge index collection")
         dense = params.vectors.get("dense")  # a Keyword-only index has none
+        recorded = self._generations.format_of(generation)
+        if recorded is not None and (recorded.retrieval is RetrievalMode.HYBRID) != bool(dense):
+            raise CorruptIndex(
+                f"{generation} records {recorded.retrieval.value} retrieval but its collection "
+                f"{'has' if dense else 'has no'} dense vectors")
         assessment = assess(
-            self._generations.format_of(generation), dense.size if dense else None,
+            recorded, dense.size if dense else None,
             self._settings, running_dimension if verify_dimension else None)
         if verify_dimension and reachable:  # an unverified answer is worth asking for again
             self._assessments[generation] = assessment

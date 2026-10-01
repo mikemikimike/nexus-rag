@@ -4,7 +4,7 @@ Driven through the Knowledge index with the fake Model gateway, like the other i
 """
 import pytest
 
-from local_rag import Access, IndexReadOnly, KnowledgeIndex, Settings
+from local_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
 from local_rag.fakes import FakeModelGateway
 from local_rag.gateway_litellm import GatewayError
 from local_rag.settings import RetrievalMode
@@ -223,3 +223,19 @@ def test_an_unreachable_embedding_model_is_a_health_note_not_a_failure(hybrid, f
     flaky.down = False
     hybrid.search("battery")
     assert hybrid.health().notes == ()
+
+
+# --- records that disagree with the collection ------------------------------------------
+
+def test_a_recorded_mode_that_disagrees_with_the_collection_is_reported_not_trusted(corpus):
+    keyword = keyword_index()
+    keyword.sync(corpus)
+    generation = keyword.status().generation
+    keyword._generations.record(
+        generation, IndexFormat.written_by(Settings(retrieval=HYBRID), 64))
+
+    status = reopened(keyword, None).status()
+
+    assert status.access == Access.REFUSED
+    assert any("dense" in warning for warning in status.warnings)
+

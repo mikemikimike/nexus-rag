@@ -232,6 +232,23 @@ def test_the_compose_file_holds_no_secret_and_takes_every_one_from_the_env_file(
     assert "env_file" not in str(services)  # works in Portainer, whose host paths are not ours
 
 
+def test_the_compose_file_names_no_variable_twice():
+    import yaml
+
+    class Strict(yaml.SafeLoader):
+        pass
+
+    def mapping(loader, node):
+        keys = [loader.construct_object(key) for key, _ in node.value]
+        repeated = sorted({key for key in keys if keys.count(key) > 1})
+        assert not repeated, f"named twice: {repeated}"
+        return loader.construct_mapping(node)
+
+    Strict.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+
+    yaml.load((fake_drop.REPO / "deploy/container/compose.yaml").read_text(), Strict)
+
+
 def test_every_setting_the_programs_read_can_be_set_from_the_env_file():
     # Compose passes a container only the variables it names, so a setting that is not named
     # here could never be changed in the env file (the Rebuild threshold, chunking, ...).

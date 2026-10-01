@@ -29,7 +29,7 @@ class Chunker:
     @classmethod
     def from_settings(cls, settings: Settings, gateway: ModelGateway | None) -> "Chunker":
         """Sized by the gateway's token count, or the local one when there is no gateway."""
-        return cls(gateway.count_tokens if gateway else count_tokens,
+        return cls(count_tokens if gateway is None else gateway.count_tokens,
                    size=settings.chunk_tokens, overlap=settings.chunk_overlap)
 
     def split(self, text: str) -> list[str]:

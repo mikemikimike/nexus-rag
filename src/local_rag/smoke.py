@@ -103,16 +103,15 @@ def _gateway_named(environ: Mapping[str, str], settings) -> bool:
     retrieval needs one only for a reranker."""
     if settings.retrieval is RetrievalMode.KEYWORD:
         return bool(environ.get("LITELLM_BASE_URL") and settings.rerank_model)
-    return bool(environ.get("LITELLM_BASE_URL") and environ.get("RAG_EMBED_MODEL"))
+    return bool(environ.get("LITELLM_BASE_URL"))  # Settings already insisted on the model
 
 
 def _embeddings(environ: Mapping[str, str], settings, gateway: ModelGateway | None) -> str:
     if settings.retrieval is RetrievalMode.KEYWORD:
         raise _Skipped("RAG_RETRIEVAL=keyword, so no embedding model is used")
-    # Settings would fill a default in for these, and a default is no Model gateway of ours.
-    missing = [name for name in ("LITELLM_BASE_URL", "RAG_EMBED_MODEL") if not environ.get(name)]
-    if missing:
-        raise ValueError(f"{' and '.join(missing)} not set in the environment")
+    # Settings would fill a default in, and a default is no Model gateway of ours.
+    if not environ.get("LITELLM_BASE_URL"):
+        raise ValueError("LITELLM_BASE_URL not set in the environment")
     dimension = len(gateway.embed_query("smoke test"))
     return f"model {environ['RAG_EMBED_MODEL']!r} answers, {dimension} dimensions"
 

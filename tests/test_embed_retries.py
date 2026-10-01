@@ -9,7 +9,7 @@ import pytest
 from local_rag import KnowledgeIndex, Settings
 from local_rag.corpus import Document, InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
-from local_rag.gateway_litellm import LiteLLMGateway
+from local_rag.gateway_litellm import GatewayError, LiteLLMGateway
 from conftest import DOCUMENTS
 from fake_litellm_server import FakeLiteLLM
 
@@ -84,14 +84,19 @@ def test_one_attempt_means_no_retry(server):
     assert len(embedding_requests(server)) == 1
 
 
-def test_an_error_that_does_not_say_it_is_permanent_is_retried():
-    gateway = CountingFailure(ValueError("something odd"))
+@pytest.mark.parametrize("error, calls", [
+    (ValueError("a bug, not a gateway"), 1),  # nothing says another try could help
+    (GatewayError("unreachable"), 2),
+    (GatewayError("wrong key", retryable=False), 1),
+])
+def test_only_an_error_that_says_it_may_pass_is_retried(error, calls):
+    gateway = CountingFailure(error)
     index = KnowledgeIndex(Settings(embed_attempts=2, embed_retry_backoff=0.0), gateway)
 
     report = index.sync(ONE)
 
     assert report.failed == 1
-    assert gateway.calls == 2
+    assert gateway.calls == calls
 
 
 class CountingFailure(FakeModelGateway):
