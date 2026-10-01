@@ -1,4 +1,7 @@
-"""Exclusive-run lock shared by Sync and Rebuild: only one of them runs at a time.
+"""Exclusive-run lock: only one holder of a given lock runs at a time.
+
+The Knowledge index uses one lock per Corpus for its Syncs, and one index-wide lock for a
+Rebuild (or switch-back), checking the other kind before it proceeds.
 
 The lock lives in Qdrant, as a tiny marker collection, so that it also holds across
 processes (overlapping timers) that share one Qdrant server. The holder refreshes a
@@ -17,7 +20,7 @@ _HEARTBEAT_POINT = 1
 
 
 class SyncInProgress(RuntimeError):
-    """Another Sync or Rebuild already holds the Knowledge index."""
+    """Another Sync of the same Corpus, or a Rebuild, already holds the Knowledge index."""
 
 
 class LockLost(RuntimeError):
@@ -70,6 +73,10 @@ class ExclusiveRun:
                 self._release(owner)
         finally:
             self._local.release()
+
+    def is_held(self) -> bool:
+        """Whether some run holds the lock now (a marker gone stale does not count)."""
+        return self._client.collection_exists(self._name) and self._age() < self._stale_after
 
     def _acquire(self, owner: str) -> bool:
         if self._try_create():

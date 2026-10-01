@@ -162,3 +162,41 @@ def test_documents_of_an_undeclared_corpus_stay_searchable_and_status_names_it(i
     assert index.get_document("b:b1") == "bravo QX-2"
     assert not any("undeclared" in w for w in index.status(declared=["a", "b"]).warnings)
     assert not any("undeclared" in w for w in index.status().warnings)
+
+
+def test_forget_is_refused_while_a_sync_of_that_corpus_runs_and_removes_nothing(index):
+    from local_rag import SyncInProgress
+
+    index.sync(InMemoryCorpus([doc("a1", "alpha ZX-1")], name="a"))
+    refused = []
+
+    class ForgettingCorpus(InMemoryCorpus):
+        def fetch(self, document_id):
+            with pytest.raises(SyncInProgress):
+                index.forget("a")
+            refused.append(document_id)
+            return super().fetch(document_id)
+
+    index.sync(ForgettingCorpus([doc("a1", "alpha ZX-1", version="2")], name="a"))
+
+    assert refused
+    assert index.get_document("a:a1") == "alpha ZX-1"
+    assert index.forget("a") == 1
+
+
+def test_forget_is_refused_while_a_rebuild_runs(index):
+    from local_rag import SyncInProgress
+
+    index.sync(InMemoryCorpus([doc("a1", "alpha ZX-1")], name="a"))
+    refused = []
+
+    class ForgettingCorpus(InMemoryCorpus):
+        def fetch(self, document_id):
+            with pytest.raises(SyncInProgress):
+                index.forget("a")
+            refused.append(document_id)
+            return super().fetch(document_id)
+
+    index.rebuild([ForgettingCorpus([doc("a1", "alpha ZX-1")], name="a")])
+
+    assert refused
