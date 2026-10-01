@@ -153,15 +153,21 @@ def run_gitlab(ctx: Context) -> None:
     check("gitlab.repositories", lambda: _repositories(declared), needs=["gitlab.git"])
 
 
-def _tool_runs(ctx: Context, declared: list) -> str:
+def _declared(ctx: Context, read):
+    """What ``read`` makes of the Corpus declaration, and the file's path; the check is skipped
+    when the file cannot be used."""
     from local_rag.declaration import DEFAULT_PATH, Declaration, DeclarationError  # not at import: the install group runs without it
     path = Path(ctx.args.corpora or ctx.environ.get("RAG_CORPORA_FILE") or DEFAULT_PATH)
     try:
-        declaration = Declaration.read(path)
-        declared += [declaration.corpus(name, ctx.environ)
-                     for name in declaration.names_of("gitlab")]
+        return read(Declaration.read(path)), path
     except DeclarationError as error:
-        raise Skipped(f"no usable GitLab Corpus at {path} (use --corpora): {error}") from None
+        raise Skipped(f"no usable Corpus declaration at {path} (use --corpora): {error}") from None
+
+
+def _tool_runs(ctx: Context, declared: list) -> str:
+    found, path = _declared(ctx, lambda declaration: [
+        declaration.corpus(name, ctx.environ) for name in declaration.names_of("gitlab")])
+    declared += found
     if not declared:
         raise Skipped(f"{path} declares no GitLab Corpus")
     try:
@@ -209,12 +215,7 @@ def _read(ctx: Context) -> str:
 
 
 def _roots(ctx: Context) -> str:
-    from local_rag.declaration import DEFAULT_PATH, Declaration, DeclarationError  # not at import: the install group runs without it
-    path = Path(ctx.args.corpora or ctx.environ.get("RAG_CORPORA_FILE") or DEFAULT_PATH)
-    try:
-        roots = Declaration.read(path).confluence_roots()
-    except DeclarationError as error:
-        raise Skipped(f"no usable Corpus declaration at {path} (use --corpora): {error}") from None
+    roots, path = _declared(ctx, lambda declaration: declaration.confluence_roots())
     if not roots:
         raise Skipped(f"{path} declares no Confluence Root")
     command, unresolved = _command(ctx), {}

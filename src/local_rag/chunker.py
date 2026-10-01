@@ -1,4 +1,4 @@
-"""Splits a Document's text into Passages with LlamaIndex's sentence splitter.
+"""Splits a Document's text into Passages.
 
 Prose is split by sentences, code (see ``is_code``) by syntax where the language has
 a splitter and by lines otherwise, each piece knowing the lines it
@@ -21,9 +21,6 @@ from local_rag.syntax import splitter_for
 from local_rag.tokens import count_tokens
 
 
-# What the running code does to split code, recorded in the Index format so a change shows as a
-# Read-only index. A syntax-aware splitter changes it.
-CODE_SPLITTING = "lines"
 CODE_OVERLAP_LINES = 3  # lines shared by neighbouring code Passages
 
 
@@ -47,7 +44,7 @@ class _ProseSplitter:
         self._splitter = splitter
 
     def split(self, text: str) -> list[Piece]:
-        return [Piece(chunk) for chunk in self._splitter.split_text(text)]
+        return [Piece(passage) for passage in self._splitter.split_text(text)]
 
 
 class LineSplitter:

@@ -376,7 +376,7 @@ If an internal CA signed the certificate: `export NODE_EXTRA_CA_CERTS=/path/ca.p
 
 If Claude Code itself should use the network's LiteLLM chat model, `examples/claude_settings.example.json` holds the `env` block (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL` and the default model names); fill in the Model gateway's host and key. That is the chat model, independent of the embedding model.
 
-The tools users get are `search_docs(query, top_k, space, repository, ref)`, `list_spaces()` (Confluence Spaces, folders and GitLab groups) and `get_page(page_id)`, which returns a page or a file (a snapshot as of the last Sync). Their descriptions tell Claude what code results are.
+The tools users get are `search_docs(query, top_k, space, repository, ref)`, `list_spaces()` (Confluence Spaces, folders and GitLab groups) and `get_page(page_id)`, which returns a Document's full text, a page or a file, as of the last Sync. Their descriptions tell Claude what code results are.
 
 **Gate:** from one client, `claude mcp list` shows `local-rag` connected and a `search_docs` call returns Passages.
 

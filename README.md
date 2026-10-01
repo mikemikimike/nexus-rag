@@ -140,7 +140,7 @@ claude mcp add --transport http local-rag https://rag.example.test/mcp \
 
 Or commit `examples/mcp.json.example` as `.mcp.json` to a repository, and each user only sets `LOCAL_RAG_TOKEN`. If TLS uses an internal CA: `export NODE_EXTRA_CA_CERTS=/path/ca.pem`. Add `examples/CLAUDE.md.snippet` to the project's `CLAUDE.md`. To point Claude Code itself at your LiteLLM chat model, see `examples/claude_settings.example.json`.
 
-Tools: `search_docs(query, top_k, space, repository, ref)` returns the best Passages with title, link, page id and Space (for code also file, line range, enclosing symbol and ref; it sees each Repository's Primary ref unless `ref` is given); `list_spaces()` lists exactly the Spaces in the Knowledge index, GitLab groups included; `get_page(page_id)` returns a page or a file, a Document's full indexed text as of the last Sync. For the live page Claude uses the Confluence CLI plugin (`confluence read <page_id>`).
+Tools: `search_docs(query, top_k, space, repository, ref)` returns the best Passages with title, link, page id and Space (for code also file, line range, enclosing symbol and ref; it sees each Repository's Primary ref unless `ref` is given); `list_spaces()` lists exactly the Spaces in the Knowledge index, GitLab groups included; `get_page(page_id)` returns a Document's full indexed text, a page or a file, as of the last Sync. For the live page Claude uses the Confluence CLI plugin (`confluence read <page_id>`).
 
 ## 6. Smoke check and operations
 

@@ -225,7 +225,3 @@ def test_the_mcp_result_header_shows_path_ref_and_line_range():
     assert f"{URL}#L1-2" in text
     assert "ref: main" in text and "lines: 1-2" in text and "src/ledger.py" in text
 
-
-def test_the_format_and_the_chunker_name_the_same_splitting_method():
-    from local_rag import chunker, index_format
-    assert index_format.CODE_SPLITTING == chunker.CODE_SPLITTING
