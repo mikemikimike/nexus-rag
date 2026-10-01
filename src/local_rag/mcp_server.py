@@ -40,12 +40,16 @@ _SEARCH_DESCRIPTION = {
 Returns the best passages with title, link, page_id and space.
 Exact identifiers (error codes, hostnames, ticket ids) work well in the query.
 Optional `space` restricts the search to one space (see list_spaces).
+Code results show their `ref`. Searches see each repository's primary ref only: pass `ref` to
+search another tracked ref (a branch or tag), and `repository` (its path) to search one repository.
 For the whole page use get_page with the returned page_id.""",
     RetrievalMode.KEYWORD: """Keyword search over indexed pages and attachments. It matches the
 words you give, not their meaning: use the terms the page itself would use.
 Returns the best passages with title, link, page_id and space.
 Exact identifiers (error codes, hostnames, ticket ids) work well in the query.
 Optional `space` restricts the search to one space (see list_spaces).
+Code results show their `ref`. Searches see each repository's primary ref only: pass `ref` to
+search another tracked ref (a branch or tag), and `repository` (its path) to search one repository.
 For the whole page use get_page with the returned page_id.""",
 }
 
@@ -55,10 +59,12 @@ def build_server(index: KnowledgeIndex) -> MCPServer:
         "Search the team's indexed internal documentation."))
 
     @server.tool(description=_SEARCH_DESCRIPTION[index.retrieval])
-    async def search_docs(query: str, top_k: int = 6, space: str = "") -> str:
+    async def search_docs(query: str, top_k: int = 6, space: str = "",
+                          repository: str = "", ref: str = "") -> str:
         limit = max(1, min(top_k, MAX_TOP_K))
         results = await anyio.to_thread.run_sync(
-            lambda: index.search(query, k=limit, space=space or None))
+            lambda: index.search(query, k=limit, space=space or None, repository=repository or None,
+                                ref=ref or None))
         return _format_results(results)
 
     @server.tool()
@@ -191,12 +197,12 @@ def _format_passages(passages: list[Passage]) -> str:
     for number, passage in enumerate(passages, 1):
         page_id = passage.parent_id or passage.document_id
         header = f"{passage.link} | page_id: {page_id} | space: {passage.space}"
+        if passage.ref:
+            header += f" | ref: {passage.ref}"
         if passage.parent_id:
             header += f" | attachment: {passage.document_id}"
         if passage.start_line is not None:
             header += f" | file: {passage.path or passage.title}"
-            if passage.ref:
-                header += f" | ref: {passage.ref}"
             header += f" | lines: {passage.line_range}"
             if passage.symbol:
                 header += f" | symbol: {passage.symbol}"

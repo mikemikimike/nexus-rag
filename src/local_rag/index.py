@@ -34,10 +34,9 @@ class Passage:
     score: float
     parent_id: str | None = None  # the page an Attachment belongs to
     corpus: str | None = None  # None for an index built before named Corpora
-    # Set for a code Passage: where it is in its file.
-    repository: str | None = None
-    ref: str | None = None
-    path: str | None = None
+    repository: str | None = None  # code: the Repository's path
+    ref: str | None = None  # code: the Tracked ref the Passage was read at
+    path: str | None = None  # code: the file's path within the Repository
     start_line: int | None = None  # 1-based, inclusive
     end_line: int | None = None
     symbol: str | None = None  # the class or function it sits in, if the splitter knows
@@ -411,8 +410,12 @@ class KnowledgeIndex:
         return self._settings.retrieval
 
     def search(self, query: str, k: int | None = None,
-               space: str | None = None) -> SearchResults:
-        """The best Passages for the query. In Hybrid mode, if the embedding model cannot be
+               space: str | None = None, repository: str | None = None,
+               ref: str | None = None) -> SearchResults:
+        """The best Passages for the query. ``repository`` keeps only that Repository's code.
+        With no ``ref``, code at a Tracked ref that is not its Repository's Primary ref is
+        left out (other Corpora are unaffected); a ``ref`` keeps only Passages at that ref.
+        In Hybrid mode, if the embedding model cannot be
         reached the search is a Keyword fallback, and the results' ``notice`` says so."""
         settings = self._settings
         found = self._serving()
@@ -421,7 +424,12 @@ class KnowledgeIndex:
         serving, assessment = found
         limit = settings.top_k if k is None else k
         candidates = settings.hybrid_candidates
-        in_space = models.Filter(must=[_match("space", space)]) if space is not None else None
+        must = [_match(key, value) for key, value in
+                (("space", space), ("repository", repository), ("ref", ref))
+                if value is not None]
+        # Only a Passage marked non-primary is left out: other Corpora's carry no mark.
+        not_primary = [] if ref is not None else [_match("primary", False)]
+        in_space = models.Filter(must=must, must_not=not_primary)
         prefetch = []
         notice = None
         if assessment.dense:
@@ -652,7 +660,8 @@ class KnowledgeIndex:
             space=raw.space, version=raw.version, text=self._extractor.extract(raw),
             parent_id=None if raw.parent_id is None else qualified_id(corpus.name, raw.parent_id),
             media_type=raw.media_type, corpus=corpus.name, parts=parts,
-            repository=raw.repository, ref=raw.ref, path=raw.path)
+            repository=raw.repository, ref=raw.ref, path=raw.path,
+            primary=raw.primary)
 
     def _add(self, document: Document, collection: str) -> None:
         # A Document with no text is still found by its title: it gets one empty Passage.
@@ -680,7 +689,7 @@ class KnowledgeIndex:
                          "title": document.title, "url": document.url,
                          "space": document.space, "text": piece.text,
                          "parent_id": document.parent_id, "corpus": document.corpus,
-                         "parts": list(document.parts),
+                         "parts": list(document.parts), **_of_code(document),
                          **_code_payload(document, piece)}))
         # Write the new Passages first, then delete this Document's leftover old ones (those
         # of an earlier, longer version included), so a failure in between never leaves the
@@ -764,7 +773,7 @@ def _of_document(document_id: str) -> list[models.FieldCondition]:
 _DOCUMENT_KIND = "document"
 
 
-def _match(key: str, value: str) -> models.FieldCondition:
+def _match(key: str, value: str | bool) -> models.FieldCondition:
     return models.FieldCondition(key=key, match=models.MatchValue(value=value))
 
 
@@ -813,9 +822,10 @@ def _context(document: Document, piece: Piece) -> str:
 
 
 def _code_payload(document: Document, piece: Piece) -> dict:
+    """What a code Passage adds to the Document's ``_of_code`` payload: its file path and lines."""
     if piece.start_line is None:
         return {}
-    return {"repository": document.repository, "ref": document.ref, "path": document.path,
+    return {"path": document.path,
             "start_line": piece.start_line, "end_line": piece.end_line, "symbol": piece.symbol}
 
 
@@ -826,7 +836,16 @@ def _document_point(document: Document) -> models.PointStruct:
                  "version": document.version, "title": document.title, "url": document.url,
                  "space": document.space, "full_text": document.text,
                  "parent_id": document.parent_id, "corpus": document.corpus,
-                 "parts": list(document.parts)})
+                 "parts": list(document.parts), **_of_code(document)})
+
+
+def _of_code(document: Document) -> dict:
+    """The payload of a Document from code: its Repository, Tracked ref and whether that is
+    the Primary ref. Other Documents carry none, so no filter on these keeps them out."""
+    if document.repository is None:
+        return {}
+    return {"repository": document.repository, "ref": document.ref,
+            "primary": document.primary}
 
 
 def _connect(settings: Settings) -> QdrantClient:

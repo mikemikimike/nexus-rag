@@ -17,7 +17,11 @@
                                         # (default: $HOME/.cache/local-rag/gitlab)
     [[corpus.code.repositories]]        # one table per Repository
     path = "platform/payments"          # the project's full path in GitLab
-    refs = ["main"]                     # its Tracked refs, a branch or tag each: one for now
+    refs = ["main", {name = "release/1.2", primary = true, exclude = ["docs/**"]}]
+                                        # its Tracked refs, a branch or tag each. The first is
+                                        # the Primary ref unless another sets primary = true;
+                                        # exclude globs (a path, or a file name) are added to
+                                        # the defaults for that ref
 
 Each Corpus has a ``kind`` and that kind's parameters. Unknown names, kinds and parameters
 are rejected when the file is read; a wrong value (or a folder that is not there) when the
@@ -70,6 +74,19 @@ class _Table:
                 or not all(isinstance(v, Mapping) for v in value)):
             raise self._fail(key, "one or more [[tables]]")
         return [_Table(self.name, v, self.base) for v in value]
+
+    def items(self, key: str) -> list["str | _Table"]:
+        """The list under ``key`` of strings and inline tables (the tables readable like a
+        Corpus's own)."""
+        value = self._table.get(key)
+        if (not isinstance(value, list)
+                or not all(isinstance(v, (str, Mapping)) for v in value)):
+            raise self._fail(key, "a list of names or {name = ...} tables")
+        return [v.strip() if isinstance(v, str) else _Table(self.name, v, self.base)
+                for v in value]
+
+    def optional_flag(self, key: str) -> bool | None:
+        return self.flag(key, False) if key in self._table else None
 
     def only(self, *keys: str) -> None:
         """Raises unless the table holds no key besides ``keys``."""
@@ -125,19 +142,36 @@ def _confluence(name: str, table: _Table, environ: Mapping[str, str]) -> Corpus:
         exclude_attachments=table.texts("exclude_attachments", DEFAULT_EXCLUDED_ATTACHMENTS))
 
 
-def _repository(table: _Table) -> Repository:
+def _repositories(table: _Table) -> list[Repository]:
+    """One ``Repository`` per Tracked ref of the Repository the table declares."""
     table.only("path", "refs")
-    refs = table.texts("refs")
-    if len(refs) != 1:
-        # Several Tracked refs per Repository (the first its Primary ref) are not supported
-        # yet: say so rather than silently index one.
+    path = table.text("path").strip("/")
+    entries = table.items("refs")
+    if not entries:
+        raise DeclarationError(f"corpus {table.name!r}: refs must name at least one ref")
+    refs = []
+    for entry in entries:
+        if isinstance(entry, str):
+            if not entry:
+                raise table._fail("refs", "names of branches or tags")
+            refs.append((entry, None, ()))
+            continue
+        entry.only("name", "primary", "exclude")
+        refs.append((entry.text("name").strip(), entry.optional_flag("primary"),
+                     tuple(entry.texts("exclude", ()))))
+    names = [name for name, _, _ in refs]
+    if len(set(names)) != len(names):
+        raise DeclarationError(f"corpus {table.name!r}: {path} lists a ref twice")
+    marked = [name for name, primary, _ in refs if primary]
+    if len(marked) > 1:
         raise DeclarationError(
-            f"corpus {table.name!r}: refs must name exactly one branch or tag for now")
-    return Repository(table.text("path").strip("/"), refs[0])
+            f"corpus {table.name!r}: {path} marks more than one ref primary ({', '.join(marked)})")
+    primary_name = marked[0] if marked else names[0]
+    return [Repository(path, name, name == primary_name, exclude) for name, _, exclude in refs]
 
 
 def _gitlab(name: str, table: _Table, environ: Mapping[str, str]) -> Corpus:
-    repositories = [_repository(t) for t in table.tables("repositories")]
+    repositories = [r for t in table.tables("repositories") for r in _repositories(t)]
     missing = [v for v in ("GITLAB_URL", "GITLAB_TOKEN") if not environ.get(v, "").strip()]
     if missing:
         raise DeclarationError(

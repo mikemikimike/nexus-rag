@@ -42,9 +42,10 @@ class Document:
     corpus: str | None = None  # the Corpus that owns it; set by the Knowledge index
     media_type: str = "text/plain"  # the Media type its Corpus gave it, kept past extraction
     parts: tuple[str, ...] = ()  # the parts of its Corpus it was listed under; set by the index
-    repository: str | None = None  # a code file's Repository, by its full path
-    ref: str | None = None  # the branch or tag it was read at
-    path: str | None = None  # its path within the Repository
+    repository: str | None = None  # code: the Repository's path; None for other Corpora
+    ref: str | None = None  # code: the Tracked ref the file was read at
+    primary: bool = True  # code: whether that is the Repository's Primary ref
+    path: str | None = None  # a code file's path within its Repository
 
 
 @dataclass(frozen=True)
@@ -59,9 +60,10 @@ class RawDocument:
     content: bytes
     media_type: str
     parent_id: str | None = None  # the page an Attachment belongs to
-    repository: str | None = None  # a code file's Repository, by its full path
-    ref: str | None = None  # the branch or tag it was read at
-    path: str | None = None  # its path within the Repository
+    repository: str | None = None  # code: the Repository's path; None for other Corpora
+    ref: str | None = None  # code: the Tracked ref the file was read at
+    primary: bool = True  # code: whether that is the Repository's Primary ref
+    path: str | None = None  # a code file's path within its Repository
 
 
 @dataclass(frozen=True)
