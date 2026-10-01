@@ -229,3 +229,10 @@ def test_an_unreadable_recorded_chunk_size_is_reported_as_an_unreadable_format()
             "schema_version": 1, "embed_model": "embed", "dimension": 64,
             "sparse": {"k1": 1.2, "b": 0.75, "avg_doc_length": 250.0},
             "chunk_tokens": "lots", "chunk_overlap": 60})
+
+
+def test_a_changed_query_instruction_leaves_the_index_current_and_needs_no_rebuild(index):
+    upgraded = after_an_upgrade(index, query_instruction="Find the passage that answers the question")
+
+    assert upgraded.status().access == Access.READ_WRITE
+    upgraded.sync(InMemoryCorpus(DOCUMENTS))

@@ -23,6 +23,7 @@ class Settings:
     gateway_base_url: str | None = None  # LiteLLM, OpenAI-compatible root; None until an operator names it
     gateway_api_key: str | None = field(default=None, repr=False)  # bearer key for the gateway
     embed_model: str = "embed"  # model name registered in the gateway for embeddings
+    query_instruction: str = ""  # goes before a query embedding ("Instruct: ...\nQuery: ..."); empty leaves queries as they are; not part of the Index format
     rerank_model: str | None = None  # model name for /rerank; None leaves rerank off
     embed_batch_size: int = 16  # texts per /embeddings request
     embed_attempts: int = 3  # tries at one Document's embeddings in a Sync or Rebuild; search never retries

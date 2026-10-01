@@ -66,6 +66,7 @@ def settings_from_environment(environ: Mapping[str, str], *,
         embed_attempts=number("RAG_EMBED_ATTEMPTS", int),
         embed_retry_backoff=number("RAG_EMBED_RETRY_BACKOFF", float),
         gateway_timeout=number("RAG_GATEWAY_TIMEOUT", float),
+        query_instruction=(text("RAG_QUERY_INSTRUCTION") or "").strip() or None,
         rerank_model=rerank_model,
         rerank=True if rerank_model else None,  # naming a rerank model turns rerank on
         liteparse_bin=text("LIT_BIN") or _sibling_liteparse(),

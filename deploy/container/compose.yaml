@@ -40,6 +40,7 @@ services:
       RAG_RETRIEVAL: ${RAG_RETRIEVAL:-}
       RAG_EMBED_MODEL: ${RAG_EMBED_MODEL:-}
       RAG_RERANK_MODEL: ${RAG_RERANK_MODEL:-}
+      RAG_QUERY_INSTRUCTION: ${RAG_QUERY_INSTRUCTION:-}
       # Tuning: unset means the program's default (see src/local_rag/environment.py).
       RAG_COLLECTION: ${RAG_COLLECTION:-}
       RAG_TOP_K: ${RAG_TOP_K:-}
