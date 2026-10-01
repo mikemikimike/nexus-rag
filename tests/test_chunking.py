@@ -42,7 +42,7 @@ def test_a_document_longer_than_one_chunk_is_indexed_as_several_passages():
     status = index.status()
     assert status.documents == 1
     assert status.passages > 1
-    assert len(passages_of(index, "wiki/manual")) == status.passages
+    assert len(passages_of(index, "default:wiki/manual")) == status.passages
 
 
 def test_a_short_document_still_yields_one_passage(index, corpus):
@@ -60,7 +60,7 @@ def test_a_query_matching_only_the_tail_of_a_long_document_finds_it():
 
     found = index.search("ZX-9000")
 
-    assert found[0].document_id == "wiki/manual"
+    assert found[0].document_id == "default:wiki/manual"
     assert "ZX-9000" in found[0].text
     assert len(found[0].text) < len(text) / 2  # the Passage, not the whole Document
     assert (found[0].title, found[0].space, found[0].url) == (
@@ -74,7 +74,7 @@ def test_a_semantic_query_finds_the_tail_of_a_long_document_too():
     text = long_text(40, {39: "Every automobile needs fuel."})
     index.sync(InMemoryCorpus([manual(text), *DOCUMENTS[:2]]))
 
-    assert index.search("car")[0].document_id == "wiki/manual"
+    assert index.search("car")[0].document_id == "default:wiki/manual"
 
 
 def test_every_passage_carries_the_documents_title_in_what_is_embedded():
@@ -92,7 +92,7 @@ def test_the_full_text_is_still_the_whole_document_however_many_passages():
     text = long_text(30)
     index.sync(InMemoryCorpus([manual(text)]))
 
-    assert index.get_document("wiki/manual") == text
+    assert index.get_document("default:wiki/manual") == text
 
 
 def indexed(corpus_documents, settings=SMALL, gateway=None):
@@ -123,7 +123,7 @@ def test_a_document_that_shrinks_loses_its_surplus_passages():
     status = index.status()
     assert (status.documents, status.passages) == (1, 1)
     assert not [p for p in index.search("QQ-1111", k=10) if "QQ-1111" in p.text]
-    assert index.get_document("wiki/manual") == "One short paragraph now."
+    assert index.get_document("default:wiki/manual") == "One short paragraph now."
 
 
 def test_a_document_that_grows_gains_passages():
@@ -143,25 +143,25 @@ def test_removing_a_document_removes_all_its_passages():
     assert report.removed == 1
     status = index.status()
     assert (status.documents, status.passages) == (3, 3)
-    assert passages_of(index, "wiki/manual") == []
-    assert index.get_document("wiki/manual") is None
+    assert passages_of(index, "default:wiki/manual") == []
+    assert index.get_document("default:wiki/manual") is None
 
 
 def test_passage_ids_are_the_same_every_time_a_document_is_indexed():
     first = indexed([manual(long_text(30))])
     second = indexed([manual(long_text(30))])
 
-    ids = lambda index: sorted(p.id for p in passages_of(index, "wiki/manual"))
+    ids = lambda index: sorted(p.id for p in passages_of(index, "default:wiki/manual"))
     assert ids(first) == ids(second) and len(ids(first)) > 1
 
 
 def test_resyncing_the_same_text_under_a_new_version_does_not_duplicate_passages():
     index = indexed([manual(long_text(30))])
-    before = sorted(p.id for p in passages_of(index, "wiki/manual"))
+    before = sorted(p.id for p in passages_of(index, "default:wiki/manual"))
 
     index.sync(InMemoryCorpus([manual(long_text(30), version="2")]))
 
-    assert sorted(p.id for p in passages_of(index, "wiki/manual")) == before
+    assert sorted(p.id for p in passages_of(index, "default:wiki/manual")) == before
 
 
 def test_a_failed_embed_of_a_changed_long_document_keeps_its_old_passages_searchable():
@@ -198,8 +198,8 @@ def test_a_crash_after_writing_the_new_passages_never_hides_the_document():
     index._client.delete = real_delete
 
     assert report.failed == 1
-    assert index.search("QQ-2222")[0].document_id == "wiki/manual"  # new text already live
-    assert index.search("QQ-1111")[0].document_id == "wiki/manual"  # nothing went missing
+    assert index.search("QQ-2222")[0].document_id == "default:wiki/manual"  # new text already live
+    assert index.search("QQ-1111")[0].document_id == "default:wiki/manual"  # nothing went missing
     again = index.sync(InMemoryCorpus([manual(long_text(10, {9: "New marker QQ-2222."}),
                                               version="2")]))
     assert again.replaced == 1  # the interrupted replace is finished by the next Sync
@@ -230,6 +230,6 @@ def test_a_rebuild_splits_every_document_and_counts_its_passages():
     index = indexed([manual(long_text(30)), *DOCUMENTS])
     before = index.status().passages
 
-    assert index.rebuild(InMemoryCorpus([manual(long_text(30)), *DOCUMENTS])).promoted
+    assert index.rebuild([InMemoryCorpus([manual(long_text(30)), *DOCUMENTS])]).promoted
 
     assert index.status().passages == before

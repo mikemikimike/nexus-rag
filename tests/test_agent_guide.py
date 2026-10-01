@@ -18,7 +18,7 @@ FOREIGN_VARIABLES = {"NODE_EXTRA_CA_CERTS", "NO_PROXY", "HTTP_PROXY", "HTTPS_PRO
                      "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"}
 FOREIGN_FLAGS = {"--transport", "--header"}  # `claude mcp add`
 # Shell variables the guide sets for itself, and names it mentions only to rule them out.
-SHELL_VARIABLES = {"ENV_FILE", "ROOTS_FILE", "RAG_VALUE", "RAG_APPEND", "MIRROR_URL",
+SHELL_VARIABLES = {"ENV_FILE", "CORPORA_FILE", "RAG_VALUE", "RAG_APPEND", "MIRROR_URL",
                    "NO_PROXY_LIST", "CA_PEM"}
 NOT_SETTINGS = {"CONFLUENCE_URL", "CONFLUENCE_TOKEN"}
 
@@ -44,7 +44,7 @@ def test_every_variable_the_guide_names_is_read_by_the_code_or_shipped_in_a_file
 
 def test_the_guide_asks_for_every_input_the_ticket_lists():
     asked = ["LITELLM_BASE_URL", "LITELLM_API_KEY", "RAG_EMBED_MODEL", "RAG_RERANK_MODEL",
-             "CONFLUENCE_DOMAIN", "CONFLUENCE_API_TOKEN", "confluence_roots.txt", "--folder",
+             "CONFLUENCE_DOMAIN", "CONFLUENCE_API_TOKEN", "corpora.toml", "kind = \"folder\"",
              "MCP_HOST", "MCP_PORT", "MCP_TLS_CERT", "MCP_TLS_KEY", "NODE_EXTRA_CA_CERTS",
              "NO_PROXY", "MCP_TOKENS"]
 

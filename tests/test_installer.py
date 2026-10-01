@@ -220,23 +220,23 @@ def test_existing_data_and_documents_are_left_exactly_as_they_are(machine):
     index_file = machine.path("/var/lib/qdrant/storage/collections/live/segment.dat")
     index_file.parent.mkdir(parents=True)
     index_file.write_bytes(b"the index")
-    roots = machine.path("/etc/local-rag/confluence_roots.txt")
+    roots = machine.path("/etc/local-rag/corpora.toml")
     roots.parent.mkdir(parents=True)
-    roots.write_text("12345  # my space\n")
+    roots.write_text("# my space\n")
     before = snapshot(machine.path("/var/lib/qdrant/storage"))
 
     machine.install()
     machine.install()
 
     assert snapshot(machine.path("/var/lib/qdrant/storage")) == before
-    assert roots.read_text() == "12345  # my space\n"
+    assert roots.read_text() == "# my space\n"
     assert not any(str(index_file.parent) in " ".join(c) for c in machine.host.ran)
 
 
-def test_a_roots_file_is_provided_for_the_unit_to_read_when_there_is_none(machine):
+def test_a_corpora_file_is_provided_for_the_unit_to_read_when_there_is_none(machine):
     machine.install()
 
-    roots = machine.path("/etc/local-rag/confluence_roots.txt")
+    roots = machine.path("/etc/local-rag/corpora.toml")
     assert roots.is_file()
     assert all(line.startswith("#") or not line.strip() for line in roots.read_text().splitlines())
 
@@ -327,9 +327,9 @@ def test_plain_services_and_timers_call_the_command_line(machine):
     for name in UNITS:
         assert machine.path(f"/etc/systemd/system/{name}").is_file(), name
     assert directives(unit(machine, "local-rag-sync.service"), "ExecStart") == [
-        "/opt/local-rag/venv/bin/local-rag sync --roots-file /etc/local-rag/confluence_roots.txt"]
+        "/opt/local-rag/venv/bin/local-rag sync confluence"]
     assert directives(unit(machine, "local-rag-full.service"), "ExecStart") == [
-        "/opt/local-rag/venv/bin/local-rag sync --roots-file /etc/local-rag/confluence_roots.txt"]
+        "/opt/local-rag/venv/bin/local-rag sync confluence"]
     assert directives(unit(machine, "local-rag-mcp.service"), "ExecStart") == [
         "/opt/local-rag/venv/bin/local-rag-mcp"]
     assert directives(unit(machine, "qdrant.service"), "ExecStart") == ["/opt/qdrant/qdrant"]

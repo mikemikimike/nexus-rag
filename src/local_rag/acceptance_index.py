@@ -13,6 +13,7 @@ from local_rag import acceptance_corpus as corpus_files
 from local_rag.acceptance_corpus import KEYWORD_DOCUMENT, LONG_DOCUMENT, SEMANTIC_DOCUMENT
 from local_rag.acceptance_report import KEYWORD_ONLY, Context, Failure, Skipped, is_keyword_only
 from local_rag.chunker import Chunker
+from local_rag.corpus import qualified_id
 from local_rag.folder import FolderCorpus
 from local_rag.index import KnowledgeIndex
 from local_rag.index_format import Access
@@ -60,7 +61,8 @@ class _RoundTrip:
         return self.index.search(query, k=k)
 
     def found(self, query: str, document_id: str) -> bool:
-        return any(p.document_id == document_id for p in self.search(query))
+        stored = qualified_id(self.corpus.name, document_id)
+        return any(p.document_id == stored for p in self.search(query))
 
     def mentions(self, query: str, term: str) -> bool:
         """Whether any Passage the search returns holds the term (the dense side always
@@ -70,7 +72,8 @@ class _RoundTrip:
     def need(self, query: str, document_id: str, what: str, cause: str,
              *, containing: str | None = None, k: int = SEARCH_K) -> None:
         passages = self.search(query, k)
-        if not any(p.document_id == document_id and (containing is None or containing in p.text)
+        stored = qualified_id(self.corpus.name, document_id)
+        if not any(p.document_id == stored and (containing is None or containing in p.text)
                    for p in passages):
             seen = ", ".join(sorted({p.document_id for p in passages})) or "nothing"
             raise Failure(f"searching for {what} found {seen}, not {document_id}",
@@ -216,7 +219,7 @@ def _remove(trip: _RoundTrip) -> str:
 
 def _rebuild(trip: _RoundTrip) -> str:
     before = trip.index.status().generation
-    report = trip.index.rebuild(trip.corpus)
+    report = trip.index.rebuild([trip.corpus])
     if not report.promoted:
         raise Failure(f"Rebuild was refused: {report.reason}",
                       cause="a Rebuild of two generated Documents should always be complete; "

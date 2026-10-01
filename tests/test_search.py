@@ -9,7 +9,7 @@ def test_exact_identifier_search_returns_the_passage_containing_it(index, corpus
 
     passages = index.search("ORA-00942")
 
-    assert passages[0].document_id == "dba/ora-00942"
+    assert passages[0].document_id == "default:dba/ora-00942"
     assert "ORA-00942" in passages[0].text
     assert passages[0].title == "Fixing ORA-00942"
     assert passages[0].url == "https://wiki.example.test/dba/ora-00942"
@@ -23,7 +23,7 @@ def test_semantic_query_without_shared_keywords_returns_closest_passage(index, c
 
     passages = index.search(query)
 
-    assert passages[0].document_id == "garage/battery"
+    assert passages[0].document_id == "default:garage/battery"
     assert not set(tokenize(query)) & set(tokenize(passages[0].text))
 
 
@@ -42,7 +42,7 @@ def test_index_ignores_environment_and_working_directory(
 
     index.sync(corpus)
 
-    assert index.search("ORA-12154")[0].document_id == "dba/ora-12154"
+    assert index.search("ORA-12154")[0].document_id == "default:dba/ora-12154"
     assert list(tmp_path.iterdir()) == []
 
 

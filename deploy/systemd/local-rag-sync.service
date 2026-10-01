@@ -9,5 +9,5 @@ Group=ragsvc
 EnvironmentFile=/etc/local-rag/local-rag.env
 Environment=HOME=/var/lib/ragsvc
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-ExecStart=/opt/local-rag/venv/bin/local-rag sync --roots-file /etc/local-rag/confluence_roots.txt
+ExecStart=/opt/local-rag/venv/bin/local-rag sync confluence
 TimeoutStartSec=6h

@@ -47,12 +47,12 @@ def code_index(request):
 
 @pytest.mark.parametrize("query, expected", PARTS)
 def test_an_identifier_is_found_by_its_parts(code_index, query, expected):
-    assert code_index.search(query)[0].document_id == expected
+    assert code_index.search(query)[0].document_id == f"default:{expected}"
 
 
 @pytest.mark.parametrize("query, expected", WHOLE)
 def test_an_identifier_is_still_found_whole(code_index, query, expected):
-    assert code_index.search(query)[0].document_id == expected
+    assert code_index.search(query)[0].document_id == f"default:{expected}"
 
 
 def test_an_index_without_identifier_splitting_is_read_only_until_a_rebuild(monkeypatch):
@@ -73,6 +73,6 @@ def test_an_index_without_identifier_splitting_is_read_only_until_a_rebuild(monk
     assert any("identifier" in warning for warning in status.warnings)
     with pytest.raises(IndexReadOnly, match="Rebuild"):
         upgraded.sync(CODE)
-    assert upgraded.rebuild(CODE).promoted
+    assert upgraded.rebuild([CODE]).promoted
     assert upgraded.status().access == Access.READ_WRITE
-    assert upgraded.search("user by id")[0].document_id == "camel"
+    assert upgraded.search("user by id")[0].document_id == "default:camel"

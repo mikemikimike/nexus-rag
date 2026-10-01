@@ -30,7 +30,7 @@ def test_status_reports_the_live_generation_counts_and_format(index):
     assert (status.documents, status.passages) == (3, 3)
     assert status.format == IndexFormat(
         schema_version=1, sparse=SparseParams(), embed_model="embed", dimension=64,
-        chunk_tokens=400, chunk_overlap=60, identifier_splitting=True)
+        chunk_tokens=400, chunk_overlap=60, corpus_ownership=True, identifier_splitting=True)
     assert status.access == "read-write" and status.warnings == ()
 
 
@@ -38,7 +38,7 @@ def test_status_follows_the_live_index_through_a_rebuild(index):
     index.sync(InMemoryCorpus(DOCUMENTS))
     first = index.status().generation
 
-    index.rebuild(InMemoryCorpus(DOCUMENTS[:2]))
+    index.rebuild([InMemoryCorpus(DOCUMENTS[:2])])
 
     status = index.status()
     assert status.generation != first
@@ -80,9 +80,9 @@ def test_status_reports_a_sync_that_could_not_finish(index):
 
 
 def test_status_reports_the_last_rebuild_promoted_or_refused(index):
-    index.rebuild(InMemoryCorpus(DOCUMENTS))
+    index.rebuild([InMemoryCorpus(DOCUMENTS)])
     promoted = index.status().last_sync
-    index.rebuild(FlakyCorpus(DOCUMENTS, failing={"dba/ora-12154"}))
+    index.rebuild([FlakyCorpus(DOCUMENTS, failing={"dba/ora-12154"})])
     refused = index.status().last_sync
 
     assert (promoted.kind, promoted.outcome) == ("Rebuild", "promoted")

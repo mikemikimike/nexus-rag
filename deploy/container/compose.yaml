@@ -79,12 +79,12 @@ services:
   sync:
     image: local-rag:0.1.0
     profiles: [sync]
-    command: ["local-rag", "sync", "--roots-file", "/etc/local-rag/confluence_roots.txt"]
+    command: ["local-rag", "sync", "confluence"]
     depends_on: [qdrant]
     environment: *settings
     volumes:
       - rag-data:/data
-      - /etc/local-rag/confluence_roots.txt:/etc/local-rag/confluence_roots.txt:ro
+      - /etc/local-rag/corpora.toml:/etc/local-rag/corpora.toml:ro
 
 volumes:
   qdrant-storage:

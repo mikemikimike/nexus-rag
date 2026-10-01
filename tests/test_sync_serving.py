@@ -20,7 +20,7 @@ def test_replaced_document_serves_its_new_full_text(index, corpus):
                                         corpus.fetch("garage/battery")]))
 
     assert report.replaced == 1
-    assert index.get_document("dba/ora-00942") == "Brand new body."
+    assert index.get_document("default:dba/ora-00942") == "Brand new body."
 
 
 def test_removed_document_and_space_disappear_from_serving(index, corpus):
@@ -30,5 +30,5 @@ def test_removed_document_and_space_disappear_from_serving(index, corpus):
                                         corpus.fetch("dba/ora-12154")]))
 
     assert report.removed == 1
-    assert index.get_document("garage/battery") is None
+    assert index.get_document("default:garage/battery") is None
     assert index.list_spaces() == ["DBA"]

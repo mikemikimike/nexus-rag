@@ -2,7 +2,7 @@
 
     python -m local_rag.acceptance [--only GROUP ...] [--skip GROUP ...]
                                    [--systemd | --container]
-                                   [--mcp-url URL] [--token TOKEN] [--roots-file FILE]
+                                   [--mcp-url URL] [--token TOKEN] [--corpora FILE]
 
 Run it with the settings the services run with (``run_rag ...`` / ``compose run --rm -T sync
 ...``, like the smoke check). It checks, in groups: ``gateway`` (the Model gateway embeds, and
@@ -173,8 +173,9 @@ def _parser() -> argparse.ArgumentParser:
                         help="where the MCP server listens (default: MCP_HOST and MCP_PORT)")
     parser.add_argument("--token", metavar="TOKEN",
                         help="the MCP token to use (default: the first of MCP_TOKENS)")
-    parser.add_argument("--roots-file", metavar="FILE",
-                        help="the Confluence roots file (default: /etc/local-rag/confluence_roots.txt)")
+    parser.add_argument("--corpora", metavar="FILE",
+                        help="the Corpus declaration file whose Confluence Roots are checked "
+                             "(default: RAG_CORPORA_FILE, else /etc/local-rag/corpora.toml)")
     return parser
 
 
