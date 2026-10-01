@@ -5,9 +5,9 @@
 #   python3.12 -m local_rag.container save --out DIR     (or docker build -f deploy/container/Dockerfile .)
 FROM python:3.12-slim
 
-# confluence-cli is a Node program, and the Confluence Corpus reads through it.
+# confluence-cli is a Node program, and the Confluence Corpus reads through it; the GitLab Corpus reads through git.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends nodejs npm \
+    && apt-get install -y --no-install-recommends git nodejs npm \
     && npm install --global confluence-cli \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 

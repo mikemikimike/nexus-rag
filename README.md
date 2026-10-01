@@ -42,7 +42,7 @@ The air-gapped network has a **Mirror** of public package sources, populated on 
 | Qdrant server binary, version and checksum recorded in `src/local_rag/binary_drop.py` (systemd route) | Binary drop |
 | This system's own code, `git archive` of this repository (while it is private) | Binary drop |
 | Saved system and Qdrant images (container route) | Binary drop |
-| Python 3.12 with `venv`, `systemd`, `useradd`, `chown` (systemd route); Docker with the compose plugin (container route) | OS packages: checked, never carried |
+| Python 3.12 with `venv`, `systemd`, `useradd`, `chown`, `git` (systemd route; `git` also in the container image, GitLab Corpus); Docker with the compose plugin (container route) | OS packages: checked, never carried |
 | LibreOffice or ImageMagick, only if `lit` reports missing converters for Office or image files; OCR language data, only with `RAG_OCR=1` | OS packages (see `lit parse --help`) |
 | Claude Code on each client, plus your internal CA certificate if TLS uses one | your usual channel |
 

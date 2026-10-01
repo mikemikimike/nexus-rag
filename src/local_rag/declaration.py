@@ -11,6 +11,14 @@
     attachments = true                  # optional
     exclude_attachments = ["*.png"]     # optional: file name globs; defaults to images, video, archives
 
+    [corpus.code]
+    kind = "gitlab"                     # GITLAB_URL and GITLAB_TOKEN come from the environment
+    cache = "/var/cache/local-rag/gitlab"   # optional: where the mirrors live; safe to delete
+                                        # (default: $HOME/.cache/local-rag/gitlab)
+    [[corpus.code.repositories]]        # one table per Repository
+    path = "platform/payments"          # the project's full path in GitLab
+    refs = ["main"]                     # its Tracked refs, a branch or tag each: one for now
+
 Each Corpus has a ``kind`` and that kind's parameters. Unknown names, kinds and parameters
 are rejected when the file is read; a wrong value (or a folder that is not there) when the
 Corpus is built, which ``sync`` does only for the Corpus it names. A kind is added by
@@ -27,8 +35,10 @@ from typing import Any
 from local_rag.confluence import DEFAULT_EXCLUDED_ATTACHMENTS, ConfluenceCorpus
 from local_rag.corpus import Corpus, check_corpus_name
 from local_rag.folder import FolderCorpus
+from local_rag.gitlab import GitLabCorpus, Repository
 
 DEFAULT_PATH = "/etc/local-rag/corpora.toml"
+DEFAULT_GITLAB_CACHE = Path(".cache/local-rag/gitlab")  # below HOME
 
 
 class DeclarationError(ValueError):
@@ -49,6 +59,24 @@ class _Table:
 
     def _fail(self, key: str, wanted: str) -> DeclarationError:
         return DeclarationError(f"corpus {self.name!r}: {key} must be {wanted}")
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._table
+
+    def tables(self, key: str) -> list["_Table"]:
+        """The array of tables under ``key``, each readable like a Corpus's own table."""
+        value = self._table.get(key)
+        if (not isinstance(value, list) or not value
+                or not all(isinstance(v, Mapping) for v in value)):
+            raise self._fail(key, "one or more [[tables]]")
+        return [_Table(self.name, v, self.base) for v in value]
+
+    def only(self, *keys: str) -> None:
+        """Raises unless the table holds no key besides ``keys``."""
+        unknown = sorted(set(self._table) - set(keys))
+        if unknown:
+            raise DeclarationError(
+                f"corpus {self.name!r}: unknown {', '.join(unknown)} (takes {', '.join(keys)})")
 
     def text(self, key: str) -> str:
         value = self._table.get(key)
@@ -97,7 +125,31 @@ def _confluence(name: str, table: _Table, environ: Mapping[str, str]) -> Corpus:
         exclude_attachments=table.texts("exclude_attachments", DEFAULT_EXCLUDED_ATTACHMENTS))
 
 
+def _repository(table: _Table) -> Repository:
+    table.only("path", "refs")
+    refs = table.texts("refs")
+    if len(refs) != 1:
+        # Several Tracked refs per Repository (the first its Primary ref) are not supported
+        # yet: say so rather than silently index one.
+        raise DeclarationError(
+            f"corpus {table.name!r}: refs must name exactly one branch or tag for now")
+    return Repository(table.text("path").strip("/"), refs[0])
+
+
+def _gitlab(name: str, table: _Table, environ: Mapping[str, str]) -> Corpus:
+    repositories = [_repository(t) for t in table.tables("repositories")]
+    missing = [v for v in ("GITLAB_URL", "GITLAB_TOKEN") if not environ.get(v, "").strip()]
+    if missing:
+        raise DeclarationError(
+            f"corpus {name!r}: {' and '.join(missing)} must be set in the environment")
+    home = Path(environ.get("HOME") or Path.home())
+    cache = table.base / table.text("cache") if "cache" in table else home / DEFAULT_GITLAB_CACHE
+    return GitLabCorpus(repositories, name=name, url=environ["GITLAB_URL"].strip(),
+                        token=environ["GITLAB_TOKEN"].strip(), cache=cache)
+
+
 _KINDS: dict[str, _Builder] = {
+    "gitlab": _Builder(frozenset({"cache", "repositories"}), _gitlab),
     "folder": _Builder(frozenset({"path"}), _folder),
     "confluence": _Builder(
         frozenset({"roots", "max_depth", "attachments", "exclude_attachments"}), _confluence),

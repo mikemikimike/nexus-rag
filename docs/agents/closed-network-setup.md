@@ -90,7 +90,7 @@ systemd route:
 uname -m                                  # x86_64 (the only supported machine)
 python3.12 --version                      # Python 3.12.x
 python3.12 -c 'import venv, ensurepip'    # silent; Debian family: install python3-venv
-command -v systemctl useradd chown        # three paths
+command -v systemctl useradd chown git   # four paths
 sudo -n true && echo sudo-ok              # sudo works without a prompt, or ask the operator to run the Installer
 ```
 
