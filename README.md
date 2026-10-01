@@ -149,7 +149,7 @@ compose run --rm -T sync python -m local_rag.smoke                    # containe
 | Status: Live index generation, Documents, Passages, Index format, last Sync | `local-rag status` |
 | Try a query | `local-rag search "ORA-00942" [--space ENG] [-k 5]` |
 | Sync now | `local-rag sync --roots-file /etc/local-rag/confluence_roots.txt`, or `systemctl start local-rag-sync.service` |
-| Rebuild (new embedding model or chunking) | `local-rag rebuild --roots-file /etc/local-rag/confluence_roots.txt` |
+| Rebuild (new embedding model) | `local-rag rebuild --roots-file /etc/local-rag/confluence_roots.txt` |
 | Undo a bad Rebuild | `local-rag switch-back` |
 | Logs | `journalctl -u local-rag-mcp -f`, `journalctl -u local-rag-sync` (container route: `docker logs`, journal of the `local-rag-container-*` units) |
 | Add or revoke a user | edit `MCP_TOKENS`, restart the MCP server (`compose up -d` on the container route) |
@@ -158,9 +158,11 @@ Exit codes of `local-rag`: `0` success; `1` failure or refusal (a Sync with fail
 
 A folder Corpus works the same way (`local-rag sync --folder DIR`; the Space is the top-level folder), but one Knowledge index follows one Corpus: a Sync of another Corpus removes every Document it does not list. Try a folder with its own `RAG_COLLECTION`.
 
-**Index format.** The index records how it was built (schema version, sparse encoder parameters, embedding model name and dimension). After an upgrade or a model change `local-rag status` tells whether it still matches. A mismatching index that can still be searched is served as a **Read-only index** with a warning and refuses Sync until you run a Rebuild; an unusable one is refused. Nothing is ever rebuilt automatically. After changing the embedding model or `RAG_CHUNK_TOKENS`, run a Rebuild.
+**Index format.** The index records how it was built (schema version, sparse encoder parameters, embedding model name and dimension). After an upgrade or a model change `local-rag status` tells whether it still matches. A mismatching index that can still be searched is served as a **Read-only index** with a warning and refuses Sync until you run a Rebuild; an unusable one is refused. Nothing is ever rebuilt automatically. After changing the embedding model, run a Rebuild.
 
-**Settings** (the env file; unset means the default): `RAG_TOP_K` (6), `RAG_HYBRID_CANDIDATES` per retriever (40), `RAG_MAX_PER_DOC` (2), `RAG_CHUNK_TOKENS` (400) and `RAG_CHUNK_OVERLAP` (60), `RAG_EMBED_BATCH` (16), `RAG_GATEWAY_TIMEOUT` (60 s), `RAG_RERANK_MODEL` (off), `RAG_REBUILD_FAILURE_THRESHOLD` (0, a share between 0 and 1), `RAG_COLLECTION`, `RAG_BM25_*`, `RAG_OCR`, `LIT_BIN`, `CONFLUENCE_BIN`. The authoritative list is `src/local_rag/environment.py`.
+**Settings** (the env file; unset means the default): `RAG_TOP_K` (6), `RAG_HYBRID_CANDIDATES` per retriever (40), `RAG_MAX_PER_DOC` (2), `RAG_EMBED_BATCH` (16), `RAG_GATEWAY_TIMEOUT` (60 s), `RAG_RERANK_MODEL` (off), `RAG_REBUILD_FAILURE_THRESHOLD` (0, a share between 0 and 1), `RAG_COLLECTION`, `RAG_BM25_*`, `RAG_OCR`, `LIT_BIN`, `CONFLUENCE_BIN`. The authoritative list is `src/local_rag/environment.py`.
+
+**Known limit: one Passage per Document.** The Knowledge index currently embeds each Document whole, as a single Passage. The splitter in `src/local_rag/chunker.py` (and the `RAG_CHUNK_TOKENS` and `RAG_CHUNK_OVERLAP` settings that configure it) is not yet used by the index, so a Document longer than the embedding model's input limit is truncated or refused by the Model gateway, depending on the gateway (a refusal counts as a failed Document).
 
 **Backup.** The Knowledge index can be rebuilt from the Corpus and the Model gateway; back up the env file (the settings and secrets), and optionally Qdrant snapshots.
 

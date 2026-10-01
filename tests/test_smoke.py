@@ -129,6 +129,18 @@ def test_a_rerank_model_the_gateway_cannot_serve_fails(smoke):
     assert line(out, "Rerank").startswith("[FAIL]")
 
 
+def test_a_rerank_model_without_a_named_gateway_fails_with_a_reason():
+    out = io.StringIO()
+    environment = {**ENVIRONMENT, "LITELLM_BASE_URL": "", "RAG_EMBED_MODEL": "",
+                   "RAG_RERANK_MODEL": "rerank-model"}
+
+    code = main([], environment, client=QdrantClient(":memory:"), run=Host(), stdout=out)
+
+    assert code == 1
+    failed = line(out.getvalue(), "Rerank")
+    assert failed.startswith("[FAIL]") and "no Model gateway" in failed
+
+
 def test_an_unreachable_qdrant_fails_with_its_reason(smoke):
     code, out, _ = smoke(client=UnreachableQdrant())
 

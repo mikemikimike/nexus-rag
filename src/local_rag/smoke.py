@@ -115,6 +115,8 @@ def _embeddings(environ: Mapping[str, str], gateway: ModelGateway | None) -> str
 def _rerank(model: str | None, gateway: ModelGateway | None) -> str:
     if not model:
         raise _Skipped("RAG_RERANK_MODEL is not set, so search does not rerank")
+    if gateway is None:
+        raise ValueError("no Model gateway: LITELLM_BASE_URL and RAG_EMBED_MODEL are not set")
     scores = gateway.rerank("smoke test", ["first text", "second text"])
     if len(scores) != 2:
         raise ValueError(f"asked to score 2 texts, got {len(scores)} scores")
@@ -140,7 +142,7 @@ def _confluence(environ: Mapping[str, str], run: Run) -> str:
     if not environ.get("CONFLUENCE_DOMAIN"):
         raise _Skipped("CONFLUENCE_DOMAIN is not set")
     command = environ.get("CONFLUENCE_BIN") or "confluence"
-    run([command, "spaces", "--json"])  # one authenticated, read-only call
+    run([command, "spaces"])  # one authenticated, read-only call
     return f"{command} reads {environ['CONFLUENCE_DOMAIN']}"
 
 
