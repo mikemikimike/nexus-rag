@@ -17,6 +17,7 @@ annotated-types==0.8.0
     # via pydantic
 anyio==4.15.1
     # via
+    #   local-rag (pyproject.toml)
     #   httpx
     #   httpx2
     #   mcp
@@ -103,7 +104,9 @@ httpx==0.28.1
     #   llama-index-core
     #   qdrant-client
 httpx2==2.13.1
-    # via mcp
+    # via
+    #   local-rag (pyproject.toml)
+    #   mcp
 hyperframe==6.1.0
     # via h2
 idna==3.20

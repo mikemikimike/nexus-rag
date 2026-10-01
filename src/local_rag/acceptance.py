@@ -1,6 +1,7 @@
 """The live acceptance suite: does the whole stack work, end to end, on this network?
 
-    python -m local_rag.acceptance [--only GROUP ...] [--systemd | --container]
+    python -m local_rag.acceptance [--only GROUP ...] [--skip GROUP ...]
+                                   [--systemd | --container]
                                    [--mcp-url URL] [--token TOKEN] [--roots-file FILE]
 
 Run it with the settings the services run with (``run_rag ...`` / ``compose run --rm -T sync
@@ -8,7 +9,8 @@ Run it with the settings the services run with (``run_rag ...`` / ``compose run 
 a long text is split into Passages the model accepts), ``qdrant`` (reachable, a wrong key
 refused), ``index`` (a round trip on a throwaway collection and temp folder), ``mcp`` (the
 running MCP server over HTTP), ``install`` (units or containers, env file mode, timers; needs
-``--systemd`` or ``--container``) and ``confluence`` (only when ``CONFLUENCE_DOMAIN`` is set).
+``--systemd`` or ``--container``, else it fails, and ``--skip install`` leaves it out) and
+``confluence`` (only when ``CONFLUENCE_DOMAIN`` is set).
 
 It never touches the live index: the index group works in its own collection, named
 ``acceptance-<random>``, and removes it and its temp folder at the end, also after a failure.
@@ -45,7 +47,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
         args = _parser().parse_args(argv)
     except SystemExit as stop:  # argparse: --help, or a command line it rejected
         return int(stop.code or 0)
-    groups = [g for g in GROUPS if not args.only or g in args.only]
+    groups = [g for g in GROUPS if (not args.only or g in args.only) and g not in args.skip]
     if "install" in groups and args.only and not (args.systemd or args.container):
         print("error: --only install needs --systemd or --container", file=err)
         return 2
@@ -158,6 +160,9 @@ def _parser() -> argparse.ArgumentParser:
         prog="python -m local_rag.acceptance", description=__doc__.split("\n\n")[0])
     parser.add_argument("--only", action="append", choices=GROUPS, metavar="GROUP",
                         help=f"run only this group (repeatable): {', '.join(GROUPS)}")
+    parser.add_argument("--skip", action="append", choices=GROUPS, metavar="GROUP", default=[],
+                        help="leave this group out (repeatable); the install group is otherwise "
+                             "run, and fails without --systemd or --container")
     route = parser.add_mutually_exclusive_group()
     route.add_argument("--systemd", action="store_true",
                        help="check the systemd route's units (the install group)")

@@ -606,10 +606,24 @@ def test_the_container_stack_check_says_where_it_must_run_when_docker_is_missing
     assert code == 1 and "on the host" in line(out, "install.stack")
 
 
-def test_the_install_group_is_skipped_without_a_route_and_needs_one_when_asked_for():
-    code, out, _ = run_suite("--only", "gateway")
-    assert "install." not in out
+def test_a_run_that_is_not_told_the_route_fails_instead_of_passing_unchecked():
+    code, out, _ = run_suite("--skip", "index", "--skip", "mcp", "--skip", "confluence")
 
+    assert code == 1
+    failed = line(out, "install.route")
+    assert failed.startswith("[FAIL]") and "--systemd" in failed and "--skip install" in failed
+    assert "closed-network-setup.md section 7" in failed
+    assert out.rstrip().endswith("ACCEPTANCE FAILED: install.route")
+    assert line(out, "gateway.embeddings").startswith("[ OK ]")  # the rest still ran
+
+
+def test_the_install_group_can_be_left_out_and_is_otherwise_not_optional():
+    code, out, _ = run_suite("--only", "gateway", "--only", "qdrant", "--skip", "install")
+    assert code == 0 and "install." not in out
+
+
+
+def test_asking_for_only_the_install_group_needs_a_route():
     code, out, err = run_suite("--only", "install")
     assert code == 2 and out == "" and "--systemd or --container" in err
 

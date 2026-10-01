@@ -31,14 +31,18 @@ def run_install(ctx: Context) -> None:
         check("install.enabled", lambda: _units_enabled(ctx, CONTAINER_TIMERS),
               needs=["install.units"])
     else:
-        check("install.units", lambda: _skip("neither --systemd nor --container was given"))
+        check("install.route", _no_route)
         return
     check("install.env-file", lambda: _env_file_private(ctx, env_file))
     check("install.timers", lambda: _timers_scheduled(ctx, timers), needs=["install.units"])
 
 
-def _skip(why: str) -> str:
-    raise Skipped(why)
+def _no_route() -> str:
+    # Not a skip: an installation nobody was told how to check is not accepted.
+    raise Failure("neither --systemd nor --container was given, so the installation was not checked",
+                  cause="say which route is installed; inside the container stack, where docker and "
+                        "systemctl do not exist, leave the group out with --skip install and run "
+                        "it on the host", see="section 7 (Verify)")
 
 
 def _failing_units(ctx: Context, units, command: list[str]) -> list[str]:

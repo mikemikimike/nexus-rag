@@ -124,7 +124,7 @@ compose run --rm -T sync local-rag status  # run any local-rag command
 compose run --rm -T sync                   # one Sync (what the timers do)
 ```
 
-After the first Sync, run the acceptance suite (section 6, "Acceptance suite"): `compose run --rm -T sync python -m local_rag.acceptance --mcp-url http://mcp:8765` inside the stack, then its `install` group on the host, which needs `docker` and `systemctl` (the command is in section 6). The installation is accepted when both end `ACCEPTANCE PASSED`.
+After the first Sync, run the acceptance suite (section 6, "Acceptance suite"): `compose run --rm -T sync python -m local_rag.acceptance --skip install --mcp-url http://mcp:8765` inside the stack, then its `install` group on the host, which needs `docker` and `systemctl` (the command is in section 6). The installation is accepted when both end `ACCEPTANCE PASSED`.
 
 Mind the missing TLS (section 1).
 
@@ -155,7 +155,7 @@ The smoke check looks at each component; the acceptance suite proves the whole s
 
 ```bash
 run_rag /opt/local-rag/venv/bin/python -m local_rag.acceptance --systemd   # systemd route
-compose run --rm -T sync python -m local_rag.acceptance --mcp-url http://mcp:8765   # container route, inside the stack (MCP_PORT if changed)
+compose run --rm -T sync python -m local_rag.acceptance --skip install --mcp-url http://mcp:8765   # container route, inside the stack (MCP_PORT if changed)
 sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.acceptance --container --only install   # container route, on the host
 ```
 
