@@ -246,6 +246,10 @@ class Declaration:
         """The declared Corpus names, in the order the file lists them."""
         return list(self._tables)
 
+    def names_of(self, kind: str) -> list[str]:
+        """The names of the declared Corpora of one kind (``folder``, ``confluence``, ``gitlab``)."""
+        return [name for name, declared in self._kinds.items() if declared == kind]
+
     def corpus(self, name: str, environ: Mapping[str, str] | None = None) -> Corpus:
         """The Corpus declared under ``name``; raises DeclarationError if there is none or its
         parameters cannot be used (for example a folder that is not there)."""

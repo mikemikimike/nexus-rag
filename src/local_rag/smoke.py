@@ -82,6 +82,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
     check("Knowledge index", lambda: _index(settings, gateway, client))
     check("LiteParse", lambda: _version(run, settings.liteparse_bin))
     check("Confluence CLI", lambda: _confluence(environ, run))
+    check("GitLab (git)", lambda: _gitlab(environ, run))
     if args.systemd:
         for unit in SYSTEMD_UNITS:
             check(unit, lambda unit=unit: _unit_active(run, unit))
@@ -134,6 +135,12 @@ def _confluence(environ: Mapping[str, str], run: Run) -> str:
     command = environ.get("CONFLUENCE_BIN") or "confluence"
     run([command, "spaces"])  # one authenticated, read-only call
     return f"{command} reads {environ['CONFLUENCE_DOMAIN']}"
+
+
+def _gitlab(environ: Mapping[str, str], run: Run) -> str:
+    if not environ.get("GITLAB_URL"):
+        raise _Skipped("GITLAB_URL is not set")
+    return run(["git", "--version"]).strip() or "git runs"
 
 
 def _version(run: Run, command: str) -> str:

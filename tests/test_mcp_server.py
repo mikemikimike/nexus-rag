@@ -391,3 +391,36 @@ def test_search_docs_narrows_to_a_repository_or_a_tracked_ref_and_shows_the_ref(
     assert "ref: feature/x" not in plain and plain.count("ref: main") == 2
     assert "ref: feature/x" in feature and "ref: main" not in feature
     assert "platform/other/a.py" in other and "platform/pay/a.py" not in other
+
+
+# --- code search ------------------------------------------------------------------------
+
+@pytest.mark.parametrize("retrieval", [RetrievalMode.HYBRID, RetrievalMode.KEYWORD])
+def test_search_docs_explains_code_results_in_either_retrieval_mode(retrieval):
+    gateway = FakeModelGateway() if retrieval is RetrievalMode.HYBRID else None
+    index = KnowledgeIndex(Settings(retrieval=retrieval), gateway)
+    with serving(index) as base_url:
+        description = tool_descriptions(base_url)["search_docs"]
+
+    for needle in ("code files", "repositories", "`repository`", "`ref`", "gitlab groups"):
+        assert needle in description.lower(), needle
+
+
+def test_get_page_keeps_its_name_and_says_it_returns_a_page_or_a_file(server):
+    description = tool_descriptions(server)["get_page"]
+
+    assert "page or a file" in description
+
+
+def test_list_spaces_includes_the_gitlab_groups_and_not_an_empty_space(tmp_path, gateway):
+    from fake_gitlab import FakeGitLab
+    from local_rag.gitlab import GitLabCorpus, Repository
+    remote = FakeGitLab(tmp_path / "remote")
+    remote.commit("platform/payments", {"a.py": "def a():\n    return 1\n"})
+    remote.commit("toplevel", {"b.py": "def b():\n    return 2\n"})
+    code = GitLabCorpus([Repository("platform/payments", "main"), Repository("toplevel", "main")],
+                        url=remote.url, token="t", cache=tmp_path / "mirrors", name="code")
+    index = KnowledgeIndex(Settings(), gateway)
+    index.sync(code)
+    with serving(index) as base_url:
+        assert call(base_url, "list_spaces") == "platform"

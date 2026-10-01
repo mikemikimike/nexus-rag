@@ -214,8 +214,9 @@ class _Stack:
                        str(layout.env_file), "-f", str(layout.compose_file), "up", "-d"])
         if any(changed):
             self.host.run(["systemctl", "daemon-reload"])
+        timers = [unit.name for unit in units if unit.suffix == ".timer"]
         self.host.run(["systemctl", "enable", "--now",
-                       *(unit.name for unit in units if unit.suffix == ".timer")])
+                       *(name for name in timers if "@" not in name)])  # a template is opted into per Corpus
 
 
 def _replace_if_different(source: Path, destination: Path, done) -> bool:
@@ -264,6 +265,11 @@ MCP_PORT=8765
 # CONFLUENCE_AUTH_TYPE=bearer
 # CONFLUENCE_API_TOKEN=
 # CONFLUENCE_READ_ONLY=true
+
+# GitLab (read by a `kind = "gitlab"` Corpus; a read-only token that can see only code
+# suitable for every user of this server; the URL is the base, without a project path)
+# GITLAB_URL=https://gitlab.example.test
+# GITLAB_TOKEN=
 """
 
 

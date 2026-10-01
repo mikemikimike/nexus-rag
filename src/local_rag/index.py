@@ -709,7 +709,7 @@ class KnowledgeIndex:
                 filter=models.Filter(must=_of_document(document_id))))
 
     def list_spaces(self) -> list[str]:
-        """The Spaces that have at least one indexed Document, sorted."""
+        """The named Spaces (Confluence Spaces, GitLab groups, folders) that have at least one indexed Document, sorted."""
         serving = self._readable()
         if serving is None:
             return []
@@ -718,7 +718,7 @@ class KnowledgeIndex:
         while True:
             records, offset = self._client.scroll(
                 serving, limit=256, offset=offset, with_payload=["space"])
-            spaces.update(r.payload["space"] for r in records)
+            spaces.update(r.payload["space"] for r in records if r.payload["space"])  # a top-level project has none
             if offset is None:
                 return sorted(spaces)
 
