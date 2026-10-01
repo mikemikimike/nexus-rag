@@ -13,7 +13,6 @@ SYSTEMD_UNITS = ("qdrant.service", "local-rag-mcp.service",
 CONTAINER_TIMERS = ("local-rag-container-sync.timer", "local-rag-container-full.timer")
 CONTAINER_SERVICES = ("qdrant", "mcp")
 COMPOSE_PROJECT = "local-rag"
-DEFAULT_ROOTS_FILE = "/etc/local-rag/confluence_roots.txt"
 
 
 def run_install(ctx: Context) -> None:
@@ -168,14 +167,14 @@ def _read(ctx: Context) -> str:
 
 
 def _roots(ctx: Context) -> str:
-    from local_rag.confluence import read_roots  # not at import: the install group runs without it
-    path = Path(ctx.args.roots_file or DEFAULT_ROOTS_FILE)
+    from local_rag.declaration import DEFAULT_PATH, Declaration, DeclarationError  # not at import: the install group runs without it
+    path = Path(ctx.args.corpora or ctx.environ.get("RAG_CORPORA_FILE") or DEFAULT_PATH)
     try:
-        roots = read_roots(path)
-    except (OSError, UnicodeDecodeError):
-        raise Skipped(f"no roots file at {path} (use --roots-file)") from None
+        roots = Declaration.read(path).confluence_roots()
+    except DeclarationError as error:
+        raise Skipped(f"no usable Corpus declaration at {path} (use --corpora): {error}") from None
     if not roots:
-        raise Skipped(f"{path} lists no Root")
+        raise Skipped(f"{path} declares no Confluence Root")
     command, unresolved = _command(ctx), {}
     for root in roots:
         try:

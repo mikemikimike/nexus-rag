@@ -39,7 +39,7 @@ from typing import TextIO
 from local_rag.binary_drop import (
     QDRANT, SYSTEM_VERSION, Artifact, DropRefused, parse_reported_version, require_version,
     sha256_of, unpack_code, verified_code_archive, verify_against_sums)
-from local_rag.installer import ROOTS_FILE, CommandFailed, Layout, SystemHost, create_text
+from local_rag.installer import CORPORA_FILE, CommandFailed, Layout, SystemHost, create_text
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SYSTEM_REPOSITORY = "local-rag"
@@ -203,8 +203,8 @@ class _Stack:
             self.done("created", f"{layout.env_file} (new secrets)")
         else:
             self.done("kept", layout.env_file)
-        if create_text(layout.roots_file, ROOTS_FILE):
-            self.done("created", layout.roots_file)
+        if create_text(layout.corpora_file, CORPORA_FILE):
+            self.done("created", layout.corpora_file)
         _replace_if_different(source / COMPOSE_FILE, layout.compose_file, self.done)
         units = sorted(path for path in (source / UNITS_DIRECTORY).iterdir()
                        if path.suffix in (".service", ".timer"))

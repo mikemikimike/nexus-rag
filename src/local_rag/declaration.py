@@ -171,3 +171,8 @@ class Declaration:
     def corpora(self, environ: Mapping[str, str] | None = None) -> list[Corpus]:
         """Every declared Corpus, built."""
         return [self.corpus(name, environ) for name in self.names]
+
+    def confluence_roots(self) -> list[str]:
+        """The Roots of every Confluence Corpus declared, for checks that need them resolved."""
+        return [root for name, kind in self._kinds.items() if kind == "confluence"
+                for root in self._tables[name].texts("roots")]

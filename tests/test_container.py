@@ -152,19 +152,19 @@ def test_first_start_generates_the_secrets_once_into_one_env_file(host):
     assert oct(host.path("/etc/local-rag/container.env").stat().st_mode & 0o777) == "0o600"
 
 
-def test_a_second_start_never_overwrites_settings_or_the_roots_file(host):
+def test_a_second_start_never_overwrites_settings_or_the_corpora_file(host):
     host.start()
     env_file = host.path("/etc/local-rag/container.env")
-    roots_file = host.path("/etc/local-rag/confluence_roots.txt")
+    roots_file = host.path("/etc/local-rag/corpora.toml")
     env_file.write_text(env_file.read_text() + "LITELLM_BASE_URL=http://gateway.example.test/v1\n")
-    roots_file.write_text("12345\n")
+    roots_file.write_text("# mine\n")
     before = env_file.read_text()
 
     code, out, err = host.start()
 
     assert code == 0, err
     assert env_file.read_text() == before
-    assert roots_file.read_text() == "12345\n"
+    assert roots_file.read_text() == "# mine\n"
 
 
 def test_an_upgrade_leaves_the_volumes_alone(host):

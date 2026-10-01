@@ -9,7 +9,7 @@ Work the sections in order. Each ends with a **Gate**: do not start the next sec
 - **Secrets stay out of output.** Never `cat` an env file, echo a token or paste one into a log line. Show an env file masked:
   `sudo sed -E 's/^([A-Z0-9_]*(KEY|TOKENS?))=.*/\1=<hidden>/' "$ENV_FILE" | grep -v '^#'`
   Values the operator gives you pass through this session; offer them the alternative of editing the env file themselves and letting you verify with the smoke check.
-- **Existing state is never overwritten.** The Installer and `local_rag.container start` create the env file, the roots file, the volumes and the Knowledge index once and never touch them again. Do not delete or regenerate them, do not clear Qdrant's storage, and do not run a **Rebuild** unless the operator asked for one: a Rebuild is never automatic, and the weekly timer runs the same `local-rag sync` as the hourly one.
+- **Existing state is never overwritten.** The Installer and `local_rag.container start` create the env file, the Corpus declaration file, the volumes and the Knowledge index once and never touch them again. Do not delete or regenerate them, do not clear Qdrant's storage, and do not run a **Rebuild** unless the operator asked for one: a Rebuild is never automatic, and the weekly timer runs the same `local-rag sync` as the hourly one.
 - **Every MCP token sees every indexed Document.** Page permissions in Confluence are not enforced. Say this to the operator in section 3 and get an explicit yes.
 - **Stop and ask** when: a command fails and the troubleshooting table (section 10) does not name the cause; the Installer or `container start` refuses (it changes nothing when it refuses, so read the message to the operator and ask); an answer cannot pass its validation after one retry; you would need to leave the paths this guide uses.
 - **Where commands run.** Everything runs on the target host, as a user with `sudo`, except section 8 (the operators' clients) and the connected-machine build, which is not part of this guide (the README, sections 3 and 4, has it, and its ship-from-a-clean-checkout rule: `container save` builds from the working tree but archives `HEAD`).
@@ -184,7 +184,7 @@ python3 -c 'import json; print(len(json.load(open("/tmp/embed.json"))["data"][0]
 
 Validate: the Confluence variable names are exactly the five above (there is no `CONFLUENCE_URL` or `CONFLUENCE_TOKEN`). C2 has no scheme and no path; `curl -sS -o /dev/null -w '%{http_code}\n' "https://$CONFLUENCE_DOMAIN/"` returns a status (a certificate error means the CA question in group D; try `http://` if the instance is plain HTTP). C3 starts with `/`. C4 is non-empty and passes the `set_env` character rule. C5 each line is all digits or starts with `http://` or `https://`; after section 5, prove every Root with `run_rag confluence info ROOT --json` (container route: `compose run --rm -T sync confluence info ROOT --json`), which must print JSON with `id`, `title` and `spaceKey`. C6 `test -d` passes and `sudo -u ragsvc test -r` on it passes (the service user must read it).
 
-Corpus limits to tell the operator: one Knowledge index follows one Corpus, and a Sync of another Corpus removes every Document it does not list, so try a folder with its own `RAG_COLLECTION`. The scheduled timers run `local-rag sync --roots-file /etc/local-rag/confluence_roots.txt`, so a folder Corpus is synced by hand (`local-rag sync --folder DIR`) unless the operator overrides the unit (a drop-in, `systemctl edit`). The container stack mounts no folder, so a folder Corpus there needs a change to the compose file, which this repository does not provide: tell the operator and stop.
+Corpora are declared by name in one file, `/etc/local-rag/corpora.toml` (section 5 writes it). Each Corpus owns its Documents: `local-rag sync NAME` adds, replaces and removes only that Corpus's Documents, so a folder and Confluence share one Knowledge index. The scheduled timers run `local-rag sync confluence`, so name the Confluence Corpus `confluence`; any other Corpus is synced by hand (`local-rag sync NAME`) unless the operator overrides or copies a unit (a drop-in, `systemctl edit`). A Document's id in the index is its Corpus's name, a colon, then its own id (`confluence:12345`); `get_page` takes that id. The container stack mounts no folder, so a folder Corpus there needs a change to the compose file, which this repository does not provide: tell the operator and stop.
 
 ### D. Network and host
 
@@ -218,7 +218,7 @@ systemd route (adds `--index-url "$MIRROR_URL"` unless pip is configured for the
 sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.installer --drop "$DROP" --index-url "$MIRROR_URL"
 ```
 
-It creates the `ragsvc` user, `/opt/qdrant/qdrant`, `/var/lib/qdrant`, `/etc/local-rag/local-rag.env` (with a generated Qdrant key and one MCP token, `kept` if it exists), an empty `/etc/local-rag/confluence_roots.txt`, the venv `/opt/local-rag/venv` (packages from the Mirror), and the units, and it enables `qdrant.service`, `local-rag-mcp.service`, `local-rag-sync.timer` and `local-rag-full.timer`. A Mirror failure happens after the user, the Qdrant binary and the env file exist: fix the Mirror and run the same command again.
+It creates the `ragsvc` user, `/opt/qdrant/qdrant`, `/var/lib/qdrant`, `/etc/local-rag/local-rag.env` (with a generated Qdrant key and one MCP token, `kept` if it exists), a commented `/etc/local-rag/corpora.toml`, the venv `/opt/local-rag/venv` (packages from the Mirror), and the units, and it enables `qdrant.service`, `local-rag-mcp.service`, `local-rag-sync.timer` and `local-rag-full.timer`. A Mirror failure happens after the user, the Qdrant binary and the env file exist: fix the Mirror and run the same command again.
 
 Container route:
 
@@ -226,9 +226,9 @@ Container route:
 sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.container start --drop "$DROP"
 ```
 
-It loads the images, writes `/etc/local-rag/container.env` (generated secrets, `kept` if it exists) and the roots file, installs `/opt/local-rag/container/compose.yaml` and the timers `local-rag-container-sync.timer` and `local-rag-container-full.timer`, and runs `docker compose up -d`. Data lives in Docker volumes that an upgrade does not touch.
+It loads the images, writes `/etc/local-rag/container.env` (generated secrets, `kept` if it exists) and the Corpus declaration file, installs `/opt/local-rag/container/compose.yaml` and the timers `local-rag-container-sync.timer` and `local-rag-container-full.timer`, and runs `docker compose up -d`. Data lives in Docker volumes that an upgrade does not touch.
 
-**Gate:** the command exited 0, and the env file and roots file exist (`sudo ls -l /etc/local-rag/`).
+**Gate:** the command exited 0, and the env file and the Corpus declaration file exist (`sudo ls -l /etc/local-rag/`).
 
 ## 5. Configure
 
@@ -257,30 +257,41 @@ RAG_VALUE="$NO_PROXY_LIST" set_env NO_PROXY                     # systemd route,
 RAG_VALUE="$TOKEN" RAG_APPEND=1 set_env MCP_TOKENS
 ```
 
-The Roots, one per line, appended once each:
+The Corpora, declared by name (the declaration is TOML; the table's key is the Corpus's name). The Confluence Corpus must be named `confluence`, because the timers sync it by that name. Write the file once with what the operator answered, quoting each Root:
 
 ```bash
-ROOTS_FILE=/etc/local-rag/confluence_roots.txt
-for root in $ROOTS; do grep -qxF "$root" "$ROOTS_FILE" || echo "$root" | sudo tee -a "$ROOTS_FILE" >/dev/null; done
+CORPORA_FILE=/etc/local-rag/corpora.toml
+sudo tee "$CORPORA_FILE" >/dev/null <<EOF
+[corpus.confluence]
+kind = "confluence"
+roots = ["12345", "https://confluence.example.test/pages/viewpage.action?pageId=67890"]
+# optional: max_depth = 0, attachments = true, exclude_attachments = ["*.png"]
+
+[corpus.docs]
+kind = "folder"
+path = "/srv/docs"
+EOF
 ```
+
+Leave out the `[corpus.docs]` table when there is no folder, and the `[corpus.confluence]` table when there is no Confluence. If the operator already edited the file, show it to them instead of overwriting it.
 
 Apply the settings: systemd route `sudo systemctl restart qdrant local-rag-mcp` (only `local-rag-mcp` if Qdrant's settings did not change); container route `compose up -d`. The settings reach a Sync from the env file each time it starts, but the MCP server reads them only at its start.
 
-Then show the masked env file and the roots file to the operator.
+Then show the masked env file and the Corpus declaration file to the operator.
 
-**Gate:** each `set_env` printed `set` or `unchanged`, the masked env file shows what the operator answered, and each Root passed `confluence info ROOT --json` (Confluence Corpus).
+**Gate:** each `set_env` printed `set` or `unchanged`, the masked env file shows what the operator answered, and each Root passed `confluence info ROOT --json` (Confluence Corpus), and `local-rag status` runs without a usage error.
 
 ## 6. First Sync
 
 Run the Sync the timers run, in the foreground, so its output and exit code are yours (it can take a long time; if your tool times out, start it detached with `sudo systemctl start --no-block local-rag-sync.service` and follow `journalctl -fu local-rag-sync`; container route `sudo systemctl start --no-block local-rag-container-sync.service` and `journalctl -fu local-rag-container-sync`):
 
 ```bash
-run_rag /opt/local-rag/venv/bin/local-rag sync --roots-file /etc/local-rag/confluence_roots.txt   # systemd route
-compose run --rm -T sync                                                                         # container route
-run_rag /opt/local-rag/venv/bin/local-rag sync --folder "$FOLDER"                                # folder Corpus, systemd route
+run_rag /opt/local-rag/venv/bin/local-rag sync confluence   # systemd route
+compose run --rm -T sync                                    # container route
+run_rag /opt/local-rag/venv/bin/local-rag sync docs         # another Corpus, by the name declared for it
 ```
 
-Read the result: `Sync: N added, ...` and exit 0 is complete. Exit 1 lists `failed <id>: <why>` per Document, and the rest is indexed: show the list to the operator (a scanned PDF without OCR is a typical cause; see the troubleshooting table). Exit 2 is a command line that cannot be used (an empty roots file gives `give a Corpus`). `sync` on an empty Knowledge index makes the index live with the first Document that succeeds. A **Rebuild** is not part of a first install; the operator asks for one when the embedding model or chunking changes.
+Read the result: `Sync: N added, ...` and exit 0 is complete. Exit 1 lists `failed <id>: <why>` per Document, and the rest is indexed: show the list to the operator (a scanned PDF without OCR is a typical cause; see the troubleshooting table). Exit 2 is a command line that cannot be used (a Corpus name that is not declared, or a declaration that cannot be read, names what is wrong). `sync` on an empty Knowledge index makes the index live with the first Document that succeeds. A **Rebuild** is not part of a first install; the operator asks for one when the embedding model or chunking changes.
 
 **Gate:** exit 0, or exit 1 with a failure list the operator has seen and accepted.
 
@@ -365,11 +376,11 @@ Changing `RAG_EMBED_MODEL` (or its dimension): the index records the model and i
 ```bash
 sudo systemd-run --unit=local-rag-rebuild -p User=ragsvc -p EnvironmentFile=/etc/local-rag/local-rag.env \
   -p Environment=HOME=/var/lib/ragsvc -p Environment=PATH=/usr/local/bin:/usr/bin:/bin \
-  /opt/local-rag/venv/bin/local-rag rebuild --roots-file /etc/local-rag/confluence_roots.txt
+  /opt/local-rag/venv/bin/local-rag rebuild
 journalctl -fu local-rag-rebuild
 ```
 
-(container route: the same `systemd-run --unit=local-rag-rebuild`, running `/usr/bin/docker compose --project-name local-rag --env-file /etc/local-rag/container.env -f /opt/local-rag/container/compose.yaml run --rm -T sync local-rag rebuild --roots-file /etc/local-rag/confluence_roots.txt`, the command the container timers' units use for a Sync), then read `local-rag status`. A Rebuild goes live only when its failure rate is within `RAG_REBUILD_FAILURE_THRESHOLD` (default `0`) and the Corpus was listed completely; otherwise the Live index is untouched and the refusal says why. Only one Sync or Rebuild runs at a time; the other exits 1 at once.
+(container route: the same `systemd-run --unit=local-rag-rebuild`, running `/usr/bin/docker compose --project-name local-rag --env-file /etc/local-rag/container.env -f /opt/local-rag/container/compose.yaml run --rm -T sync local-rag rebuild`; a Rebuild re-embeds every declared Corpus), then read `local-rag status`. A Rebuild goes live only when its failure rate is within `RAG_REBUILD_FAILURE_THRESHOLD` (default `0`) and the Corpus was listed completely; otherwise the Live index is untouched and the refusal says why. Only one Sync or Rebuild runs at a time; the other exits 1 at once.
 
 ## 10. Troubleshooting
 

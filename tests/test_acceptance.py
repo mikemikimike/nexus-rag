@@ -664,13 +664,14 @@ CONFLUENCE = {"CONFLUENCE_DOMAIN": "wiki.example.test", "CONFLUENCE_API_TOKEN": 
 
 
 def roots_file(tmp_path, *roots):
-    path = tmp_path / "roots.txt"
-    path.write_text("# roots\n" + "\n".join(roots) + "\n")
+    path = tmp_path / "corpora.toml"
+    listed = ", ".join(f'"{root}"' for root in roots)
+    path.write_text(f'[corpus.confluence]\nkind = "confluence"\nroots = [{listed}]\n')
     return str(path)
 
 
 def confluence_only(tmp_path, *roots, host=None, environ=None):
-    return run_suite("--only", "confluence", "--roots-file", roots_file(tmp_path, *roots),
+    return run_suite("--only", "confluence", "--corpora", roots_file(tmp_path, *roots),
                      environ={**CONFLUENCE, **(environ or {})},
                      host=host or Host({"info": '{"id": "100", "title": "Home"}'}))
 
@@ -715,11 +716,11 @@ def test_a_root_that_does_not_resolve_is_named(tmp_path):
 
 
 def test_a_missing_roots_file_skips_the_roots_check_with_the_reason(tmp_path):
-    code, out, _ = run_suite("--only", "confluence", "--roots-file", str(tmp_path / "none.txt"),
+    code, out, _ = run_suite("--only", "confluence", "--corpora", str(tmp_path / "none.toml"),
                              environ=CONFLUENCE)
 
     assert code == 0, out
-    assert "no roots file" in line(out, "confluence.roots")
+    assert "no usable Corpus declaration" in line(out, "confluence.roots")
 
 
 # --- as a whole -----------------------------------------------------------------------
@@ -729,7 +730,7 @@ def test_all_groups_pass_together_and_the_summary_says_so(tmp_path):
     host.answers["info"] = '{"id": "100"}'
     with serving(served_index(PAGE), tokens=(MCP_TOKEN,)) as url:
         code, out, err = run_suite(
-            "--systemd", "--mcp-url", url, "--roots-file", roots_file(tmp_path, "100"),
+            "--systemd", "--mcp-url", url, "--corpora", roots_file(tmp_path, "100"),
             environ=CONFLUENCE, host=host)
 
     assert code == 0, out

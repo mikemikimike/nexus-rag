@@ -79,12 +79,12 @@ It checks the prerequisites and the drop, then creates (only what is missing): t
 Then configure and start working:
 
 1. Edit `/etc/local-rag/local-rag.env`: `LITELLM_BASE_URL` (ends with `/v1`), `LITELLM_API_KEY`, `RAG_EMBED_MODEL` (the `model_name` registered in LiteLLM, see `examples/litellm_config.yaml`; or `RAG_RETRIEVAL=keyword` instead, if the network has no embedding model), optionally `RAG_RERANK_MODEL`, and the `CONFLUENCE_*` block (bearer token, `CONFLUENCE_READ_ONLY=true`). Settings are read at start: `sudo systemctl restart local-rag-mcp` afterwards.
-2. List the Confluence Roots, one page id or URL per line, in `/etc/local-rag/confluence_roots.txt`. A Space's home page as a Root covers the whole Space.
+2. Declare the Corpora in `/etc/local-rag/corpora.toml` (TOML, see "Declaring Corpora" below). Name the Confluence Corpus `confluence`: the timers sync it by that name. A Space's home page as a Root covers the whole Space.
 3. Run the smoke check (section 6), then the first Sync: `sudo systemctl start local-rag-sync.service` (it runs until done; follow it with `journalctl -fu local-rag-sync`).
 4. Health: `curl http://HOST:8765/healthz` answers `ok`. Your first token: `sudo grep '^MCP_TOKENS=' /etc/local-rag/local-rag.env`.
 5. When the first Sync is done, run the acceptance suite (section 6, "Acceptance suite"): `run_rag /opt/local-rag/venv/bin/python -m local_rag.acceptance --systemd` (the helper is defined below). The installation is accepted when it ends `ACCEPTANCE PASSED`.
 
-The hourly timer runs an incremental Sync; the weekly timer runs the same Sync as a safety net. Both read the roots file. Until step 1 and 2 are done they fail harmlessly.
+The hourly timer runs an incremental Sync; the weekly timer runs the same Sync as a safety net. Both run `local-rag sync confluence`. Until step 1 and 2 are done they fail harmlessly.
 
 Commands below use this helper, which runs a program as the service user with the services' own settings:
 
@@ -114,7 +114,7 @@ tar -xzf drop/local-rag-$VERSION.tar.gz -C /tmp
 sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.container start --drop drop
 ```
 
-It verifies the checksums, the image tags and the versions the images report, loads the images, writes (only if missing) the env file `/etc/local-rag/container.env` with generated secrets (mode 0600) and the roots file, installs the compose file in `/opt/local-rag/container/` and the container timers, and runs `docker compose up -d`. Data and the index live in Docker volumes, which an upgrade does not touch.
+It verifies the checksums, the image tags and the versions the images report, loads the images, writes (only if missing) the env file `/etc/local-rag/container.env` with generated secrets (mode 0600) and the Corpus declaration file, installs the compose file in `/opt/local-rag/container/` and the container timers, and runs `docker compose up -d`. Data and the index live in Docker volumes, which an upgrade does not touch.
 
 Configure as on the systemd route (step 1 and 2 of section 3, with `container.env`), then apply it with `up -d`. The container route needs no Mirror for packages, since the images carry them. Commands below use:
 
@@ -170,7 +170,7 @@ It runs these groups, each check on its own line with a stable name (`--only GRO
 | `index` | on a throwaway collection and a temp folder of generated Documents: Sync; a distinctive term (keyword) and a paraphrase sharing no word (meaning) find their Documents; text from the tail of a long Document is found by term and by meaning, which shows the real embedding model reads whole Passages (the meaning checks are skipped in `keyword` mode); `status` counts; a changed Document is replaced and a removed one disappears; Rebuild and `switch-back` |
 | `mcp` | the running MCP server, over HTTP with a token from `MCP_TOKENS` (or `--token`): `search_docs`, `list_spaces`, `get_page` answer; no token and a wrong token get 401; `/healthz` answers 200 without a token. It listens where `MCP_HOST` and `MCP_PORT` say, or `--mcp-url` (inside the container stack the server is another container: `--mcp-url http://mcp:8765`, as above) |
 | `install` | needs `--systemd` or `--container`. Units exist, are active and enabled, the env file is not world-readable, the sync timers are scheduled; container route: the stack's `qdrant` and `mcp` containers are up and healthy. The container route's checks need `docker` and `systemctl`, so run them on the host (third command above, where only the standard library is needed), not inside the stack |
-| `confluence` | only when `CONFLUENCE_DOMAIN` is set: the read-only `confluence spaces` call works and every Root of the roots file (`--roots-file`, default `/etc/local-rag/confluence_roots.txt`) resolves |
+| `confluence` | only when `CONFLUENCE_DOMAIN` is set: the read-only `confluence spaces` call works and every Root of the Confluence Corpora in the declaration file (`--corpora`, default `RAG_CORPORA_FILE`, else `/etc/local-rag/corpora.toml`) resolves |
 
 Reading the output: `[ OK ]`, `[FAIL]` or `[SKIP]` per check, with a reason. A `[FAIL]` line says what was seen, the likely cause and the section of `docs/agents/closed-network-setup.md` to read. A `[SKIP]` is never a pass: it says why (an optional component that is not configured, or an earlier check that failed, so one broken gateway shows as one failure and not a dozen). It starts by printing the settings it uses (never a secret; keys and tokens are only said to be set) and ends with a summary. Exit code `0`: nothing failed; `1`: a check failed; `2`: the command line or the settings cannot be used.
 
@@ -180,15 +180,30 @@ It never touches the live index: the `index` group works in its own collection `
 |---|---|
 | Status: Live index generation, Documents, Passages, Index format, last Sync | `local-rag status` |
 | Try a query | `local-rag search "ORA-00942" [--space ENG] [-k 5]` |
-| Sync now | `local-rag sync --roots-file /etc/local-rag/confluence_roots.txt`, or `systemctl start local-rag-sync.service` |
-| Rebuild (new embedding model, or `RAG_RETRIEVAL` changed) | `local-rag rebuild --roots-file /etc/local-rag/confluence_roots.txt` |
+| Sync now | `local-rag sync confluence` (any declared Corpus by its name), or `systemctl start local-rag-sync.service` |
+| Rebuild (new embedding model, or `RAG_RETRIEVAL` changed) | `local-rag rebuild` (re-embeds every declared Corpus) |
 | Undo a bad Rebuild | `local-rag switch-back` |
 | Logs | `journalctl -u local-rag-mcp -f`, `journalctl -u local-rag-sync` (container route: `docker logs`, journal of the `local-rag-container-*` units) |
 | Add or revoke a user | edit `MCP_TOKENS`, restart the MCP server (`compose up -d` on the container route) |
 
 Exit codes of `local-rag`: `0` success; `1` failure or refusal (a Sync with failed Documents, a refused Rebuild, another run in progress, an unusable index); `2` a command line that cannot be used. Only one Sync or Rebuild runs at a time; the Knowledge index enforces it.
 
-A folder Corpus works the same way (`local-rag sync --folder DIR`; the Space is the top-level folder), but one Knowledge index follows one Corpus: a Sync of another Corpus removes every Document it does not list. Try a folder with its own `RAG_COLLECTION`.
+**Declaring Corpora.** Every Corpus is declared by name in one TOML file, `/etc/local-rag/corpora.toml` (override with `RAG_CORPORA_FILE` or `--corpora FILE`). The table's key is the Corpus's name (letters, digits, `-`, `_`):
+
+```toml
+[corpus.confluence]
+kind = "confluence"
+roots = ["12345", "https://wiki.example.test/pages/viewpage.action?pageId=678"]
+max_depth = 0                       # optional, 0 = the whole subtree
+attachments = true                  # optional
+exclude_attachments = ["*.png"]     # optional file name globs; the default leaves out images, video, archives
+
+[corpus.docs]
+kind = "folder"
+path = "/srv/docs"                  # relative paths are relative to the file; the Space is the top-level folder
+```
+
+`local-rag sync NAME` syncs one Corpus and touches only its Documents, so Corpora share one Knowledge index. `local-rag rebuild` re-embeds every declared Corpus. A Document's id is its Corpus's name and its own id (`confluence:12345`), and Status shows the last Sync of each Corpus. A Corpus named that is not declared is a usage error (exit 2). An index built before named Corpora is a Read-only index until a Rebuild.
 
 **Index format.** The index records how it was built (schema version, Retrieval mode, sparse encoder parameters, chunk size and overlap, and for a hybrid index the embedding model name and dimension). After an upgrade, a model change, a change of `RAG_RETRIEVAL` or a change of `RAG_CHUNK_TOKENS` or `RAG_CHUNK_OVERLAP`, `local-rag status` tells whether it still matches. A mismatching index that can still be searched is served as a **Read-only index** with a warning and refuses Sync until you run a Rebuild; an unusable one is refused. Nothing is ever rebuilt automatically. After changing the embedding model, the Retrieval mode or the chunk settings, run a Rebuild. An index built before Documents were split into Passages did not record its chunk settings, so it shows up as a Read-only index until you run one.
 
