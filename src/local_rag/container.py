@@ -248,6 +248,8 @@ MCP_PORT=8765
 # LITELLM_API_KEY=
 # RAG_EMBED_MODEL=YOUR-EMBEDDING-MODEL-NAME
 # RAG_RERANK_MODEL=
+# Other tuning (RAG_REBUILD_FAILURE_THRESHOLD, RAG_CHUNK_TOKENS, RAG_TOP_K, ...): the RAG_*
+# names in src/local_rag/environment.py, listed in the compose file; unset means the default.
 
 # Confluence (read by confluence-cli during a Sync)
 # CONFLUENCE_DOMAIN=confluence.example.test

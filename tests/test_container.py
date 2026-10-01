@@ -1,4 +1,5 @@
 import io
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -229,6 +230,20 @@ def test_the_compose_file_holds_no_secret_and_takes_every_one_from_the_env_file(
     assert services["qdrant"]["environment"]["QDRANT__SERVICE__API_KEY"].startswith(
         "${QDRANT_API_KEY:?")
     assert "env_file" not in str(services)  # works in Portainer, whose host paths are not ours
+
+
+def test_every_setting_the_programs_read_can_be_set_from_the_env_file():
+    # Compose passes a container only the variables it names, so a setting that is not named
+    # here could never be changed in the env file (the Rebuild threshold, chunking, ...).
+    import local_rag.environment as environment
+
+    read = set(re.findall(r'"(RAG_[A-Z_]+|LITELLM_[A-Z_]+|LIT_BIN)"',
+                          Path(environment.__file__).read_text()))
+    services = compose()["services"]
+
+    assert read
+    for name in ("mcp", "sync"):
+        assert read <= set(services[name]["environment"]), name
 
 
 def test_only_the_mcp_server_is_reachable_from_outside_and_sync_is_not_part_of_up():

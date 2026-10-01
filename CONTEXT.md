@@ -81,7 +81,7 @@ The air-gapped network's internal copy of public package sources (Python package
 _Avoid_: proxy, registry, PyPI server
 
 **Binary drop**:
-The verified set of files that are not available from the Mirror and are carried into the air-gapped network by hand: the Qdrant server binary and, while the source repository is private, an archive of this system's own code, each with a version and checksum.
+The verified set of files that are not available from the Mirror and are carried into the air-gapped network by hand: the Qdrant server binary and, while the source repository is private, an archive of this system's own code, each with a version and checksum. On the container route it carries the saved system and Qdrant images instead of the Qdrant binary.
 _Avoid_: bundle, vendor directory, release bundle
 
 **Installer**:

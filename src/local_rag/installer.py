@@ -330,7 +330,7 @@ def _create_env_file(path: Path, prepare: Callable[[Path], None] = lambda staged
 
 
 def create_text(path: Path, text: str, mode: int = 0o644,
-                 prepare: Callable[[Path], None] = lambda staged: None) -> bool:
+                prepare: Callable[[Path], None] = lambda staged: None) -> bool:
     """Write ``path`` unless something is there already; True if it was written.
 
     The file is complete (and ``prepare`` has run on it, to set its owner) before it appears
