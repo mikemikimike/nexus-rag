@@ -15,6 +15,9 @@ from local_rag.sparse import SparseParams
 # Bump when the collection layout or payload shape changes in a way old code cannot read.
 SCHEMA_VERSION = 1
 
+# What the running code's keyword encoding does, recorded so a change shows as a Read-only index.
+IDENTIFIER_SPLITTING = True
+
 
 class Access(StrEnum):
     READ_WRITE = "read-write"
@@ -45,21 +48,26 @@ class IndexFormat:
     chunk_overlap: int | None = None
     # Indexes built before the Retrieval mode existed were all Hybrid.
     retrieval: RetrievalMode = RetrievalMode.HYBRID
+    # Whether keyword encoding adds the parts of camelCase, dotted and kebab-case identifiers.
+    # Indexes built before it was recorded did not.
+    identifier_splitting: bool = False
 
     @classmethod
     def written_by(cls, settings: Settings, dimension: int | None) -> "IndexFormat":
         """The format of an index the running code creates."""
         if settings.retrieval is RetrievalMode.KEYWORD:
             return cls(SCHEMA_VERSION, settings.sparse, None, None, settings.chunk_tokens,
-                       settings.chunk_overlap, RetrievalMode.KEYWORD)
+                       settings.chunk_overlap, RetrievalMode.KEYWORD, IDENTIFIER_SPLITTING)
         return cls(SCHEMA_VERSION, settings.sparse, settings.embed_model, dimension,
-                   settings.chunk_tokens, settings.chunk_overlap, RetrievalMode.HYBRID)
+                   settings.chunk_tokens, settings.chunk_overlap, RetrievalMode.HYBRID,
+                   IDENTIFIER_SPLITTING)
 
     def to_payload(self) -> dict:
         return {"schema_version": self.schema_version, "retrieval": self.retrieval.value,
                 "embed_model": self.embed_model,
                 "dimension": self.dimension, "chunk_tokens": self.chunk_tokens,
-                "chunk_overlap": self.chunk_overlap, "sparse": {
+                "chunk_overlap": self.chunk_overlap,
+                "identifier_splitting": self.identifier_splitting, "sparse": {
                     "k1": self.sparse.k1, "b": self.sparse.b,
                     "avg_doc_length": self.sparse.avg_doc_length}}
 
@@ -80,7 +88,8 @@ class IndexFormat:
                 dimension=_optional_int(dimension),
                 chunk_tokens=_optional_int(payload.get("chunk_tokens")),
                 chunk_overlap=_optional_int(payload.get("chunk_overlap")),
-                retrieval=retrieval)
+                retrieval=retrieval,
+                identifier_splitting=bool(payload.get("identifier_splitting", False)))
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ValueError(f"unreadable index format {payload!r}") from error
 
@@ -148,6 +157,10 @@ def assess(recorded: IndexFormat | None, stored_dimension: int | None, settings:
                 differences.append(
                     f"chunk overlap differs: index built with {recorded.chunk_overlap} "
                     f"tokens, running with {settings.chunk_overlap}")
+    if recorded is not None and recorded.identifier_splitting != IDENTIFIER_SPLITTING:
+        differences.append(
+            "keyword search does not split identifiers into their parts in this index "
+            "(built by an earlier version)")
     unchecked = []
     unreachable = False
     if running_dimension is not None and both_hybrid:
