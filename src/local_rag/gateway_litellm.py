@@ -5,8 +5,10 @@ import urllib.request
 from collections.abc import Sequence
 from typing import Any
 
-from local_rag.settings import Settings
+from local_rag.settings import RetrievalMode, Settings
 from local_rag.tokens import count_tokens
+
+_TRANSIENT_STATUSES = {408, 429}  # a timeout, or "too many requests": try again later
 
 RERANK_MAX_CHARS = 2000  # longer texts are cut before scoring; the head carries the topic
 
@@ -16,7 +18,23 @@ _DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 class GatewayError(RuntimeError):
-    """The Model gateway could not answer: unreachable, refused, or answered nonsense."""
+    """The Model gateway could not answer: unreachable, refused, or answered nonsense.
+
+    ``retryable`` says whether asking again could help: an unreachable or overloaded
+    gateway may recover, a wrong key or model name will not.
+    """
+
+    def __init__(self, message: str, *, retryable: bool = True):
+        super().__init__(message)
+        self.retryable = retryable
+
+
+def gateway_from_settings(settings: Settings) -> "LiteLLMGateway | None":
+    """The Model gateway the settings need, or None if nothing will reach one: Keyword-only
+    retrieval with no reranker."""
+    if settings.retrieval is RetrievalMode.KEYWORD and not settings.rerank:
+        return None
+    return LiteLLMGateway.from_settings(settings)
 
 
 class LiteLLMGateway:
@@ -83,7 +101,8 @@ class LiteLLMGateway:
             ordered = sorted(answer["data"], key=lambda item: item["index"])
             vectors = [[float(x) for x in item["embedding"]] for item in ordered]
         except (KeyError, TypeError, ValueError) as error:
-            raise GatewayError(f"malformed embeddings answer: {error!r}") from error
+            raise GatewayError(f"malformed embeddings answer: {error!r}",
+                               retryable=False) from error
         if len(vectors) != len(batch):
             raise GatewayError(
                 f"expected {len(batch)} embeddings, gateway returned {len(vectors)}")
@@ -101,7 +120,9 @@ class LiteLLMGateway:
                 body = response.read()
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", "replace")[:500]
-            raise GatewayError(f"gateway {url} answered {error.code}: {detail}") from error
+            raise GatewayError(f"gateway {url} answered {error.code}: {detail}",
+                               retryable=error.code in _TRANSIENT_STATUSES
+                               or error.code >= 500) from error
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             raise GatewayError(f"gateway {url} unreachable: {error}") from error
         try:

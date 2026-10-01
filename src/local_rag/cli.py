@@ -19,9 +19,10 @@ from local_rag.corpus import Corpus
 from local_rag.environment import settings_from_environment
 from local_rag.folder import FolderCorpus
 from local_rag.gateway import ModelGateway
-from local_rag.gateway_litellm import LiteLLMGateway
+from local_rag.gateway_litellm import gateway_from_settings
 from local_rag.index import IndexStatus, KnowledgeIndex, Passage, RebuildReport, SyncReport
 from local_rag.index_format import Access
+from local_rag.settings import RetrievalMode
 
 
 class UsageError(Exception):
@@ -44,7 +45,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
     try:
         settings = settings_from_environment(environ)
         corpus = _corpus(args, environ) if args.command in ("sync", "rebuild") else None
-        index = KnowledgeIndex(settings, gateway or LiteLLMGateway.from_settings(settings),
+        index = KnowledgeIndex(settings, gateway or gateway_from_settings(settings),
                                client=client)
         return args.run(args, index, corpus, out)
     except UsageError as error:
@@ -149,6 +150,8 @@ def _search(args, index: KnowledgeIndex, corpus: None, out: TextIO) -> int:
         print("No results.", file=out)
     for number, passage in enumerate(passages, 1):
         _print_passage(number, passage, out)
+    if passages.notice:
+        print(f"note: {passages.notice}", file=out)
     return 0
 
 
@@ -192,6 +195,12 @@ def _print_passage(number: int, passage: Passage, out: TextIO) -> None:
     print(file=out)
 
 
+def _embedding(f) -> str:
+    if f.retrieval is RetrievalMode.KEYWORD:
+        return "keyword-only retrieval (no embedding model)"
+    return f"embedding model {f.embed_model!r} ({f.dimension} dimensions)"
+
+
 def _chunks(f) -> str:
     if f.chunk_tokens is None or f.chunk_overlap is None:
         return "chunk size not recorded"
@@ -210,8 +219,7 @@ def _print_status(status: IndexStatus, out: TextIO) -> None:
         show("format", "not recorded")
     else:
         f = status.format
-        show("format", f"schema {f.schema_version}, embedding model {f.embed_model!r} "
-                       f"({f.dimension} dimensions), sparse k1={f.sparse.k1:g} "
+        show("format", f"schema {f.schema_version}, {_embedding(f)}, sparse k1={f.sparse.k1:g} "
                        f"b={f.sparse.b:g} avg_doc_length={f.sparse.avg_doc_length:g}, "
                        f"{_chunks(f)}")
     if status.last_sync is None:

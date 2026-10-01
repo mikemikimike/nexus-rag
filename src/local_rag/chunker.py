@@ -12,6 +12,7 @@ from nltk.tokenize import PunktSentenceTokenizer
 
 from local_rag.gateway import ModelGateway
 from local_rag.settings import Settings
+from local_rag.tokens import count_tokens
 
 
 class Chunker:
@@ -26,8 +27,9 @@ class Chunker:
             chunking_tokenizer_fn=lambda text: split_by_sentence_tokenizer_internal(text, punkt))
 
     @classmethod
-    def from_settings(cls, settings: Settings, gateway: ModelGateway) -> "Chunker":
-        return cls(gateway.count_tokens,
+    def from_settings(cls, settings: Settings, gateway: ModelGateway | None) -> "Chunker":
+        """Sized by the gateway's token count, or the local one when there is no gateway."""
+        return cls(count_tokens if gateway is None else gateway.count_tokens,
                    size=settings.chunk_tokens, overlap=settings.chunk_overlap)
 
     def split(self, text: str) -> list[str]:

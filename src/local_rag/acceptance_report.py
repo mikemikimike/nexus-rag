@@ -14,6 +14,8 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, TextIO
 
+from local_rag.settings import RetrievalMode
+
 GUIDE = "docs/agents/closed-network-setup.md"
 COMMAND_TIMEOUT = 30.0
 QDRANT_DOWN = 'section 10 (row "/healthz 503, Qdrant is unreachable")'  # the row for any Qdrant trouble
@@ -25,6 +27,14 @@ class Failure(Exception):
     def __init__(self, what: str, *, cause: str | None = None, see: str | None = None):
         super().__init__(what)
         self.what, self.cause, self.see = what, cause, see
+
+
+KEYWORD_ONLY = "RAG_RETRIEVAL=keyword, so no embedding model is used"
+
+
+def is_keyword_only(ctx: "Context") -> bool:
+    """Whether the suite runs in Keyword-only retrieval, where the embedding checks do not apply."""
+    return ctx.settings.retrieval is RetrievalMode.KEYWORD
 
 
 class Skipped(Exception):

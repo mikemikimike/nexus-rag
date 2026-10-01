@@ -20,7 +20,10 @@ from mcp.client.streamable_http import streamable_http_client
 
 from local_rag import KnowledgeIndex, Settings
 from local_rag.corpus import Document, InMemoryCorpus
+from local_rag.fakes import FakeModelGateway
+from local_rag.gateway_litellm import GatewayError
 from local_rag.mcp_server import build_app, main
+from local_rag.settings import RetrievalMode
 from test_health import UnreachableQdrant
 from test_index_state import lose_the_live_collection
 
@@ -274,9 +277,93 @@ def test_stdio_mode_serves_the_tools_without_tokens():
     async def run():
         params = StdioServerParameters(
             command=sys.executable, args=["-m", "local_rag.mcp_server", "--stdio"],
-            env={**os.environ, "QDRANT_URL": ":memory:"})
+            env={**os.environ, "QDRANT_URL": ":memory:", "RAG_EMBED_MODEL": "embed"})
         async with Client(params) as client:
             tools = await client.list_tools()
             spaces = await client.call_tool("list_spaces", {})
             return sorted(tool.name for tool in tools.tools), spaces.content[0].text
     assert anyio.run(run) == (["get_page", "list_spaces", "search_docs"], "none")
+
+
+# --- the Retrieval mode ----------------------------------------------------------------
+
+def tool_descriptions(base_url):
+    async def run():
+        headers = {"Authorization": f"Bearer {TOKEN}"}
+        async with httpx2.AsyncClient(headers=headers) as http:
+            transport = streamable_http_client(f"{base_url}/mcp", http_client=http)
+            async with Client(transport) as client:
+                return {t.name: t.description for t in (await client.list_tools()).tools}
+    return anyio.run(run)
+
+
+class FlakyGateway(FakeModelGateway):
+    def __init__(self):
+        super().__init__()
+        self.down = False
+
+    def embed_query(self, text):
+        if self.down:
+            raise GatewayError("gateway unreachable")
+        return super().embed_query(text)
+
+
+def test_a_keyword_fallback_tells_claude_the_results_are_keyword_only(corpus):
+    gateway = FlakyGateway()
+    index = KnowledgeIndex(Settings(), gateway)
+    index.sync(corpus)
+    with serving(index) as base_url:
+        healthy = call(base_url, "search_docs", {"query": "ORA-00942"})
+        gateway.down = True
+        degraded = call(base_url, "search_docs", {"query": "ORA-00942"})
+
+    assert "keyword-only" not in healthy
+    assert degraded.startswith("Note: Results are keyword-only")
+    assert "embedding model could not be reached" in degraded
+    assert "Fixing ORA-00942" in degraded  # the results are still there
+
+
+def test_a_fallback_that_finds_nothing_still_says_why(corpus):
+    gateway = FlakyGateway()
+    index = KnowledgeIndex(Settings(), gateway)
+    index.sync(corpus)
+    gateway.down = True
+    with serving(index) as base_url:
+        text = call(base_url, "search_docs", {"query": "zzzzunknownterm"})
+
+    assert "No results." in text and "keyword-only" in text
+
+
+def test_a_keyword_only_server_describes_search_as_keyword_search(corpus):
+    index = KnowledgeIndex(Settings(retrieval=RetrievalMode.KEYWORD), None)
+    index.sync(corpus)
+    with serving(index) as base_url:
+        description = tool_descriptions(base_url)["search_docs"]
+        text = call(base_url, "search_docs", {"query": "ORA-00942"})
+
+    assert "keyword" in description.lower() and "semantic" not in description
+    assert "Fixing ORA-00942" in text and "Note:" not in text
+
+
+def test_a_hybrid_server_describes_search_as_semantic_and_keyword(server):
+    assert "semantic" in tool_descriptions(server)["search_docs"]
+
+
+def test_a_keyword_only_server_starts_with_no_embedding_model_and_no_gateway():
+    async def run():
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "local_rag.mcp_server", "--stdio"],
+            env={**os.environ, "QDRANT_URL": ":memory:", "RAG_RETRIEVAL": "keyword",
+                 "RAG_EMBED_MODEL": ""})
+        async with Client(params) as client:
+            spaces = await client.call_tool("list_spaces", {})
+            search = await client.call_tool("search_docs", {"query": "anything"})
+            return spaces.content[0].text, search.content[0].text
+    assert anyio.run(run) == ("none", "No results.")
+
+
+def test_a_hybrid_server_without_an_embedding_model_refuses_to_start_and_says_why(capsys):
+    code = main(["--stdio"], {"QDRANT_URL": ":memory:"})
+
+    assert code != 0
+    assert "RAG_EMBED_MODEL" in capsys.readouterr().err

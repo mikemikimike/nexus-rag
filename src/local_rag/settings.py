@@ -1,6 +1,12 @@
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from local_rag.sparse import SparseParams
+
+
+class RetrievalMode(StrEnum):
+    HYBRID = "hybrid"  # dense vectors from an embedding model, and keywords
+    KEYWORD = "keyword"  # keywords alone: needs no embedding model
 
 
 @dataclass(frozen=True)
@@ -11,6 +17,7 @@ class Settings:
     qdrant_api_key: str | None = field(default=None, repr=False)
     collection: str = "knowledge"
     sparse: SparseParams = field(default_factory=SparseParams)
+    retrieval: RetrievalMode = RetrievalMode.HYBRID  # what a new index is built to search by
     top_k: int = 6
     hybrid_candidates: int = 40
     gateway_base_url: str = "http://localhost:4000/v1"  # LiteLLM, OpenAI-compatible root
@@ -18,6 +25,8 @@ class Settings:
     embed_model: str = "embed"  # model name registered in the gateway for embeddings
     rerank_model: str | None = None  # model name for /rerank; None leaves rerank off
     embed_batch_size: int = 16  # texts per /embeddings request
+    embed_attempts: int = 3  # tries at one Document's embeddings in a Sync or Rebuild; search never retries
+    embed_retry_backoff: float = 0.5  # seconds before the second try, doubling for each later one
     gateway_timeout: float = 60.0  # seconds per gateway request
     liteparse_bin: str = "lit"  # LiteParse command that reads PDF, Office and image files
     liteparse_timeout: float = 300.0  # seconds LiteParse may take per file
@@ -30,12 +39,18 @@ class Settings:
     rebuild_failure_threshold: float = 0.0  # share of Documents (0 to 1) that may fail for a Rebuild to go live
 
     def __post_init__(self):
+        object.__setattr__(self, "retrieval", RetrievalMode(self.retrieval))
         if self.chunk_tokens < 1:
             raise ValueError(f"chunk_tokens must be at least 1, got {self.chunk_tokens!r}")
         if not 0 <= self.chunk_overlap < self.chunk_tokens:
             raise ValueError(
                 f"chunk_overlap must be at least 0 and smaller than chunk_tokens "
                 f"({self.chunk_tokens}), got {self.chunk_overlap!r}")
+        if self.embed_attempts < 1:
+            raise ValueError(f"embed_attempts must be at least 1, got {self.embed_attempts!r}")
+        if self.embed_retry_backoff < 0:
+            raise ValueError(
+                f"embed_retry_backoff must not be negative, got {self.embed_retry_backoff!r}")
         if not 0.0 <= self.rebuild_failure_threshold <= 1.0:  # also false for NaN
             raise ValueError(
                 "rebuild_failure_threshold must be between 0 and 1, "

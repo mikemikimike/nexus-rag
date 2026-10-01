@@ -7,7 +7,8 @@ model_list:
       api_base: http://LOCAL_LLM_HOST:8000/v1
       api_key: none
 
-  # 2) Embedding model for Sync and search (name must match RAG_EMBED_MODEL in the env file)
+  # 2) Embedding model for Sync and search (name must match RAG_EMBED_MODEL in the env file).
+  #    Without one, set RAG_RETRIEVAL=keyword in the env file and leave this entry out.
   - model_name: local-embed
     litellm_params:
       model: openai/YOUR-EMBEDDING-MODEL

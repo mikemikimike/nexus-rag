@@ -89,12 +89,20 @@ def test_a_placeholder_token_fails(smoke):
 
 
 def test_an_unset_model_gateway_fails_instead_of_using_a_default(smoke):
-    code, out, _ = smoke(LITELLM_BASE_URL="", RAG_EMBED_MODEL="")
+    code, out, _ = smoke(LITELLM_BASE_URL="")
 
     assert code == 1
     failed = line(out, "Model gateway")
     assert failed.startswith("[FAIL]") and "LITELLM_BASE_URL" in failed
-    assert "RAG_EMBED_MODEL" in failed
+
+
+def test_hybrid_retrieval_without_an_embedding_model_fails_naming_both_ways_out(smoke):
+    code, out, _ = smoke(RAG_EMBED_MODEL="")
+
+    assert code == 1
+    failed = line(out, "settings")
+    assert failed.startswith("[FAIL]") and "RAG_EMBED_MODEL" in failed
+    assert "RAG_RETRIEVAL=keyword" in failed
 
 
 def test_an_unreachable_gateway_fails_with_its_reason(smoke):
@@ -131,7 +139,7 @@ def test_a_rerank_model_the_gateway_cannot_serve_fails(smoke):
 
 def test_a_rerank_model_without_a_named_gateway_fails_with_a_reason():
     out = io.StringIO()
-    environment = {**ENVIRONMENT, "LITELLM_BASE_URL": "", "RAG_EMBED_MODEL": "",
+    environment = {**ENVIRONMENT, "LITELLM_BASE_URL": "", "RAG_RETRIEVAL": "keyword",
                    "RAG_RERANK_MODEL": "rerank-model"}
 
     code = main([], environment, client=QdrantClient(":memory:"), run=Host(), stdout=out)
@@ -236,3 +244,43 @@ def test_an_unknown_argument_is_a_usage_error(smoke):
     code, _, _ = smoke("--nonsense")
 
     assert code == 2
+
+
+# --- the Retrieval mode ----------------------------------------------------------------
+
+KEYWORD_ONLY = {"RAG_RETRIEVAL": "keyword", "RAG_EMBED_MODEL": "", "LITELLM_BASE_URL": ""}
+
+
+def smoke_without_a_gateway(gateway=None, **environment):
+    out = io.StringIO()
+    code = main([], {**ENVIRONMENT, **KEYWORD_ONLY, **environment}, gateway=gateway,
+                client=QdrantClient(":memory:"), run=Host(), stdout=out)
+    return code, out.getvalue()
+
+
+def test_a_keyword_only_installation_passes_with_no_gateway_at_all():
+    code, out = smoke_without_a_gateway()
+
+    assert code == 0, out
+    assert "[FAIL]" not in out
+    skipped = line(out, "Model gateway")
+    assert skipped.startswith("[SKIP]") and "keyword" in skipped
+    assert line(out, "Rerank").startswith("[SKIP]")
+    assert line(out, "Knowledge index").startswith("[ OK ]")
+
+
+def test_a_keyword_only_installation_with_a_reranker_still_checks_the_gateway_for_it():
+    code, out = smoke_without_a_gateway(
+        FakeModelGateway(), LITELLM_BASE_URL="http://gateway.example.test:4000/v1",
+        RAG_RERANK_MODEL="rerank-model")
+
+    assert code == 0, out
+    assert line(out, "Model gateway").startswith("[SKIP]")
+    assert line(out, "Rerank").startswith("[ OK ]")
+
+
+def test_hybrid_retrieval_with_a_dead_embedding_model_fails_not_skips(smoke):
+    code, out, _ = smoke(gateway=DownGateway())
+
+    assert code == 1
+    assert line(out, "Model gateway").startswith("[FAIL]")

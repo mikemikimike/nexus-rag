@@ -10,7 +10,7 @@ _EXPORTS = {
     "local_rag.exclusive": ["SyncInProgress"],
     "local_rag.generations": ["CorruptIndex", "NoPreviousIndex"],
     "local_rag.index": ["Health", "IndexStatus", "KnowledgeIndex", "Passage", "RebuildReport",
-                        "SyncReport"],
+                        "SearchResults", "SyncReport"],
     "local_rag.index_format": ["Access", "IncompatibleIndex", "IndexFormat", "IndexReadOnly",
                               "IndexRefused"],
     "local_rag.journal": ["LastSync"],

@@ -37,7 +37,7 @@ A named grouping of Documents (a Confluence space, or a top-level folder) that a
 _Avoid_: project, namespace, category
 
 **Passage**:
-A chunk of a Document that is embedded and returned by search.
+A chunk of a Document that is indexed, and embedded too in a Hybrid index, and returned by search.
 _Avoid_: chunk, node, snippet
 
 **Sync**:
@@ -45,7 +45,7 @@ Bringing the Knowledge index into agreement with a Corpus, adding, replacing and
 _Avoid_: ingest, refresh, update
 
 **Rebuild**:
-A Sync that re-embeds every Document into a fresh index, needed when the embedding model or chunking changes, and promoted to live only if it is complete enough.
+A Sync that adds every Document again into a fresh index (embedding it, in a Hybrid index), needed when the Retrieval mode, embedding model or chunking changes, and promoted to live only if it is complete enough. A Document whose embedding keeps failing counts as failed, and the Rebuild is promoted only if failures stay within the threshold.
 _Avoid_: reindex, full refresh
 
 **Live index**:
@@ -57,8 +57,16 @@ The one generation kept from before the last promotion, which an operator can sw
 _Avoid_: backup, snapshot, old collection
 
 **Index format**:
-What an index records about how it was built (schema version, sparse encoder parameters, chunk size and overlap, embedding model name and dimension), compared with the running code after an upgrade. An index whose format differs is served as a Read-only index if it can still be searched and refused if it cannot; it is never rebuilt automatically. An index whose records are corrupt or unreadable is reported, never treated as empty.
+What an index records about how it was built (schema version, Retrieval mode, sparse encoder parameters, chunk size and overlap, and for a Hybrid index the embedding model name and dimension), compared with the running code after an upgrade. An index whose format differs is served as a Read-only index if it can still be searched and refused if it cannot; it is never rebuilt automatically. An index whose records are corrupt or unreadable is reported, never treated as empty.
 _Avoid_: version, schema
+
+**Retrieval mode**:
+How an index finds Passages, chosen by the operator and recorded in the Index format: _Hybrid_ (meaning and keywords, which needs an embedding model) or _Keyword-only_ (keywords alone, which needs none). Choosing Hybrid without naming an embedding model is a settings error, never a silent downgrade.
+_Avoid_: degraded mode, BM25 mode, no-embedding mode
+
+**Keyword fallback**:
+A search served by keywords alone because the embedding model could not be reached for that query, which the caller is told.
+_Avoid_: degraded mode, silent fallback
 
 **Read-only index**:
 A Live index whose Index format differs from the running code but can still be searched. It is served with a warning and refuses Sync until an operator runs a Rebuild.
@@ -69,7 +77,7 @@ What an operator can ask of the Knowledge index: the Live index generation, Docu
 _Avoid_: info, stats
 
 **Health**:
-Whether Qdrant and the Knowledge index can be reached, for monitoring.
+Whether Qdrant and the Knowledge index can be reached, for monitoring. Whether the embedding model worked the last time it was used is noted, but an unreachable embedding model does not make Health fail, since search still answers by Keyword fallback.
 _Avoid_: liveness, ping
 
 **Model gateway**:

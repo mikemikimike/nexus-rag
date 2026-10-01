@@ -24,8 +24,9 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 
 from local_rag.environment import SettingsError, settings_from_environment
-from local_rag.gateway_litellm import LiteLLMGateway
-from local_rag.index import KnowledgeIndex, Passage
+from local_rag.gateway_litellm import gateway_from_settings
+from local_rag.index import KnowledgeIndex, Passage, SearchResults
+from local_rag.settings import RetrievalMode
 
 MAX_TOP_K = 15  # most Passages one search_docs call may ask for
 DEFAULT_HOST = "127.0.0.1"
@@ -34,21 +35,31 @@ DEFAULT_PORT = 8765
 type Serve = Callable[..., None]  # (app, *, host, port, certfile, keyfile), blocks until stopped
 
 
+_SEARCH_DESCRIPTION = {
+    RetrievalMode.HYBRID: """Hybrid (semantic + keyword) search over indexed pages and attachments.
+Returns the best passages with title, link, page_id and space.
+Exact identifiers (error codes, hostnames, ticket ids) work well in the query.
+Optional `space` restricts the search to one space (see list_spaces).
+For the whole page use get_page with the returned page_id.""",
+    RetrievalMode.KEYWORD: """Keyword search over indexed pages and attachments. It matches the
+words you give, not their meaning: use the terms the page itself would use.
+Returns the best passages with title, link, page_id and space.
+Exact identifiers (error codes, hostnames, ticket ids) work well in the query.
+Optional `space` restricts the search to one space (see list_spaces).
+For the whole page use get_page with the returned page_id.""",
+}
+
+
 def build_server(index: KnowledgeIndex) -> MCPServer:
     server = MCPServer("local-rag", instructions=(
         "Search the team's indexed internal documentation."))
 
-    @server.tool()
+    @server.tool(description=_SEARCH_DESCRIPTION[index.retrieval])
     async def search_docs(query: str, top_k: int = 6, space: str = "") -> str:
-        """Hybrid (semantic + keyword) search over indexed pages and attachments.
-        Returns the best passages with title, link, page_id and space.
-        Exact identifiers (error codes, hostnames, ticket ids) work well in the query.
-        Optional `space` restricts the search to one space (see list_spaces).
-        For the whole page use get_page with the returned page_id."""
         limit = max(1, min(top_k, MAX_TOP_K))
-        passages = await anyio.to_thread.run_sync(
+        results = await anyio.to_thread.run_sync(
             lambda: index.search(query, k=limit, space=space or None))
-        return _format_passages(passages)
+        return _format_results(results)
 
     @server.tool()
     async def list_spaces() -> str:
@@ -103,7 +114,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
         port = _port(environ)
         if index is None:
             settings = settings_from_environment(environ)
-            index = KnowledgeIndex(settings, LiteLLMGateway.from_settings(settings))
+            index = KnowledgeIndex(settings, gateway_from_settings(settings))
     except (SettingsError, ValueError) as error:
         print(f"error: {error}", file=err)
         return 2
@@ -166,6 +177,11 @@ class BearerAuth:
         presented = presented.strip()
         # Compare against every token, so the time taken does not say which one matched.
         return any([hmac.compare_digest(presented, token) for token in self._tokens])
+
+
+def _format_results(results: SearchResults) -> str:
+    text = _format_passages(results)
+    return f"Note: {results.notice}\n\n{text}" if results.notice else text
 
 
 def _format_passages(passages: list[Passage]) -> str:
