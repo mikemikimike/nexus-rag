@@ -161,15 +161,18 @@ def test_a_repository_that_cannot_be_fetched_is_a_failure_not_an_empty_repositor
     assert report.removed == 0
 
 
-def test_a_failed_repository_keeps_its_indexed_documents(gitlab, cache):
+def test_a_failed_ref_keeps_its_indexed_documents(gitlab, cache):
+    gitlab.commit(REPOSITORY, {"extra.py": "x = 1\n"}, branch="gone")
+    both = (Repository(REPOSITORY, "main"), Repository(REPOSITORY, "gone"))
     index = KnowledgeIndex(Settings(), FakeModelGateway())
-    index.sync(corpus(gitlab, cache))
+    index.sync(corpus(gitlab, cache, *both))
+    gitlab.git(REPOSITORY, "branch", "-D", "gone")
 
-    report = index.sync(corpus(gitlab, cache, Repository(REPOSITORY, "no-such-branch")))
+    report = index.sync(corpus(gitlab, cache, *both))
 
-    assert list(report.failures) == [f"{REPOSITORY}@no-such-branch"]
+    assert list(report.failures) == [f"{REPOSITORY}@gone"]
     assert report.removed == 0
-    assert index.get_document(f"gitlab:{REPOSITORY}@main:README.md") is not None
+    assert index.get_document(f"gitlab:{REPOSITORY}@gone:extra.py") is not None
 
 
 def test_the_token_never_appears_in_a_failure(cache):
@@ -212,3 +215,153 @@ refs = ["main"]
 
     assert built.name == "code"
     assert document_ids(built) == ids(*FILES)
+
+
+# Tracked refs
+
+def tracked(gitlab):
+    """A feature branch that changes one file of the Repository and adds another."""
+    gitlab.commit(REPOSITORY, {"src/ledger.py": "def post_entry(): return 'feature'\n",
+                               "src/hook.py": "def notify(): pass\n"}, branch="feature/x")
+
+
+def feature_corpus(gitlab, cache, **options):
+    return corpus(gitlab, cache, Repository(REPOSITORY, "main"),
+                  Repository(REPOSITORY, "feature/x", primary=False), **options)
+
+
+def test_the_same_file_at_two_tracked_refs_is_two_documents(gitlab, cache):
+    tracked(gitlab)
+
+    found = document_ids(feature_corpus(gitlab, cache))
+
+    assert f"{REPOSITORY}@main:src/ledger.py" in found
+    assert f"{REPOSITORY}@feature/x:src/ledger.py" in found
+    assert f"{REPOSITORY}@main:src/hook.py" not in found
+    assert f"{REPOSITORY}@feature/x:src/hook.py" in found
+
+
+def test_a_document_says_its_repository_ref_and_whether_the_ref_is_primary(gitlab, cache):
+    tracked(gitlab)
+    both = feature_corpus(gitlab, cache)
+
+    main_file = both.fetch(f"{REPOSITORY}@main:src/ledger.py")
+    feature_file = both.fetch(f"{REPOSITORY}@feature/x:src/ledger.py")
+
+    assert (main_file.repository, main_file.ref, main_file.primary) == (REPOSITORY, "main", True)
+    assert (feature_file.repository, feature_file.ref, feature_file.primary) == (
+        REPOSITORY, "feature/x", False)
+    assert b"feature" in feature_file.content and b"feature" not in main_file.content
+    assert feature_file.url == f"{gitlab.url}/{REPOSITORY}/-/blob/feature/x/src/ledger.py"
+
+
+def test_a_ref_excludes_its_own_globs_on_top_of_the_defaults(gitlab, cache):
+    gitlab.commit(REPOSITORY, {"docs/guide.md": "guide\n", "src/keep.py": "x = 1\n",
+                               "src/skip_me.py": "y = 1\n", "vendor/x.py": "z = 1\n"},
+                  branch="feature/x")
+    both = corpus(gitlab, cache, Repository(REPOSITORY, "main"),
+                  Repository(REPOSITORY, "feature/x", primary=False,
+                             exclude=("docs/**", "skip_*.py")))
+
+    found = {i.removeprefix(f"{REPOSITORY}@feature/x:") for i in document_ids(both)
+             if "@feature/x:" in i}
+
+    assert "src/keep.py" in found
+    assert not found & {"docs/guide.md", "src/skip_me.py", "vendor/x.py"}
+    assert f"{REPOSITORY}@main:README.md" in document_ids(both)
+
+
+def test_a_deleted_tracked_ref_fails_alone_and_the_others_still_remove_stale_documents(
+        gitlab, cache):
+    tracked(gitlab)
+    index = KnowledgeIndex(Settings(), FakeModelGateway())
+    index.sync(feature_corpus(gitlab, cache))
+    gitlab.git(REPOSITORY, "branch", "-D", "feature/x")
+    gitlab.commit(REPOSITORY, {"Makefile": None})  # a stale Document under main
+
+    listing = feature_corpus(gitlab, cache).list()
+    report = index.sync(feature_corpus(gitlab, cache))
+
+    assert list(listing_failures(listing)) == [f"{REPOSITORY}@feature/x"]
+    assert {r.parts for r in listing} == {(f"{REPOSITORY}@main",)}
+    assert list(report.failures) == [f"{REPOSITORY}@feature/x"]
+    assert report.removed == 1  # the Makefile of main, not the feature branch's Documents
+    assert index.get_document(f"gitlab:{REPOSITORY}@feature/x:src/hook.py") is not None
+    assert index.get_document(f"gitlab:{REPOSITORY}@main:Makefile") is None
+
+
+def test_with_no_ref_a_search_sees_only_primary_refs_and_a_ref_or_repository_narrows_it(
+        gitlab, cache):
+    tracked(gitlab)
+    gitlab.commit("platform/other", {"README.md": "Other ledger service notes\n"})
+    index = KnowledgeIndex(Settings(), FakeModelGateway())
+    index.sync(corpus(gitlab, cache, Repository(REPOSITORY, "main"),
+                      Repository(REPOSITORY, "feature/x", primary=False),
+                      Repository("platform/other", "main"), name="code"))
+
+    plain = index.search("post_entry ledger", k=15)
+    on_feature = index.search("post_entry ledger", k=15, ref="feature/x")
+    in_other = index.search("ledger", k=15, repository="platform/other")
+
+    assert plain and {(p.repository, p.ref) for p in plain} <= {
+        (REPOSITORY, "main"), ("platform/other", "main")}
+    assert on_feature and {(p.repository, p.ref) for p in on_feature} == {
+        (REPOSITORY, "feature/x")}
+    assert in_other and {p.repository for p in in_other} == {"platform/other"}
+
+
+def test_a_search_with_no_ref_leaves_non_code_corpora_alone(gitlab, cache):
+    from local_rag.corpus import Document, InMemoryCorpus
+    tracked(gitlab)
+    index = KnowledgeIndex(Settings(), FakeModelGateway())
+    index.sync(InMemoryCorpus([Document("1", "Ledger notes", "u", "WIKI", "1",
+                                        "ledger notes")], name="wiki"))
+    index.sync(feature_corpus(gitlab, cache, name="code"))
+
+    found = index.search("ledger notes", k=15)
+
+    assert any(p.corpus == "wiki" and p.repository is None for p in found)
+    assert not any(p.ref == "feature/x" for p in found)
+
+
+def declared_code(tmp_path, cache, refs):
+    file = tmp_path / "corpora.toml"
+    file.write_text(f'[corpus.code]\nkind = "gitlab"\ncache = "{cache}"\n'
+                    f'[[corpus.code.repositories]]\npath = "{REPOSITORY}"\nrefs = {refs}\n')
+    return Declaration.read(file)
+
+
+def test_the_declaration_lists_tracked_refs_with_excludes(gitlab, cache, tmp_path):
+    tracked(gitlab)
+    environ = {"GITLAB_URL": gitlab.url, "GITLAB_TOKEN": TOKEN}
+
+    built = declared_code(
+        tmp_path, cache, '["main", {name = "feature/x", exclude = ["src/hook.py"]}]'
+    ).corpus("code", environ)
+
+    assert {r.ref: r.primary for r in map(built.fetch, document_ids(built))} == {
+        "main": True, "feature/x": False}  # the first listed is the Primary ref
+    assert f"{REPOSITORY}@feature/x:src/hook.py" not in document_ids(built)
+
+
+def test_the_declaration_can_mark_another_ref_primary(gitlab, cache, tmp_path):
+    tracked(gitlab)
+    environ = {"GITLAB_URL": gitlab.url, "GITLAB_TOKEN": TOKEN}
+
+    built = declared_code(
+        tmp_path, cache, '["main", {name = "feature/x", primary = true}]'
+    ).corpus("code", environ)
+
+    assert {r.ref: r.primary for r in map(built.fetch, document_ids(built))} == {
+        "main": False, "feature/x": True}
+
+
+@pytest.mark.parametrize("refs", [
+    '[]', '["main", "main"]', '[{name = "a", primary = true}, {name = "b", primary = true}]',
+    '[{primary = true}]', '[{name = "a", colour = "red"}]', '[{name = "a", exclude = "x"}]',
+    '[{name = "a", primary = "yes"}]'])
+def test_the_declaration_rejects_unusable_refs(tmp_path, refs):
+    from local_rag.declaration import DeclarationError
+    with pytest.raises(DeclarationError):
+        declared_code(tmp_path, tmp_path / "c", refs).corpus(
+            "code", {"GITLAB_URL": "x", "GITLAB_TOKEN": "y"})

@@ -10,14 +10,20 @@ A Document's id is ``<repository path>@<ref>:<file path>``, its version the file
 SHA, its Space the Repository's parent group (empty for a top-level project) and its title
 ``<repository name>/<file path>``. A Repository that cannot be read is a failure of its part
 of the listing, ``<repository path>@<ref>``, never an empty Repository.
+
+A Repository may have several Tracked refs, each a ``Repository`` here with the same path: the
+same file at two of them is two Documents. A Tracked ref that no longer exists (a merged and
+deleted branch) fails alone. Each ref may add exclude globs to the defaults.
 """
 import base64
 import fnmatch
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
@@ -83,6 +89,8 @@ class Repository:
 
     path: str  # the project's full path, ``platform/payments``
     ref: str  # a branch or a tag
+    primary: bool = True  # whether this is the Repository's Primary ref
+    exclude: tuple[str, ...] = ()  # globs left out besides the defaults: a path or a file name
 
     @property
     def part(self) -> str:
@@ -114,13 +122,27 @@ class GitLabCorpus:
 
     def list(self) -> Listing:
         refs, failures = [], {}
+        fetched: dict[str, str | None] = {}  # repository path -> why it could not be fetched
         for repository in self._repositories.values():
             try:
-                refs += [DocumentRef(_document_id(repository, f.path), f.blob)
+                if repository.path not in fetched:
+                    fetched[repository.path] = self._fetched(repository)
+                if fetched[repository.path]:
+                    raise GitLabError(fetched[repository.path])
+                refs += [DocumentRef(_document_id(repository, f.path), f.blob,
+                                     (repository.part,))
                          for f in self._files(repository)]
             except GitLabError as error:
                 failures[repository.part] = str(error)
         return Listing(refs, failures)
+
+    def _fetched(self, repository: Repository) -> str | None:
+        """Brings the Repository's mirror up to date once for all its refs; None, or why not."""
+        try:
+            self._update(repository, self._mirror(repository))
+        except GitLabError as error:
+            return str(error)
+        return None
 
     def fetch(self, document_id: str) -> RawDocument:
         repository, path = self._locate(document_id)
@@ -129,13 +151,15 @@ class GitLabCorpus:
         if commit is None:  # fetched without a listing: read the ref as the mirror has it
             self._update(repository, mirror)
             commit = self._commit(repository)
+            self._pinned[repository.part] = commit
         blob = self._git("rev-parse", f"{commit}:{path}", cwd=mirror).strip()
         content = self._git("cat-file", "blob", blob, cwd=mirror, binary=True)
         parent, _, name = repository.path.rpartition("/")
         return RawDocument(
             id=document_id, title=f"{name}/{path}", space=parent, version=blob,
             url=f"{self._url}/{repository.path}/-/blob/{quote(repository.ref)}/{quote(path)}",
-            content=content, media_type=_media_type(path))
+            content=content, media_type=_media_type(path), repository=repository.path,
+            ref=repository.ref, primary=repository.primary)
 
     def _locate(self, document_id: str) -> tuple[Repository, str]:
         repository_and_ref, _, path = document_id.partition(":")
@@ -146,7 +170,6 @@ class GitLabCorpus:
 
     def _files(self, repository: Repository) -> Sequence[_File]:
         mirror = self._mirror(repository)
-        self._update(repository, mirror)
         commit = self._commit(repository)
         self._pinned[repository.part] = commit
         listed = self._git("ls-tree", "-r", "-l", "-z", commit, cwd=mirror, binary=True)
@@ -159,7 +182,7 @@ class GitLabCorpus:
             if int(fields[3]) > self._max_size or int(fields[3]) == 0:
                 continue
             media_type = _wanted(path)
-            if media_type:
+            if media_type and not _excluded(path, repository.exclude):
                 candidates.append(_File(fields[2], path, media_type))
         verdicts = self._sniff(candidates, mirror)
         return [f for f in candidates if verdicts[f.blob, f.media_type not in _PROSE]]
@@ -254,6 +277,33 @@ def _wanted(path: str) -> str | None:
     if any(fnmatch.fnmatchcase(pure.name, pattern) for pattern in _EXCLUDED_NAMES):
         return None
     return _NAMES.get(pure.name) or _SUFFIXES.get(pure.suffix.lower())
+
+
+def _excluded(path: str, globs: Sequence[str]) -> bool:
+    """Whether a file matches one of the Tracked ref's globs: ``docs/**`` or ``src/*_gen.py``
+    against its path, or a glob with no ``/`` (``*.sql``) against its name at any depth."""
+    name = PurePosixPath(path).name
+    return any(_glob(glob).fullmatch(path) or ("/" not in glob and fnmatch.fnmatchcase(name, glob))
+               for glob in globs)
+
+
+@lru_cache(maxsize=None)
+def _glob(glob: str) -> re.Pattern:
+    """``*`` and ``?`` stay within a directory, ``**`` crosses them (``a/**/b`` also matches
+    ``a/b``, and a trailing ``/**`` everything below)."""
+    out, i = "", 0
+    while i < len(glob):
+        if glob.startswith("**/", i):
+            out, i = out + "(?:.*/)?", i + 3
+        elif glob.startswith("**", i):
+            out, i = out + ".*", i + 2
+        elif glob[i] == "*":
+            out, i = out + "[^/]*", i + 1
+        elif glob[i] == "?":
+            out, i = out + "[^/]", i + 1
+        else:
+            out, i = out + re.escape(glob[i]), i + 1
+    return re.compile(out)
 
 
 def _is_worth_indexing(content: bytes, *, code: bool) -> bool:

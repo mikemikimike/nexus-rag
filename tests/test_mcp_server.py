@@ -368,3 +368,26 @@ def test_a_hybrid_server_without_an_embedding_model_refuses_to_start_and_says_wh
 
     assert code != 0
     assert "RAG_EMBED_MODEL" in capsys.readouterr().err
+
+
+def test_search_docs_narrows_to_a_repository_or_a_tracked_ref_and_shows_the_ref(index):
+    from local_rag.corpus import RawDocument
+
+    def code(repository, ref, primary, text):
+        return RawDocument(
+            id=f"{repository}@{ref}:a.py", title=f"{repository}/a.py", url="https://src.example.test/a",
+            space="platform", version=text, content=text.encode(), media_type="text/x-python",
+            repository=repository, ref=ref, primary=primary)
+    index.sync(InMemoryCorpus([
+        code("platform/pay", "main", True, "def settle(): pass  # zebrafish"),
+        code("platform/pay", "feature/x", False, "def settle(): pass  # zebrafish"),
+        code("platform/other", "main", True, "def settle(): pass  # zebrafish")], name="code"))
+    with serving(index) as base_url:
+        plain = call(base_url, "search_docs", {"query": "zebrafish"})
+        feature = call(base_url, "search_docs", {"query": "zebrafish", "ref": "feature/x"})
+        other = call(base_url, "search_docs",
+                     {"query": "zebrafish", "repository": "platform/other"})
+
+    assert "ref: feature/x" not in plain and plain.count("ref: main") == 2
+    assert "ref: feature/x" in feature and "ref: main" not in feature
+    assert "platform/other/a.py" in other and "platform/pay/a.py" not in other
