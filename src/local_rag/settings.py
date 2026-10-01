@@ -34,6 +34,7 @@ class Settings:
     ocr: bool = False  # let LiteParse run OCR (needs OCR language data installed)
     chunk_tokens: int = 400  # target Passage size
     chunk_overlap: int = 60  # tokens shared between neighbouring Passages
+    code_chunk_tokens: int = 800  # target size of a code Passage, which is split by lines
     max_passages_per_document: int = 2  # most Passages one Document may add to a result
     rerank: bool = False  # reorder results through the Model gateway's rerank
     sync_lock_stale_after: float = 120.0  # seconds without a heartbeat before a crashed Sync's lock is taken over
@@ -53,6 +54,9 @@ class Settings:
             raise ValueError(
                 f"chunk_overlap must be at least 0 and smaller than chunk_tokens "
                 f"({self.chunk_tokens}), got {self.chunk_overlap!r}")
+        if self.code_chunk_tokens < 1:
+            raise ValueError(
+                f"code_chunk_tokens must be at least 1, got {self.code_chunk_tokens!r}")
         if self.embed_attempts < 1:
             raise ValueError(f"embed_attempts must be at least 1, got {self.embed_attempts!r}")
         if self.embed_retry_backoff < 0:

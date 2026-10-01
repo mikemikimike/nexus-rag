@@ -74,6 +74,7 @@ def settings_from_environment(environ: Mapping[str, str], *,
         ocr=(True if text("RAG_OCR") == "1" else None),
         chunk_tokens=number("RAG_CHUNK_TOKENS", int),
         chunk_overlap=number("RAG_CHUNK_OVERLAP", int),
+        code_chunk_tokens=number("RAG_CODE_CHUNK_TOKENS", int),
         sync_lock_stale_after=number("RAG_SYNC_LOCK_STALE_AFTER", float),
         rebuild_failure_threshold=number("RAG_REBUILD_FAILURE_THRESHOLD", float),
     )

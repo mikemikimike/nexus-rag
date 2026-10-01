@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, replace
 
 from qdrant_client import QdrantClient, models
 
-from local_rag.chunker import Chunker
+from local_rag.chunker import Chunker, Piece
 from local_rag.corpus import (
     Corpus, Document, DocumentRef, RawDocument, check_corpus_name, listing_failures, qualified_id)
 from local_rag.exclusive import ExclusiveRun, Lease, SyncInProgress
@@ -36,6 +36,24 @@ class Passage:
     corpus: str | None = None  # None for an index built before named Corpora
     repository: str | None = None  # code: the Repository's path
     ref: str | None = None  # code: the Tracked ref the Passage was read at
+    path: str | None = None  # code: the file's path within the Repository
+    start_line: int | None = None  # 1-based, inclusive
+    end_line: int | None = None
+    symbol: str | None = None  # the class or function it sits in, if the splitter knows
+
+    @property
+    def line_range(self) -> str | None:
+        """``10-20``, or ``10`` for one line; None for a Passage that is not code."""
+        if self.start_line is None:
+            return None
+        if self.end_line in (None, self.start_line):
+            return str(self.start_line)
+        return f"{self.start_line}-{self.end_line}"
+
+    @property
+    def link(self) -> str:
+        """Where to read it: the Document's URL, at its lines for code (GitLab's anchor)."""
+        return self.url if self.start_line is None else f"{self.url}#L{self.line_range}"
 
 
 class SearchResults(list[Passage]):
@@ -439,7 +457,9 @@ class KnowledgeIndex:
             url=p.payload["url"], space=p.payload["space"], text=p.payload["text"],
             score=float(p.score), parent_id=p.payload.get("parent_id"),
             corpus=p.payload.get("corpus"), repository=p.payload.get("repository"),
-            ref=p.payload.get("ref"))
+            ref=p.payload.get("ref"), path=p.payload.get("path"),
+            start_line=p.payload.get("start_line"), end_line=p.payload.get("end_line"),
+            symbol=p.payload.get("symbol"))
             for p in points]
         passages = cap_per_document(passages, settings.max_passages_per_document)
         if settings.rerank:
@@ -640,12 +660,13 @@ class KnowledgeIndex:
             space=raw.space, version=raw.version, text=self._extractor.extract(raw),
             parent_id=None if raw.parent_id is None else qualified_id(corpus.name, raw.parent_id),
             media_type=raw.media_type, corpus=corpus.name, parts=parts,
-            repository=raw.repository, ref=raw.ref, primary=raw.primary)
+            repository=raw.repository, ref=raw.ref, path=raw.path,
+            primary=raw.primary)
 
     def _add(self, document: Document, collection: str) -> None:
         # A Document with no text is still found by its title: it gets one empty Passage.
-        chunks = self._chunker.split(document.text, document.media_type) or [""]
-        contents = [f"{document.title}\n\n{chunk}" for chunk in chunks]  # the title as context
+        pieces = self._chunker.pieces(document.text, document.media_type) or [Piece("")]
+        contents = [f"{_context(document, piece)}\n\n{piece.text}" for piece in pieces]
         if self._settings.retrieval is RetrievalMode.HYBRID:
             dense = self._embed(contents)
             if len(dense) != len(contents):
@@ -656,7 +677,7 @@ class KnowledgeIndex:
         self._ensure_collection(collection, None if dense[0] is None else len(dense[0]))
         document_point = _document_point(document)
         passages = []
-        for number, (chunk, content, vector) in enumerate(zip(chunks, contents, dense)):
+        for number, (piece, content, vector) in enumerate(zip(pieces, contents, dense)):
             sparse = self._sparse.encode_document(content)
             vectors = {"bm25": models.SparseVector(indices=sparse.indices, values=sparse.values)}
             if vector is not None:
@@ -666,9 +687,10 @@ class KnowledgeIndex:
                 vector=vectors,
                 payload={"document_id": document.id, "version": document.version,
                          "title": document.title, "url": document.url,
-                         "space": document.space, "text": chunk,
+                         "space": document.space, "text": piece.text,
                          "parent_id": document.parent_id, "corpus": document.corpus,
-                         "parts": list(document.parts), **_of_code(document)}))
+                         "parts": list(document.parts), **_of_code(document),
+                         **_code_payload(document, piece)}))
         # Write the new Passages first, then delete this Document's leftover old ones (those
         # of an earlier, longer version included), so a failure in between never leaves the
         # Document missing from search.
@@ -789,6 +811,22 @@ class _Stored:
         if not self.recorded or not self.parts:
             return True
         return not self.parts.isdisjoint(failures)
+
+
+def _context(document: Document, piece: Piece) -> str:
+    """What is put before a Passage's text when it is embedded and keyword-indexed: a
+    Document's title, or for code its Repository, path and symbol."""
+    if piece.start_line is None or not (document.repository or document.path):
+        return document.title
+    return "/".join(filter(None, (document.repository, document.path, piece.symbol)))
+
+
+def _code_payload(document: Document, piece: Piece) -> dict:
+    """What a code Passage adds to the Document's ``_of_code`` payload: its file path and lines."""
+    if piece.start_line is None:
+        return {}
+    return {"path": document.path,
+            "start_line": piece.start_line, "end_line": piece.end_line, "symbol": piece.symbol}
 
 
 def _document_point(document: Document) -> models.PointStruct:

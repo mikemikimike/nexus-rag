@@ -189,7 +189,12 @@ def _print_failures(failures: Mapping[str, str], out: TextIO) -> None:
 
 def _print_passage(number: int, passage: Passage, out: TextIO) -> None:
     print(f"{number}. {passage.title}", file=out)
-    print(f"   link: {passage.url}", file=out)
+    print(f"   link: {passage.link}", file=out)
+    if passage.start_line is not None:
+        print(f"   file: {passage.path or passage.title}", file=out)
+        print(f"   lines: {passage.line_range}", file=out)
+        if passage.symbol:
+            print(f"   symbol: {passage.symbol}", file=out)
     print(f"   space: {passage.space}", file=out)
     if passage.ref:
         print(f"   ref: {passage.ref}", file=out)
@@ -213,6 +218,12 @@ def _chunks(f) -> str:
     return f"chunks of {f.chunk_tokens} tokens overlapping by {f.chunk_overlap}"
 
 
+def _code_chunks(f) -> str:
+    if f.code_chunk_tokens is None or f.code_splitting is None:
+        return ", code chunking not recorded"
+    return f", code split by {f.code_splitting} into {f.code_chunk_tokens} tokens"
+
+
 def _print_status(status: IndexStatus, out: TextIO) -> None:
     def show(name: str, value) -> None:
         print(f"{name + ':':<13}{'unknown' if value is None else value}", file=out)
@@ -227,7 +238,7 @@ def _print_status(status: IndexStatus, out: TextIO) -> None:
         f = status.format
         show("format", f"schema {f.schema_version}, {_embedding(f)}, sparse k1={f.sparse.k1:g} "
                        f"b={f.sparse.b:g} avg_doc_length={f.sparse.avg_doc_length:g}, "
-                       f"{_chunks(f)}")
+                       f"{_chunks(f)}{_code_chunks(f)}")
     if status.last_sync is None:
         show("last sync", "never")
     else:

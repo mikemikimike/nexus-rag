@@ -17,6 +17,14 @@ def check_corpus_name(name: str) -> str:
     return name
 
 
+_PROSE_MEDIA_TYPES = frozenset({"text/plain", "text/markdown", "text/x-rst", "text/html"})
+
+
+def is_code(media_type: str) -> bool:
+    """Whether a Media type is source code, which is read by lines: text that is not prose."""
+    return media_type.startswith("text/") and media_type not in _PROSE_MEDIA_TYPES
+
+
 def qualified_id(corpus: str, document_id: str) -> str:
     """The id a Document has in the Knowledge index: its Corpus's name, then its own id."""
     return f"{corpus}:{document_id}"
@@ -37,6 +45,7 @@ class Document:
     repository: str | None = None  # code: the Repository's path; None for other Corpora
     ref: str | None = None  # code: the Tracked ref the file was read at
     primary: bool = True  # code: whether that is the Repository's Primary ref
+    path: str | None = None  # a code file's path within its Repository
 
 
 @dataclass(frozen=True)
@@ -54,6 +63,7 @@ class RawDocument:
     repository: str | None = None  # code: the Repository's path; None for other Corpora
     ref: str | None = None  # code: the Tracked ref the file was read at
     primary: bool = True  # code: whether that is the Repository's Primary ref
+    path: str | None = None  # a code file's path within its Repository
 
 
 @dataclass(frozen=True)

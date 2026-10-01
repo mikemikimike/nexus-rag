@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 from markdownify import markdownify
 
 from local_rag import drawio
-from local_rag.corpus import RawDocument
+from local_rag.corpus import RawDocument, is_code
 from local_rag.settings import Settings
 
 # The file types a folder Corpus recognises, with the media type each is yielded as.
@@ -83,7 +83,13 @@ class Extractor:
                 ocr=self._ocr or media_type.startswith("image/"))
         else:
             raise ExtractionError(f"unsupported media type {media_type}")
-        text = _normalise_whitespace(text)
+        if is_code(media_type):
+            # Code is cited by line number, so nothing but the line endings is touched.
+            text = text.replace("\r\n", "\n")
+            if not text.strip():
+                text = ""
+        else:
+            text = _normalise_whitespace(text)
         if not text:
             raise EmptyExtraction("empty extraction: no text could be read")
         return text
