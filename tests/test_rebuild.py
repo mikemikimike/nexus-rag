@@ -110,7 +110,7 @@ def test_search_keeps_returning_results_throughout_a_rebuild(index):
 
     index.rebuild([SearchingCorpus(DOCUMENTS)])
 
-    assert len(seen) == 3 and all(ids and ids[0] == "dba/ora-00942" for ids in seen)
+    assert len(seen) == 3 and all(ids and ids[0] == "default:dba/ora-00942" for ids in seen)
     assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
 
 
@@ -261,7 +261,7 @@ def test_a_failed_cleanup_does_not_mask_the_error_and_is_swept_by_the_next_rebui
 
     class CrashingCorpus(InMemoryCorpus):
         def fetch(self, document_id):
-            if document_id == "default:dba/ora-12154":
+            if document_id == "dba/ora-12154":
                 raise Crash()
             return super().fetch(document_id)
 
@@ -301,8 +301,8 @@ def test_an_index_written_by_an_earlier_version_keeps_being_served_but_not_synce
     with pytest.raises(IndexReadOnly, match="not recorded"):
         index.sync(InMemoryCorpus([*DOCUMENTS[:2], revised(DOCUMENTS[2], "2", "New.")]))
 
-    assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
-    assert index.get_document("default:garage/battery") == DOCUMENTS[2].text
+    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert index.get_document("garage/battery") == DOCUMENTS[2].text
     assert index.list_spaces() == ["DBA", "GARAGE"]
 
 
@@ -311,7 +311,7 @@ def test_a_rebuild_replaces_an_index_written_by_an_earlier_version_and_cleans_it
 
     index.rebuild([corpus_saying("first")])
     index.switch_back()
-    assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
+    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
     assert "first" != index.get_document("default:dba/ora-00942")
     index.switch_back()
     index.rebuild([corpus_saying("second")])

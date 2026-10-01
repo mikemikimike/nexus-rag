@@ -50,7 +50,7 @@ def test_a_root_page_and_all_its_descendants_are_synced_and_searched(index, site
 
     assert (report.added, report.failed) == (4, 0)
     found = index.search("ORA-00942")[0]
-    assert (found.document_id, found.title, found.space) == ("101", "Fixing ORA-00942", "ENG")
+    assert (found.document_id, found.title, found.space) == ("confluence:101", "Fixing ORA-00942", "ENG")
     assert found.url == "https://wiki.example.test/pages/viewpage.action?pageId=101"
     assert index.search("ZX-9000")[0].document_id == "confluence:103"
     assert index.get_document("confluence:200") is None
@@ -238,7 +238,7 @@ def test_export_failures_count_toward_the_rebuild_threshold(make_index, site):
     site.fail("102", "export")
 
     refused = make_index().rebuild([corpus(site)])
-    assert not refused.promoted and list(refused.failures) == ["102"]
+    assert not refused.promoted and list(refused.failures) == ["confluence:102"]
     assert "1 of 4 Documents failed" in refused.reason
 
     promoted = make_index(rebuild_failure_threshold=0.25).rebuild([corpus(site)])
@@ -253,7 +253,7 @@ def test_a_rebuild_is_refused_when_a_root_listing_failed(make_index, site):
     report = index.rebuild([corpus(site, "100", "200")])
 
     assert not report.promoted and "root 200" in report.reason
-    assert "root 200" in report.failures
+    assert "confluence: root 200" in report.failures
     assert index.get_document("confluence:200") is not None  # the Live index is untouched
     assert len(site.calls("export")) == 5  # the refused Rebuild fetched nothing
 

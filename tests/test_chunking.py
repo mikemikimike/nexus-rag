@@ -42,7 +42,7 @@ def test_a_document_longer_than_one_chunk_is_indexed_as_several_passages():
     status = index.status()
     assert status.documents == 1
     assert status.passages > 1
-    assert len(passages_of(index, "wiki/manual")) == status.passages
+    assert len(passages_of(index, "default:wiki/manual")) == status.passages
 
 
 def test_a_short_document_still_yields_one_passage(index, corpus):
@@ -143,7 +143,7 @@ def test_removing_a_document_removes_all_its_passages():
     assert report.removed == 1
     status = index.status()
     assert (status.documents, status.passages) == (3, 3)
-    assert passages_of(index, "wiki/manual") == []
+    assert passages_of(index, "default:wiki/manual") == []
     assert index.get_document("default:wiki/manual") is None
 
 
@@ -151,17 +151,17 @@ def test_passage_ids_are_the_same_every_time_a_document_is_indexed():
     first = indexed([manual(long_text(30))])
     second = indexed([manual(long_text(30))])
 
-    ids = lambda index: sorted(p.id for p in passages_of(index, "wiki/manual"))
+    ids = lambda index: sorted(p.id for p in passages_of(index, "default:wiki/manual"))
     assert ids(first) == ids(second) and len(ids(first)) > 1
 
 
 def test_resyncing_the_same_text_under_a_new_version_does_not_duplicate_passages():
     index = indexed([manual(long_text(30))])
-    before = sorted(p.id for p in passages_of(index, "wiki/manual"))
+    before = sorted(p.id for p in passages_of(index, "default:wiki/manual"))
 
     index.sync(InMemoryCorpus([manual(long_text(30), version="2")]))
 
-    assert sorted(p.id for p in passages_of(index, "wiki/manual")) == before
+    assert sorted(p.id for p in passages_of(index, "default:wiki/manual")) == before
 
 
 def test_a_failed_embed_of_a_changed_long_document_keeps_its_old_passages_searchable():
@@ -223,7 +223,7 @@ def test_a_document_that_chunks_to_nothing_is_still_found_by_its_title():
     index._client.delete_collection("knowledge.generations")
 
     assert index._client.count("knowledge", exact=True).count == 2  # a Passage and the text
-    assert index.search("Operations")[0].document_id == "default:wiki/empty"
+    assert index.search("Operations")[0].document_id == "wiki/empty"
 
 
 def test_a_rebuild_splits_every_document_and_counts_its_passages():

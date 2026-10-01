@@ -55,7 +55,7 @@ def test_identity_is_the_relative_path_and_space_the_top_level_folder(index, fol
 
     assert index.list_spaces() == ["dba", "security"]
     found = index.search("ZX-9000")[0]
-    assert (found.document_id, found.space) == ("security/rotation.docx", "security")
+    assert (found.document_id, found.space) == ("folder:security/rotation.docx", "security")
     assert "ZX-9000" in index.get_document("folder:security/rotation.docx")
     assert {p.space for p in index.search("standby", space="security")} == {"security"}
 
@@ -142,7 +142,7 @@ def test_an_empty_extraction_is_reported_not_indexed(index, folder):
     report = index.sync(FolderCorpus(folder))
 
     assert (report.added, report.failed) == (3, 2)
-    assert {"dba/scanned.pdf", "dba/blank.md"} == set(report.failures)
+    assert {"folder:dba/scanned.pdf", "folder:dba/blank.md"} == set(report.failures)
     assert all(reason.startswith("empty extraction") for reason in report.failures.values())
     assert index.get_document("folder:dba/scanned.pdf") is None
     assert index.get_document("folder:dba/blank.md") is None
@@ -222,7 +222,7 @@ def test_an_unreadable_file_counts_as_one_failed_document_and_the_rest_is_synced
     report = index.sync(FolderCorpus(folder))
 
     assert (report.added, report.failed) == (3, 1)
-    assert "dba/locked.md" in report.failures
+    assert "folder:dba/locked.md" in report.failures
 
 
 def test_an_unknown_media_type_fails_the_document(index):
@@ -233,7 +233,7 @@ def test_an_unknown_media_type_fails_the_document(index):
     report = index.sync(corpus)
 
     assert report.failed == 1
-    assert "application/x-mystery" in report.failures["folder:x"]
+    assert "application/x-mystery" in report.failures["default:x"]
 
 
 @pytest.mark.skipif(shutil.which("lit") is None, reason="LiteParse (`lit`) is not installed")
@@ -276,7 +276,7 @@ def test_a_rebuild_extracts_and_reports_which_documents_failed(make_index, folde
     report = index.rebuild([FolderCorpus(folder)])
 
     assert not report.promoted
-    assert list(report.failures) == ["dba/scan.pdf"]
+    assert list(report.failures) == ["folder:dba/scan.pdf"]
     assert report.failures["folder:dba/scan.pdf"].startswith("empty extraction")
     assert index.search("ORA-00942") == []  # nothing went live
 

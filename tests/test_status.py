@@ -30,7 +30,7 @@ def test_status_reports_the_live_generation_counts_and_format(index):
     assert (status.documents, status.passages) == (3, 3)
     assert status.format == IndexFormat(
         schema_version=1, sparse=SparseParams(), embed_model="embed", dimension=64,
-        chunk_tokens=400, chunk_overlap=60)
+        chunk_tokens=400, chunk_overlap=60, corpus_ownership=True)
     assert status.access == "read-write" and status.warnings == ()
 
 

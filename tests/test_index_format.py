@@ -229,3 +229,26 @@ def test_an_unreadable_recorded_chunk_size_is_reported_as_an_unreadable_format()
             "schema_version": 1, "embed_model": "embed", "dimension": 64,
             "sparse": {"k1": 1.2, "b": 0.75, "avg_doc_length": 250.0},
             "chunk_tokens": "lots", "chunk_overlap": 60})
+
+
+def test_an_index_built_before_corpus_ownership_was_recorded_is_served_read_only_until_a_rebuild(
+        index, monkeypatch):
+    real = IndexFormat.to_payload
+
+    def without_ownership(self):  # what an earlier version wrote
+        return {k: v for k, v in real(self).items() if k != "corpus_ownership"}
+
+    monkeypatch.setattr(IndexFormat, "to_payload", without_ownership)
+    index.sync(InMemoryCorpus(DOCUMENTS))
+    monkeypatch.setattr(IndexFormat, "to_payload", real)
+    upgraded = after_an_upgrade(index)
+
+    status = upgraded.status()
+
+    assert status.access == Access.READ_ONLY
+    assert any("Corpus" in warning for warning in status.warnings)
+    assert upgraded.search("ORA-00942")
+    with pytest.raises(IndexReadOnly, match="Rebuild"):
+        upgraded.sync(InMemoryCorpus(DOCUMENTS))
+    assert upgraded.rebuild([InMemoryCorpus(DOCUMENTS)]).promoted
+    assert upgraded.status().access == Access.READ_WRITE

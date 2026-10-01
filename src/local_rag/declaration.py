@@ -11,10 +11,11 @@
     attachments = true                  # optional
     exclude_attachments = ["*.png"]     # optional: file name globs; defaults to images, video, archives
 
-Each Corpus has a ``kind`` and that kind's parameters; unknown kinds, unknown parameters and
-badly formed values are rejected when the file is read, so a mistake is found by any command
-and not only by the Sync of the Corpus it is in. A kind is added by registering a builder in
-``_KINDS``: it validates its table and builds the Corpus from it. The file is read by
+Each Corpus has a ``kind`` and that kind's parameters. Unknown names, kinds and parameters
+are rejected when the file is read; a wrong value (or a folder that is not there) when the
+Corpus is built, which ``sync`` does only for the Corpus it names. A kind is added by
+registering a builder in ``_KINDS``: it validates its table and builds the Corpus from it.
+The file is read by
 ``sync <corpus>`` and, in later releases, by ``rebuild``, ``forget`` and Status.
 """
 import tomllib

@@ -168,7 +168,7 @@ def test_search_keeps_returning_results_while_a_sync_runs(index):
 
     index.sync(SearchingCorpus([*DOCUMENTS[:2], revised(DOCUMENTS[2], "2")]))
 
-    assert seen and all(ids and ids[0] == "dba/ora-00942" for ids in seen)
+    assert seen and all(ids and ids[0] == "default:dba/ora-00942" for ids in seen)
 
 
 def test_a_second_sync_while_one_is_running_is_refused(index):

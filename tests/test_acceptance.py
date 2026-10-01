@@ -288,7 +288,7 @@ def test_the_live_index_is_untouched_by_a_run():
 
     assert code == 0, out
     assert snapshot(qdrant) == before
-    assert [p.document_id for p in live.search("alpha")] == ["a"]
+    assert [p.document_id for p in live.search("alpha")] == ["default:a"]
 
 
 def snapshot(qdrant):
@@ -458,7 +458,7 @@ def test_a_working_mcp_server_passes_every_check():
     assert code == 0, out
     for name in MCP_CHECKS:
         assert line(out, name).startswith("[ OK ]"), out
-    assert "page ops/guide" in line(out, "mcp.get_page")
+    assert "page default:ops/guide" in line(out, "mcp.get_page")
     assert "OPS" in line(out, "mcp.list_spaces")
 
 
