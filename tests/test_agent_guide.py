@@ -150,7 +150,7 @@ def test_the_guide_states_what_it_must_not_contradict():
     assert "runs the same `local-rag sync` as the hourly one" in flat
     assert "plain HTTP, no TLS pass-through" in flat
     assert "builds from the working tree but archives `HEAD`" in flat
-    assert "one Passage per Document" in flat and "issue #29" in flat
+    assert "one Passage per Document" not in flat and "issue #29" not in flat
     assert "Every MCP token sees every indexed Document" in flat
     for term in ("Knowledge index", "Corpus", "Model gateway", "Mirror", "Binary drop",
                  "Installer", "Rebuild", "Sync"):

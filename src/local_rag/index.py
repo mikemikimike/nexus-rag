@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from qdrant_client import QdrantClient, models
 
+from local_rag.chunker import Chunker
 from local_rag.corpus import Corpus, Document, RawDocument, listing_failures
 from local_rag.exclusive import ExclusiveRun, Lease
 from local_rag.extraction import Extractor
@@ -86,6 +87,7 @@ class KnowledgeIndex:
         self._gateway = gateway
         self._sparse = SparseEncoder(settings.sparse)
         self._extractor = Extractor.from_settings(settings)
+        self._chunker = Chunker.from_settings(settings, gateway)
         self._client = client or _connect(settings)
         # By generation: a generation's format, once written, does not change.
         self._assessments: dict[str, Assessment] = {}
@@ -408,29 +410,36 @@ class KnowledgeIndex:
             text=self._extractor.extract(raw), parent_id=raw.parent_id)
 
     def _add(self, document: Document, collection: str) -> None:
-        # One Passage per Document until the chunker lands.
-        content = f"{document.title}\n\n{document.text}"
-        [dense] = self._gateway.embed([content])
-        sparse = self._sparse.encode_document(content)
-        self._ensure_collection(collection, len(dense))
+        # A Document with no text is still found by its title: it gets one empty Passage.
+        chunks = self._chunker.split(document.text) or [""]
+        contents = [f"{document.title}\n\n{chunk}" for chunk in chunks]  # the title as context
+        dense = self._gateway.embed(contents)
+        if len(dense) != len(contents):
+            raise ValueError(
+                f"the Model gateway returned {len(dense)} vectors for {len(contents)} texts")
+        self._ensure_collection(collection, len(dense[0]))
         document_point = _document_point(document)
-        ids = [str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document.id}#0"))]
-        # Write the new Passages first, then delete this Document's leftover old ones,
-        # so a failure in between never leaves the Document missing from search.
-        self._client.upsert(collection, points=[models.PointStruct(
-            id=ids[0],
-            vector={"dense": dense, "bm25": models.SparseVector(
-                indices=sparse.indices, values=sparse.values)},
-            payload={"document_id": document.id, "version": document.version,
-                     "title": document.title, "url": document.url,
-                     "space": document.space, "text": document.text,
-                     "parent_id": document.parent_id},
-        ), document_point], wait=True)
+        passages = []
+        for number, (chunk, content, vector) in enumerate(zip(chunks, contents, dense)):
+            sparse = self._sparse.encode_document(content)
+            passages.append(models.PointStruct(
+                id=_passage_id(document.id, number),
+                vector={"dense": vector, "bm25": models.SparseVector(
+                    indices=sparse.indices, values=sparse.values)},
+                payload={"document_id": document.id, "version": document.version,
+                         "title": document.title, "url": document.url,
+                         "space": document.space, "text": chunk,
+                         "parent_id": document.parent_id}))
+        # Write the new Passages first, then delete this Document's leftover old ones (those
+        # of an earlier, longer version included), so a failure in between never leaves the
+        # Document missing from search.
+        self._client.upsert(collection, points=[*passages, document_point], wait=True)
         self._client.delete(
             collection, wait=True,
             points_selector=models.FilterSelector(filter=models.Filter(
                 must=_of_document(document.id),
-                must_not=[models.HasIdCondition(has_id=[*ids, document_point.id])])))
+                must_not=[models.HasIdCondition(
+                    has_id=[*(p.id for p in passages), document_point.id])])))
 
     def _remove(self, document_id: str, collection: str) -> None:
         self._client.delete(
@@ -502,6 +511,11 @@ _DOCUMENT_KIND = "document"
 
 def _match(key: str, value: str) -> models.FieldCondition:
     return models.FieldCondition(key=key, match=models.MatchValue(value=value))
+
+
+def _passage_id(document_id: str, number: int) -> str:
+    """The same Document always gets the same Passage ids, so a re-sync overwrites in place."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document_id}#{number}"))
 
 
 def _document_point(document: Document) -> models.PointStruct:

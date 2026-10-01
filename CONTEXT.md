@@ -57,7 +57,7 @@ The one generation kept from before the last promotion, which an operator can sw
 _Avoid_: backup, snapshot, old collection
 
 **Index format**:
-What an index records about how it was built (schema version, sparse encoder parameters, embedding model name and dimension), compared with the running code after an upgrade. An index whose format differs is served as a Read-only index if it can still be searched and refused if it cannot; it is never rebuilt automatically. An index whose records are corrupt or unreadable is reported, never treated as empty.
+What an index records about how it was built (schema version, sparse encoder parameters, chunk size and overlap, embedding model name and dimension), compared with the running code after an upgrade. An index whose format differs is served as a Read-only index if it can still be searched and refused if it cannot; it is never rebuilt automatically. An index whose records are corrupt or unreadable is reported, never treated as empty.
 _Avoid_: version, schema
 
 **Read-only index**:
