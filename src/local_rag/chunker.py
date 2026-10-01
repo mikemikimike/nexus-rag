@@ -1,6 +1,7 @@
 """Splits a Document's text into Passages with LlamaIndex's sentence splitter.
 
-Prose is split by sentences, code (see ``is_code``) by lines, each piece knowing the lines it
+Prose is split by sentences, code (see ``is_code``) by syntax where the language has
+a splitter and by lines otherwise, each piece knowing the lines it
 covers. Sizes are measured by a token counter supplied by the caller (normally the Model
 gateway's), so nothing here reads LlamaIndex's global settings, downloads a tokenizer
 or touches its embedding client.
@@ -16,6 +17,7 @@ from nltk.tokenize import PunktSentenceTokenizer
 from local_rag.corpus import is_code
 from local_rag.gateway import ModelGateway
 from local_rag.settings import Settings
+from local_rag.syntax import splitter_for
 from local_rag.tokens import count_tokens
 
 
@@ -138,7 +140,9 @@ class Chunker:
         if overlap >= size:
             raise ValueError(f"chunk overlap ({overlap}) must be smaller than size ({size})")
         punkt = PunktSentenceTokenizer()  # rule-based: needs no downloaded model
+        self._count, self._code_size = count_tokens, code_size
         self._code = LineSplitter(count_tokens, size=code_size)
+        self._syntax = {}  # Media type -> its splitter, made when first needed
         self._prose = _ProseSplitter(SentenceSplitter(
             chunk_size=size, chunk_overlap=overlap,
             # The splitter only takes len() of what its tokenizer returns.
@@ -161,6 +165,12 @@ class Chunker:
         return self._splitter_for(media_type).split(text)
 
     def _splitter_for(self, media_type: str) -> Splitter:
-        """Where a Media type is mapped to how it is split; a syntax-aware splitter for a
-        language goes here, falling back to the line splitter."""
-        return self._code if is_code(media_type) else self._prose
+        """Where a Media type is mapped to how it is split: code in a language with a
+        syntax-aware splitter (see ``languages``) by that, other code by lines, the rest as
+        prose."""
+        if not is_code(media_type):
+            return self._prose
+        if media_type not in self._syntax:
+            self._syntax[media_type] = splitter_for(
+                media_type, self._count, size=self._code_size, fallback=self._code) or self._code
+        return self._syntax[media_type]

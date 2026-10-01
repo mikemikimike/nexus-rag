@@ -18,6 +18,9 @@ dependencies = [
     "uvicorn",  # serves it over HTTP
     "httpx2",  # the MCP client's HTTP layer, which the acceptance suite drives the server with
     "anyio",  # runs that client (imported directly by the MCP server and the acceptance suite)
+    "tree-sitter>=0.25",  # parser runtime for syntax-aware code Passages
+    "tree-sitter-python>=0.25",  # Python grammar
+    "tree-sitter-c>=0.24",  # C grammar
     "liteparse",  # PDF and Office text extraction; provides the `lit` command
 ]
 

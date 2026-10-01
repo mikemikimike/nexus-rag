@@ -221,7 +221,8 @@ def _chunks(f) -> str:
 def _code_chunks(f) -> str:
     if f.code_chunk_tokens is None or f.code_splitting is None:
         return ", code chunking not recorded"
-    return f", code split by {f.code_splitting} into {f.code_chunk_tokens} tokens"
+    by_syntax = f" ({', '.join(f.syntax_languages)} by syntax)" if f.syntax_languages else ""
+    return f", code split by {f.code_splitting}{by_syntax} into {f.code_chunk_tokens} tokens"
 
 
 def _print_status(status: IndexStatus, out: TextIO) -> None:

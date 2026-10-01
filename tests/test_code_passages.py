@@ -56,7 +56,7 @@ def test_every_code_passage_knows_the_lines_it_covers():
 
 def test_code_passages_cover_the_whole_file_with_a_small_overlap():
     text = functions(30)
-    found = passages(indexed(text))
+    found = passages(indexed(text, media_type="text/x-ruby"))
 
     covered = set()
     for passage in found:
