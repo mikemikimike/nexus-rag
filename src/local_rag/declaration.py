@@ -27,8 +27,7 @@ Each Corpus has a ``kind`` and that kind's parameters. Unknown names, kinds and 
 are rejected when the file is read; a wrong value (or a folder that is not there) when the
 Corpus is built, which ``sync`` does only for the Corpus it names. A kind is added by
 registering a builder in ``_KINDS``: it validates its table and builds the Corpus from it.
-The file is read by
-``sync <corpus>`` and, in later releases, by ``rebuild``, ``forget`` and Status.
+The file is read by ``sync <corpus>``, ``rebuild`` and Status.
 """
 import tomllib
 from collections.abc import Callable, Mapping, Sequence

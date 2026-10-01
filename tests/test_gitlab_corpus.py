@@ -416,3 +416,22 @@ def test_changing_the_primary_ref_updates_stored_documents_whose_files_did_not_c
     assert refs_found() == {"v1"}
     assert (report.replaced, report.failed) == (len(FILES) * 2, 0)
     assert sync(main_is_primary=False).unchanged == len(FILES) * 2
+
+
+def test_every_indexed_file_comes_back_from_get_document_as_it_is_or_as_prose(gitlab, cache):
+    page = "<html>\n  <body>\n    <p>ledger  page</p>\n  </body>\n</html>\n"
+    data = '{\n    "ledger":   [1,   2],\n    "ok": true\n}\n'
+    gitlab.commit(REPOSITORY, {"web/index.html": page, "web/old.htm": page,
+                               "config/ledger.json": data, "config/ledger.xml": "<a>\n  <b/>\n</a>\n",
+                               "config/ledger.yaml": "a:   1\nb:\n    - 2\n"})
+    index = KnowledgeIndex(Settings(), FakeModelGateway())
+
+    report = index.sync(corpus(gitlab, cache, name="code"))
+
+    assert report.failed == 0
+    stored = lambda name: index.get_document(f"code:{REPOSITORY}@main:{name}")
+    assert stored("web/index.html") == page
+    assert stored("web/old.htm") == page
+    assert stored("config/ledger.json") == data
+    assert stored("config/ledger.xml") == "<a>\n  <b/>\n</a>\n"
+    assert stored("config/ledger.yaml") == "a:   1\nb:\n    - 2\n"
