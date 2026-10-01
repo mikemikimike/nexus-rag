@@ -17,6 +17,14 @@ def check_corpus_name(name: str) -> str:
     return name
 
 
+_PROSE_MEDIA_TYPES = frozenset({"text/plain", "text/markdown", "text/x-rst", "text/html"})
+
+
+def is_code(media_type: str) -> bool:
+    """Whether a Media type is source code, which is read by lines: text that is not prose."""
+    return media_type.startswith("text/") and media_type not in _PROSE_MEDIA_TYPES
+
+
 def qualified_id(corpus: str, document_id: str) -> str:
     """The id a Document has in the Knowledge index: its Corpus's name, then its own id."""
     return f"{corpus}:{document_id}"
@@ -34,6 +42,9 @@ class Document:
     corpus: str | None = None  # the Corpus that owns it; set by the Knowledge index
     media_type: str = "text/plain"  # the Media type its Corpus gave it, kept past extraction
     parts: tuple[str, ...] = ()  # the parts of its Corpus it was listed under; set by the index
+    repository: str | None = None  # a code file's Repository, by its full path
+    ref: str | None = None  # the branch or tag it was read at
+    path: str | None = None  # its path within the Repository
 
 
 @dataclass(frozen=True)
@@ -48,6 +59,9 @@ class RawDocument:
     content: bytes
     media_type: str
     parent_id: str | None = None  # the page an Attachment belongs to
+    repository: str | None = None  # a code file's Repository, by its full path
+    ref: str | None = None  # the branch or tag it was read at
+    path: str | None = None  # its path within the Repository
 
 
 @dataclass(frozen=True)

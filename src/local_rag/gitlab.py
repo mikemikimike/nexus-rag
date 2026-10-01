@@ -135,7 +135,8 @@ class GitLabCorpus:
         return RawDocument(
             id=document_id, title=f"{name}/{path}", space=parent, version=blob,
             url=f"{self._url}/{repository.path}/-/blob/{quote(repository.ref)}/{quote(path)}",
-            content=content, media_type=_media_type(path))
+            content=content, media_type=_media_type(path),
+            repository=repository.path, ref=repository.ref, path=path)
 
     def _locate(self, document_id: str) -> tuple[Repository, str]:
         repository_and_ref, _, path = document_id.partition(":")

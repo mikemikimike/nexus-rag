@@ -18,6 +18,10 @@ SCHEMA_VERSION = 1
 # What the running code's keyword encoding does, recorded so a change shows as a Read-only index.
 IDENTIFIER_SPLITTING = True
 
+# How the running code splits code into Passages; the same string as chunker.CODE_SPLITTING
+# (kept apart so this module needs no splitter; a test pins them equal).
+CODE_SPLITTING = "lines"
+
 
 class Access(StrEnum):
     READ_WRITE = "read-write"
@@ -54,16 +58,20 @@ class IndexFormat:
     # Whether keyword encoding adds the parts of camelCase, dotted and kebab-case identifiers.
     # Indexes built before it was recorded did not.
     identifier_splitting: bool = False
+    # The size limit of a code Passage and the method that splits code; None when not recorded.
+    code_chunk_tokens: int | None = None
+    code_splitting: str | None = None
 
     @classmethod
     def written_by(cls, settings: Settings, dimension: int | None) -> "IndexFormat":
         """The format of an index the running code creates."""
         if settings.retrieval is RetrievalMode.KEYWORD:
             return cls(SCHEMA_VERSION, settings.sparse, None, None, settings.chunk_tokens,
-                       settings.chunk_overlap, RetrievalMode.KEYWORD, True, IDENTIFIER_SPLITTING)
+                       settings.chunk_overlap, RetrievalMode.KEYWORD, True, IDENTIFIER_SPLITTING,
+                       settings.code_chunk_tokens, CODE_SPLITTING)
         return cls(SCHEMA_VERSION, settings.sparse, settings.embed_model, dimension,
                    settings.chunk_tokens, settings.chunk_overlap, RetrievalMode.HYBRID,
-                   True, IDENTIFIER_SPLITTING)
+                   True, IDENTIFIER_SPLITTING, settings.code_chunk_tokens, CODE_SPLITTING)
 
     def to_payload(self) -> dict:
         return {"schema_version": self.schema_version, "retrieval": self.retrieval.value,
@@ -71,6 +79,8 @@ class IndexFormat:
                 "dimension": self.dimension, "chunk_tokens": self.chunk_tokens,
                 "chunk_overlap": self.chunk_overlap,
                 "identifier_splitting": self.identifier_splitting,
+                "code_chunk_tokens": self.code_chunk_tokens,
+                "code_splitting": self.code_splitting,
                 "corpus_ownership": self.corpus_ownership, "sparse": {
                     "k1": self.sparse.k1, "b": self.sparse.b,
                     "avg_doc_length": self.sparse.avg_doc_length}}
@@ -94,6 +104,9 @@ class IndexFormat:
                 chunk_overlap=_optional_int(payload.get("chunk_overlap")),
                 retrieval=retrieval,
                 identifier_splitting=bool(payload.get("identifier_splitting", False)),
+                code_chunk_tokens=_optional_int(payload.get("code_chunk_tokens")),
+                code_splitting=None if payload.get("code_splitting") is None
+                else str(payload["code_splitting"]),
                 corpus_ownership=bool(payload.get("corpus_ownership", False)))
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ValueError(f"unreadable index format {payload!r}") from error
@@ -166,6 +179,20 @@ def assess(recorded: IndexFormat | None, stored_dimension: int | None, settings:
                 differences.append(
                     f"chunk overlap differs: index built with {recorded.chunk_overlap} "
                     f"tokens, running with {settings.chunk_overlap}")
+    if recorded is not None:
+        if recorded.code_chunk_tokens is None or recorded.code_splitting is None:
+            differences.append(
+                "its code size limit and splitting method were not recorded (built before "
+                "code was split by lines)")
+        else:
+            if recorded.code_chunk_tokens != settings.code_chunk_tokens:
+                differences.append(
+                    f"code size limit differs: index built with {recorded.code_chunk_tokens} "
+                    f"tokens, running with {settings.code_chunk_tokens}")
+            if recorded.code_splitting != CODE_SPLITTING:
+                differences.append(
+                    f"code splitting differs: index built by {recorded.code_splitting!r}, "
+                    f"running {CODE_SPLITTING!r}")
     if recorded is not None and recorded.identifier_splitting != IDENTIFIER_SPLITTING:
         differences.append(
             "keyword search does not split identifiers into their parts in this index "

@@ -190,9 +190,16 @@ def _format_passages(passages: list[Passage]) -> str:
     blocks = []
     for number, passage in enumerate(passages, 1):
         page_id = passage.parent_id or passage.document_id
-        header = f"{passage.url} | page_id: {page_id} | space: {passage.space}"
+        header = f"{passage.link} | page_id: {page_id} | space: {passage.space}"
         if passage.parent_id:
             header += f" | attachment: {passage.document_id}"
+        if passage.start_line is not None:
+            header += f" | file: {passage.path or passage.title}"
+            if passage.ref:
+                header += f" | ref: {passage.ref}"
+            header += f" | lines: {passage.line_range}"
+            if passage.symbol:
+                header += f" | symbol: {passage.symbol}"
         blocks.append(f"[{number}] {passage.title}\n{header}\n{passage.text.strip()}")
     return "\n\n---\n\n".join(blocks)
 

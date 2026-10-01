@@ -105,9 +105,9 @@ def test_chunking_neither_needs_nor_touches_global_llamaindex_settings():
             LlamaSettings._embed_model) == before == (None, None, None)
 
 
-def test_every_media_type_is_split_as_prose_for_now():
+def test_every_prose_or_binary_media_type_is_split_as_prose():
     text = sentences(40)
     prose = Chunker(words, size=30, overlap=5).split(text)
 
-    for media_type in ("text/plain", "text/markdown", "text/x-python", "application/pdf"):
+    for media_type in ("text/plain", "text/markdown", "text/x-rst", "application/pdf"):
         assert Chunker(words, size=30, overlap=5).split(text, media_type) == prose
