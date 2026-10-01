@@ -310,6 +310,9 @@ MCP_PORT=8765
 # LITELLM_API_KEY=
 # RAG_EMBED_MODEL=YOUR-EMBEDDING-MODEL-NAME
 # RAG_RERANK_MODEL=
+# Qwen3-Embedding wants an instruction in front of each query (not of documents), so a
+# suggested one is below; unset leaves queries as they are. Needs no Rebuild.
+# RAG_QUERY_INSTRUCTION=Given a question, retrieve the passages that answer it
 
 # Confluence (read by confluence-cli during a Sync)
 # CONFLUENCE_DOMAIN=confluence.example.test

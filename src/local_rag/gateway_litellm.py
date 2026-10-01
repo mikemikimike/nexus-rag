@@ -42,7 +42,8 @@ class LiteLLMGateway:
 
     def __init__(self, base_url: str, *, api_key: str | None = None,
                  embed_model: str = "embed", rerank_model: str | None = None,
-                 batch_size: int = 16, timeout: float = 60.0):
+                 batch_size: int = 16, timeout: float = 60.0,
+                 query_instruction: str = ""):
         if not base_url.startswith(("http://", "https://")):
             raise ValueError(f"gateway base URL must be http(s), got {base_url!r}")
         if batch_size < 1:
@@ -53,6 +54,7 @@ class LiteLLMGateway:
         self._rerank_model = rerank_model
         self._batch_size = batch_size
         self._timeout = timeout
+        self._query_instruction = query_instruction
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "LiteLLMGateway":
@@ -60,7 +62,8 @@ class LiteLLMGateway:
             raise ValueError("no Model gateway is named: gateway_base_url is not set")
         return cls(settings.gateway_base_url, api_key=settings.gateway_api_key,
                    embed_model=settings.embed_model, rerank_model=settings.rerank_model,
-                   batch_size=settings.embed_batch_size, timeout=settings.gateway_timeout)
+                   batch_size=settings.embed_batch_size, timeout=settings.gateway_timeout,
+                   query_instruction=settings.query_instruction)
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
@@ -69,6 +72,8 @@ class LiteLLMGateway:
         return vectors
 
     def embed_query(self, text: str) -> list[float]:
+        if self._query_instruction:  # the format Qwen3-Embedding was trained with
+            text = f"Instruct: {self._query_instruction}\nQuery: {text}"
         [vector] = self._embed_batch([text])
         return vector
 
