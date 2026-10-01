@@ -104,9 +104,9 @@ max_depth = 2
     ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = ["main"]',
      "GITLAB_URL and GITLAB_TOKEN must be set"),
     ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = []',
-     "exactly one branch or tag"),
+     "at least one ref"),
     ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\n'
-     'refs = ["main", "dev"]', "exactly one branch or tag"),
+     'refs = ["main", "main"]', "lists a ref twice"),
     ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = ["m"]\n'
      'branch = "x"', "unknown branch"),
 ])

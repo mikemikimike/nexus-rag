@@ -92,6 +92,8 @@ def _parser() -> argparse.ArgumentParser:
     search = commands.add_parser("search", help="search the Live index")
     search.add_argument("query")
     search.add_argument("--space", help="only results from this Space")
+    search.add_argument("--repository", help="only code from this Repository (its path)")
+    search.add_argument("--ref", help="search this Tracked ref instead of the Primary refs")
     search.add_argument("-k", type=int, help="how many Passages to return")
     search.set_defaults(run=_search)
     commands.add_parser(
@@ -142,7 +144,8 @@ def _switch_back(args, index: KnowledgeIndex, corpora, out: TextIO) -> int:
 
 
 def _search(args, index: KnowledgeIndex, corpora, out: TextIO) -> int:
-    passages = index.search(args.query, k=args.k, space=args.space)
+    passages = index.search(args.query, k=args.k, space=args.space,
+                           repository=args.repository, ref=args.ref)
     if not passages:
         print("No results.", file=out)
     for number, passage in enumerate(passages, 1):
@@ -188,6 +191,8 @@ def _print_passage(number: int, passage: Passage, out: TextIO) -> None:
     print(f"{number}. {passage.title}", file=out)
     print(f"   link: {passage.url}", file=out)
     print(f"   space: {passage.space}", file=out)
+    if passage.ref:
+        print(f"   ref: {passage.ref}", file=out)
     print(f"   page id: {passage.parent_id or passage.document_id}", file=out)
     if passage.parent_id:
         print(f"   attachment: {passage.document_id}", file=out)

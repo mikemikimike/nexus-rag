@@ -475,3 +475,29 @@ def test_a_rebuild_leaves_out_an_undeclared_corpus(cli, folder, tmp_path):
     assert code == 0
     assert "other:" not in cli("search", "ZX-9000", "-k", "10")[1]
     assert "undeclared" not in cli("status")[1]
+
+
+def test_search_can_name_a_repository_and_a_tracked_ref_and_shows_the_ref(cli, tmp_path):
+    from fake_gitlab import FakeGitLab
+    remote = FakeGitLab(tmp_path / "remote")
+    remote.commit("platform/pay", {"a.py": "def settle(): pass  # zebrafish\n"})
+    remote.commit("platform/pay", {"a.py": "def settle(): pass  # zebrafish\n"}, branch="feat")
+    remote.commit("platform/other", {"b.py": "def settle(): pass  # zebrafish\n"})
+    declare(tmp_path, code=f'''kind = "gitlab"
+cache = "{tmp_path / "mirrors"}"
+[[corpus.code.repositories]]
+path = "platform/pay"
+refs = ["main", "feat"]
+[[corpus.code.repositories]]
+path = "platform/other"
+refs = ["main"]''')
+    env = {"GITLAB_URL": remote.url, "GITLAB_TOKEN": "t"}
+    assert cli("sync", "code", **env)[0] == 0
+
+    _, plain, _ = cli("search", "zebrafish")
+    _, on_ref, _ = cli("search", "zebrafish", "--ref", "feat")
+    _, in_repository, _ = cli("search", "zebrafish", "--repository", "platform/other")
+
+    assert plain.count("ref: main") == 2 and "ref: feat" not in plain
+    assert "ref: feat" in on_ref and "ref: main" not in on_ref
+    assert "platform/other" in in_repository and "platform/pay" not in in_repository
