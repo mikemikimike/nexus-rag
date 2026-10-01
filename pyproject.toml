@@ -16,6 +16,7 @@ dependencies = [
     "markdownify",  # HTML to Markdown for extraction
     "mcp>=2.2",  # the MCP server adapter (MCPServer, streamable HTTP, stdio)
     "uvicorn",  # serves it over HTTP
+    "liteparse",  # PDF and Office text extraction; provides the `lit` command
 ]
 
 [project.scripts]
