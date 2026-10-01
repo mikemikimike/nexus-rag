@@ -103,6 +103,7 @@ def test_the_groups_that_do_not_reach_the_gateway_need_none_named():
 
     assert code == 0, out
 
+
 def test_hybrid_retrieval_without_an_embedding_model_is_refused_before_any_check():
     code, out, err = gateway_only(environ={"RAG_EMBED_MODEL": ""})
 

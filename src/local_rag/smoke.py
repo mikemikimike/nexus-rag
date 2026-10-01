@@ -114,7 +114,7 @@ def _rerank(model: str | None, gateway: ModelGateway | None) -> str:
 
 
 def _index(settings, gateway: ModelGateway | None, client: QdrantClient | None) -> str:
-    index =KnowledgeIndex(settings, gateway, client=client)
+    index = KnowledgeIndex(settings, gateway, client=client)
     health = index.health()
     if not health.qdrant or not health.knowledge_index:
         raise RuntimeError("; ".join(health.notes) or "not reachable")
