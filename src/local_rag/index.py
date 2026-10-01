@@ -103,7 +103,7 @@ class KnowledgeIndex:
         ``gateway`` may be None for Keyword-only retrieval without a reranker: nothing then
         reaches the Model gateway.
         """
-        if gateway is None and (settings.retrieval is RetrievalMode.HYBRID or settings.rerank):
+        if gateway is None and settings.needs_model_gateway:
             raise ValueError("this Retrieval mode and these settings need a Model gateway")
         self._settings = settings
         self._gateway = gateway

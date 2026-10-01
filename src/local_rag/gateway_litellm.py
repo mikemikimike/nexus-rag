@@ -5,7 +5,7 @@ import urllib.request
 from collections.abc import Sequence
 from typing import Any
 
-from local_rag.settings import RetrievalMode, Settings
+from local_rag.settings import Settings
 from local_rag.tokens import count_tokens
 
 _TRANSIENT_STATUSES = {408, 429}  # a timeout, or "too many requests": try again later
@@ -32,7 +32,7 @@ class GatewayError(RuntimeError):
 def gateway_from_settings(settings: Settings) -> "LiteLLMGateway | None":
     """The Model gateway the settings need, or None if nothing will reach one: Keyword-only
     retrieval with no reranker."""
-    if settings.retrieval is RetrievalMode.KEYWORD and not settings.rerank:
+    if not settings.needs_model_gateway:
         return None
     return LiteLLMGateway.from_settings(settings)
 
@@ -56,6 +56,8 @@ class LiteLLMGateway:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "LiteLLMGateway":
+        if settings.gateway_base_url is None:
+            raise ValueError("no Model gateway is named: gateway_base_url is not set")
         return cls(settings.gateway_base_url, api_key=settings.gateway_api_key,
                    embed_model=settings.embed_model, rerank_model=settings.rerank_model,
                    batch_size=settings.embed_batch_size, timeout=settings.gateway_timeout)

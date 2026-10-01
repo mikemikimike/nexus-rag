@@ -33,16 +33,8 @@ def gateway_failure(error: Exception) -> Failure:
 
 
 def _require_gateway(ctx: Context):
-    missing = [name for name in ("LITELLM_BASE_URL", "RAG_EMBED_MODEL")
-               if not ctx.environ.get(name)]
     if ctx.gateway_problem:
         raise Failure(ctx.gateway_problem, cause="LITELLM_BASE_URL is not an http(s) URL",
-                      see="section 5 (Configure)")
-    if missing:
-        # Settings would fill a default in for these, and a default is no Model gateway of ours.
-        raise Failure(f"{' and '.join(missing)} not set in the environment",
-                      cause="the env file lacks the Model gateway's settings, or this command "
-                            "was not run with them (use run_rag / compose run, not a bare shell)",
                       see="section 5 (Configure)")
     return ctx.gateway
 
@@ -124,10 +116,7 @@ def _rerank(ctx: Context) -> str:
     model = ctx.settings.rerank_model
     if not model:
         raise Skipped("RAG_RERANK_MODEL is not set, so search does not rerank")
-    if ctx.gateway is None:
-        raise Failure("no Model gateway: LITELLM_BASE_URL is not set",
-                      cause="the env file lacks the Model gateway's address, which RAG_RERANK_MODEL "
-                            "needs", see="section 5 (Configure)")
+    _require_gateway(ctx)
     relevant = "Reset a forgotten password from the account page."
     unrelated = "The cafeteria serves soup on Tuesdays."
     try:

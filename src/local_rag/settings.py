@@ -20,7 +20,7 @@ class Settings:
     retrieval: RetrievalMode = RetrievalMode.HYBRID  # what a new index is built to search by
     top_k: int = 6
     hybrid_candidates: int = 40
-    gateway_base_url: str = "http://localhost:4000/v1"  # LiteLLM, OpenAI-compatible root
+    gateway_base_url: str | None = None  # LiteLLM, OpenAI-compatible root; None until an operator names it
     gateway_api_key: str | None = field(default=None, repr=False)  # bearer key for the gateway
     embed_model: str = "embed"  # model name registered in the gateway for embeddings
     rerank_model: str | None = None  # model name for /rerank; None leaves rerank off
@@ -37,6 +37,12 @@ class Settings:
     rerank: bool = False  # reorder results through the Model gateway's rerank
     sync_lock_stale_after: float = 120.0  # seconds without a heartbeat before a crashed Sync's lock is taken over
     rebuild_failure_threshold: float = 0.0  # share of Documents (0 to 1) that may fail for a Rebuild to go live
+
+    @property
+    def needs_model_gateway(self) -> bool:
+        """Whether this installation reaches the Model gateway at all: Hybrid retrieval does, and
+        so does a reranker; Keyword-only retrieval without one does not."""
+        return self.retrieval is RetrievalMode.HYBRID or self.rerank
 
     def __post_init__(self):
         object.__setattr__(self, "retrieval", RetrievalMode(self.retrieval))

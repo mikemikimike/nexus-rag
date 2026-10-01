@@ -27,7 +27,7 @@ from typing import Any, TextIO
 from urllib.parse import urlsplit, urlunsplit
 
 from local_rag.acceptance_corpus import Run
-from local_rag.acceptance_report import Context, Report, is_keyword_only, run_command
+from local_rag.acceptance_report import Context, Report, run_command
 from local_rag.environment import SettingsError, settings_from_environment
 
 GROUPS = ("gateway", "qdrant", "index", "mcp", "install", "confluence")
@@ -53,7 +53,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
         return 2
     try:
         live = settings_from_environment(
-            environ, embedding_required=bool({"gateway", "index"} & set(groups)))
+            environ, gateway_required=bool({"gateway", "index"} & set(groups)))
     except SettingsError as error:
         print(f"error: {error}", file=err)
         return 2
@@ -79,15 +79,11 @@ def _prepare(ctx: Context, groups: Sequence[str]) -> None:
     """The Model gateway, built only when a group will use it."""
     if ctx.gateway is not None or not {"gateway", "index"} & set(groups):
         return
-    # Keyword-only retrieval has no embedding model to name: only a reranker needs the gateway.
-    needed = (ctx.settings.rerank_model if is_keyword_only(ctx)
-              else ctx.environ.get("RAG_EMBED_MODEL"))
-    if ctx.environ.get("LITELLM_BASE_URL") and needed:
-        from local_rag.gateway_litellm import gateway_from_settings
-        try:
-            ctx.gateway = gateway_from_settings(ctx.settings)
-        except ValueError as error:
-            ctx.gateway_problem = str(error)
+    from local_rag.gateway_litellm import gateway_from_settings
+    try:
+        ctx.gateway = gateway_from_settings(ctx.settings)
+    except ValueError as error:  # an address that is set but is not an http(s) URL
+        ctx.gateway_problem = str(error)
 
 
 def _runner(group: str) -> Callable[[Context], None]:
@@ -118,7 +114,7 @@ def _describe(report: Report, live, environ: Mapping[str, str], run_id: Run,
     tokens = [t for t in environ.get("MCP_TOKENS", "").split(",") if t.strip()]
     report.say("local-rag acceptance suite")
     report.say(f"  groups:           {', '.join(groups)}")
-    report.say(f"  model gateway:    {_safe_url(live.gateway_base_url if environ.get('LITELLM_BASE_URL') else None)}"
+    report.say(f"  model gateway:    {_safe_url(live.gateway_base_url)}"
                f", embeddings {environ.get('RAG_EMBED_MODEL') or 'not set'}"
                f", rerank {live.rerank_model or 'not set'}, key {secret('LITELLM_API_KEY')}")
     report.say(f"  retrieval:        {live.retrieval}")

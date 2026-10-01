@@ -277,7 +277,8 @@ def test_stdio_mode_serves_the_tools_without_tokens():
     async def run():
         params = StdioServerParameters(
             command=sys.executable, args=["-m", "local_rag.mcp_server", "--stdio"],
-            env={**os.environ, "QDRANT_URL": ":memory:", "RAG_EMBED_MODEL": "embed"})
+            env={**os.environ, "QDRANT_URL": ":memory:", "RAG_EMBED_MODEL": "embed",
+                 "LITELLM_BASE_URL": "http://gateway.example.test:4000/v1"})
         async with Client(params) as client:
             tools = await client.list_tools()
             spaces = await client.call_tool("list_spaces", {})

@@ -12,7 +12,8 @@ from conftest import SYNONYMS
 from fake_litellm_server import FakeLiteLLM
 
 
-EMBEDDING = {"RAG_EMBED_MODEL": "embed"}  # Hybrid retrieval, the default, needs one named
+EMBEDDING = {"RAG_EMBED_MODEL": "embed",  # Hybrid retrieval, the default, needs these named
+             "LITELLM_BASE_URL": "http://gateway.example.test:4000/v1"}
 
 
 @pytest.fixture

@@ -76,9 +76,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
         check("settings", lambda: _raise(error))
         return 1
 
-    gateway = gateway or (gateway_from_settings(settings) if _gateway_named(environ, settings)
-                          else None)
-    check("Model gateway (embeddings)", lambda: _embeddings(environ, settings, gateway))
+    gateway = gateway or gateway_from_settings(settings)
+    check("Model gateway (embeddings)", lambda: _embeddings(settings, gateway))
     check("Rerank", lambda: _rerank(settings.rerank_model, gateway))
     check("Knowledge index", lambda: _index(settings, gateway, client))
     check("LiteParse", lambda: _version(run, settings.liteparse_bin))
@@ -98,29 +97,16 @@ def _tokens(environ: Mapping[str, str]) -> str:
     return f"{len(tokens)} token{'s' if len(tokens) != 1 else ''}"
 
 
-def _gateway_named(environ: Mapping[str, str], settings) -> bool:
-    """Whether the environment names a Model gateway this installation needs: Keyword-only
-    retrieval needs one only for a reranker."""
-    if settings.retrieval is RetrievalMode.KEYWORD:
-        return bool(environ.get("LITELLM_BASE_URL") and settings.rerank_model)
-    return bool(environ.get("LITELLM_BASE_URL"))  # Settings already insisted on the model
-
-
-def _embeddings(environ: Mapping[str, str], settings, gateway: ModelGateway | None) -> str:
+def _embeddings(settings, gateway: ModelGateway | None) -> str:
     if settings.retrieval is RetrievalMode.KEYWORD:
         raise _Skipped("RAG_RETRIEVAL=keyword, so no embedding model is used")
-    # Settings would fill a default in, and a default is no Model gateway of ours.
-    if not environ.get("LITELLM_BASE_URL"):
-        raise ValueError("LITELLM_BASE_URL not set in the environment")
     dimension = len(gateway.embed_query("smoke test"))
-    return f"model {environ['RAG_EMBED_MODEL']!r} answers, {dimension} dimensions"
+    return f"model {settings.embed_model!r} answers, {dimension} dimensions"
 
 
 def _rerank(model: str | None, gateway: ModelGateway | None) -> str:
     if not model:
         raise _Skipped("RAG_RERANK_MODEL is not set, so search does not rerank")
-    if gateway is None:
-        raise ValueError("no Model gateway: LITELLM_BASE_URL is not set")
     scores = gateway.rerank("smoke test", ["first text", "second text"])
     if len(scores) != 2:
         raise ValueError(f"asked to score 2 texts, got {len(scores)} scores")
@@ -128,9 +114,7 @@ def _rerank(model: str | None, gateway: ModelGateway | None) -> str:
 
 
 def _index(settings, gateway: ModelGateway | None, client: QdrantClient | None) -> str:
-    if gateway is None and (settings.retrieval is RetrievalMode.HYBRID or settings.rerank):
-        raise ValueError("no Model gateway: LITELLM_BASE_URL is not set")
-    index = KnowledgeIndex(settings, gateway, client=client)
+    index =KnowledgeIndex(settings, gateway, client=client)
     health = index.health()
     if not health.qdrant or not health.knowledge_index:
         raise RuntimeError("; ".join(health.notes) or "not reachable")
