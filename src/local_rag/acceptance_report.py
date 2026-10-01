@@ -27,6 +27,14 @@ class Failure(Exception):
         self.what, self.cause, self.see = what, cause, see
 
 
+KEYWORD_ONLY = "RAG_RETRIEVAL=keyword, so no embedding model is used"
+
+
+def is_keyword_only(ctx: "Context") -> bool:
+    """Whether the suite runs in Keyword-only retrieval, where the embedding checks do not apply."""
+    return str(ctx.settings.retrieval) == "keyword"
+
+
 class Skipped(Exception):
     """A check that does not apply here; the reason is reported."""
 

@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -15,7 +16,7 @@ from local_rag.index_format import (
     Access, Assessment, IndexFormat, IndexReadOnly, IndexRefused, assess)
 from local_rag.journal import Journal, LastSync
 from local_rag.ranking import cap_per_document, rerank
-from local_rag.settings import Settings
+from local_rag.settings import RetrievalMode, Settings
 from local_rag.sparse import SparseEncoder
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,21 @@ class Passage:
     text: str
     score: float
     parent_id: str | None = None  # the page an Attachment belongs to
+
+
+class SearchResults(list[Passage]):
+    """The Passages a search found, best first, and a notice for the caller when the search
+    could not use the embedding model (a Keyword fallback)."""
+
+    def __init__(self, passages=(), notice: str | None = None):
+        super().__init__(passages)
+        self.notice = notice
+
+
+_FALLBACK_NOTICE = ("Results are keyword-only: the embedding model could not be reached for "
+                    "this search, so matches by meaning are missing.")
+_NO_EMBEDDINGS_NOTICE = ("Results are keyword-only: this index was built without an embedding "
+                         "model; an operator must run a Rebuild to add one.")
 
 
 @dataclass(frozen=True)
@@ -80,9 +96,15 @@ class Health:
 class KnowledgeIndex:
     """The searchable body of indexed Documents: accepts a Corpus, answers searches."""
 
-    def __init__(self, settings: Settings, gateway: ModelGateway, *,
+    def __init__(self, settings: Settings, gateway: ModelGateway | None, *,
                  client: QdrantClient | None = None):
-        """``client`` lets several instances (processes, in effect) share one Qdrant."""
+        """``client`` lets several instances (processes, in effect) share one Qdrant.
+
+        ``gateway`` may be None for Keyword-only retrieval without a reranker: nothing then
+        reaches the Model gateway.
+        """
+        if gateway is None and (settings.retrieval is RetrievalMode.HYBRID or settings.rerank):
+            raise ValueError("this Retrieval mode and these settings need a Model gateway")
         self._settings = settings
         self._gateway = gateway
         self._sparse = SparseEncoder(settings.sparse)
@@ -91,6 +113,8 @@ class KnowledgeIndex:
         self._client = client or _connect(settings)
         # By generation: a generation's format, once written, does not change.
         self._assessments: dict[str, Assessment] = {}
+        # Why the embedding model failed the last time it was used; None if it worked.
+        self._embedding_failure: str | None = None
         self._journal = Journal(self._client, f"{settings.collection}.last-sync")
         self._generations = Generations(self._client, settings.collection)
         self._exclusive = ExclusiveRun(
@@ -258,23 +282,41 @@ class KnowledgeIndex:
             # Not worth masking the error that got us here; the next Rebuild sweeps it.
             log.warning("could not remove unpromoted index %s", generation, exc_info=True)
 
+    @property
+    def retrieval(self) -> RetrievalMode:
+        """The Retrieval mode this code runs in (the Live index may have been built in another)."""
+        return self._settings.retrieval
+
     def search(self, query: str, k: int | None = None,
-               space: str | None = None) -> list[Passage]:
+               space: str | None = None) -> SearchResults:
+        """The best Passages for the query. In Hybrid mode, if the embedding model cannot be
+        reached the search is a Keyword fallback, and the results' ``notice`` says so."""
         settings = self._settings
-        serving = self._readable()
-        if serving is None:
-            return []
+        found = self._serving()
+        if found is None:
+            return SearchResults()
+        serving, assessment = found
         limit = settings.top_k if k is None else k
         candidates = settings.hybrid_candidates
         in_space = models.Filter(must=[_match("space", space)]) if space is not None else None
-        prefetch = [models.Prefetch(
-            query=self._gateway.embed_query(query), using="dense", limit=candidates,
-            filter=in_space)]
+        prefetch = []
+        notice = None
+        if assessment.dense:
+            vector = None if assessment.embedding_unreachable else self._embed_query(query)
+            if vector is None:
+                notice = _FALLBACK_NOTICE
+            else:
+                prefetch.append(models.Prefetch(
+                    query=vector, using="dense", limit=candidates, filter=in_space))
+        elif settings.retrieval is RetrievalMode.HYBRID:
+            notice = _NO_EMBEDDINGS_NOTICE
         sparse = self._sparse.encode_query(query)
         if sparse.indices:
             prefetch.append(models.Prefetch(
                 query=models.SparseVector(indices=sparse.indices, values=sparse.values),
                 using="bm25", limit=candidates, filter=in_space))
+        if not prefetch:
+            return SearchResults(notice=notice)
         points = self._client.query_points(
             serving, prefetch=prefetch,
             query=models.FusionQuery(fusion=models.Fusion.RRF),
@@ -287,7 +329,38 @@ class KnowledgeIndex:
         passages = cap_per_document(passages, settings.max_passages_per_document)
         if settings.rerank:
             passages = rerank(self._gateway, query, passages)
-        return passages[:limit]
+        return SearchResults(passages[:limit], notice)
+
+    def _embed(self, texts: list[str]) -> list[list[float]]:
+        """Embed a Document's texts, trying again after a failure that could be transient."""
+        settings = self._settings
+        for attempt in range(1, settings.embed_attempts + 1):
+            try:
+                vectors = self._gateway.embed(texts)
+            except Exception as error:
+                self._embedding_failure = _describe(error)
+                if attempt == settings.embed_attempts or not getattr(error, "retryable", True):
+                    raise
+                wait = settings.embed_retry_backoff * 2 ** (attempt - 1)
+                log.warning("embedding failed (attempt %d of %d), trying again in %.1fs: %s",
+                            attempt, settings.embed_attempts, wait, self._embedding_failure)
+                time.sleep(wait)
+            else:
+                self._embedding_failure = None
+                return vectors
+        raise AssertionError("embed_attempts is at least 1")
+
+    def _embed_query(self, query: str) -> list[float] | None:
+        """The query's vector, or None, noting why, if the embedding model cannot be reached."""
+        try:
+            vector = self._gateway.embed_query(query)
+        except Exception as error:
+            self._embedding_failure = _describe(error)
+            log.warning("the embedding model could not be reached",
+                        exc_info=True)
+            return None
+        self._embedding_failure = None
+        return vector
 
     def status(self) -> IndexStatus:
         """The Live index generation, its size and format, and whether it can be written to.
@@ -310,7 +383,11 @@ class KnowledgeIndex:
         except Exception as error:
             return Health(
                 True, False, (f"the Knowledge index cannot be read: {_describe(error)}",))
-        return Health(True, status.access is not Access.REFUSED, status.warnings)
+        notes = status.warnings
+        if self._embedding_failure:
+            notes = (*notes, f"the embedding model was unreachable the last time it was used "
+                             f"({self._embedding_failure}); searches fall back to keywords")
+        return Health(True, status.access is not Access.REFUSED, notes)
 
     def _status(self, *, verify_dimension: bool) -> IndexStatus:
         last_sync, unreadable = self._last_sync()
@@ -341,6 +418,11 @@ class KnowledgeIndex:
 
     def _readable(self) -> str | None:
         """What to query for the Live index, or None if there is none; refuses an unusable one."""
+        found = self._serving()
+        return None if found is None else found[0]
+
+    def _serving(self) -> tuple[str, Assessment] | None:
+        """What to query for the Live index and how it may be searched, or None if there is none."""
         found = self._generations.serving()
         if found is None:
             return None
@@ -348,7 +430,7 @@ class KnowledgeIndex:
         assessment = self._assessment(generation)
         if assessment.access is Access.REFUSED:
             raise IndexRefused(_explain("the index cannot be used", assessment))
-        return query
+        return query, assessment
 
     def _require_writable(self, generation: str) -> None:
         assessment = self._assessment(generation)
@@ -365,18 +447,19 @@ class KnowledgeIndex:
 
         def running_dimension() -> int | None:
             nonlocal reachable
-            try:
-                return len(self._gateway.embed_query("dimension probe"))
-            except Exception:
+            vector = self._embed_query("dimension probe")
+            if vector is None:
                 reachable = False
                 return None
+            return len(vector)
 
         params = self._client.get_collection(generation).config.params
-        if not (isinstance(params.vectors, dict) and "dense" in params.vectors
+        if not (isinstance(params.vectors, dict)
                 and "bm25" in (params.sparse_vectors or {})):
             raise CorruptIndex(f"{generation} is not a Knowledge index collection")
+        dense = params.vectors.get("dense")  # a Keyword-only index has none
         assessment = assess(
-            self._generations.format_of(generation), params.vectors["dense"].size,
+            self._generations.format_of(generation), dense.size if dense else None,
             self._settings, running_dimension if verify_dimension else None)
         if verify_dimension and reachable:  # an unverified answer is worth asking for again
             self._assessments[generation] = assessment
@@ -413,19 +496,24 @@ class KnowledgeIndex:
         # A Document with no text is still found by its title: it gets one empty Passage.
         chunks = self._chunker.split(document.text) or [""]
         contents = [f"{document.title}\n\n{chunk}" for chunk in chunks]  # the title as context
-        dense = self._gateway.embed(contents)
-        if len(dense) != len(contents):
-            raise ValueError(
-                f"the Model gateway returned {len(dense)} vectors for {len(contents)} texts")
-        self._ensure_collection(collection, len(dense[0]))
+        if self._settings.retrieval is RetrievalMode.HYBRID:
+            dense = self._embed(contents)
+            if len(dense) != len(contents):
+                raise ValueError(
+                    f"the Model gateway returned {len(dense)} vectors for {len(contents)} texts")
+        else:
+            dense = [None] * len(contents)
+        self._ensure_collection(collection, None if dense[0] is None else len(dense[0]))
         document_point = _document_point(document)
         passages = []
         for number, (chunk, content, vector) in enumerate(zip(chunks, contents, dense)):
             sparse = self._sparse.encode_document(content)
+            vectors = {"bm25": models.SparseVector(indices=sparse.indices, values=sparse.values)}
+            if vector is not None:
+                vectors["dense"] = vector
             passages.append(models.PointStruct(
                 id=_passage_id(document.id, number),
-                vector={"dense": vector, "bm25": models.SparseVector(
-                    indices=sparse.indices, values=sparse.values)},
+                vector=vectors,
                 payload={"document_id": document.id, "version": document.version,
                          "title": document.title, "url": document.url,
                          "space": document.space, "text": chunk,
@@ -473,7 +561,8 @@ class KnowledgeIndex:
             limit=1, with_payload=["full_text"])
         return records[0].payload["full_text"] if records else None
 
-    def _ensure_collection(self, collection: str, dimension: int) -> None:
+    def _ensure_collection(self, collection: str, dimension: int | None) -> None:
+        """``dimension`` is the size of the dense vectors, None for a Keyword-only index."""
         if self._client.collection_exists(collection):
             return
         # Before it exists, so a crash leaves no stray.
@@ -481,7 +570,7 @@ class KnowledgeIndex:
             collection, IndexFormat.written_by(self._settings, dimension))
         self._client.create_collection(
             collection_name=collection,
-            vectors_config={"dense": models.VectorParams(
+            vectors_config={} if dimension is None else {"dense": models.VectorParams(
                 size=dimension, distance=models.Distance.COSINE)},
             sparse_vectors_config={"bm25": models.SparseVectorParams(
                 modifier=models.Modifier.IDF)},

@@ -11,11 +11,12 @@ from pathlib import Path
 
 from local_rag import acceptance_corpus as corpus_files
 from local_rag.acceptance_corpus import KEYWORD_DOCUMENT, LONG_DOCUMENT, SEMANTIC_DOCUMENT
-from local_rag.acceptance_report import Context, Failure
+from local_rag.acceptance_report import KEYWORD_ONLY, Context, Failure, Skipped, is_keyword_only
 from local_rag.chunker import Chunker
 from local_rag.folder import FolderCorpus
 from local_rag.index import KnowledgeIndex
 from local_rag.index_format import Access
+from local_rag.tokens import count_tokens
 
 SEARCH_K = 3  # few enough that a Document is found by being near the query, not by being one of few
 NEEDS = ["gateway.embeddings", "qdrant.reachable"]
@@ -93,7 +94,9 @@ def run_index(ctx: Context) -> None:
         trip.append(_RoundTrip(ctx))
         return _sync(trip[0])
 
-    check("index.sync", sync_first, needs=NEEDS)
+    # Keyword-only retrieval has no embedding model to have checked first.
+    check("index.sync", sync_first,
+          needs=["qdrant.reachable"] if is_keyword_only(ctx) else NEEDS)
     after = ["index.sync"]
     check("index.keyword", lambda: _keyword(need_trip()), needs=after)
     check("index.dense", lambda: _dense(need_trip()), needs=after)
@@ -109,7 +112,8 @@ def run_index(ctx: Context) -> None:
 def _sync(trip: _RoundTrip) -> str:
     trip.texts = corpus_files.write_corpus(
         trip.folder, trip.run_id, chunk_tokens=trip.settings.chunk_tokens,
-        count_tokens=trip.ctx.gateway.count_tokens, split=trip.chunker.split)
+        count_tokens=trip.ctx.gateway.count_tokens if trip.ctx.gateway else count_tokens,
+        split=trip.chunker.split)
     report = trip.sync()
     if report.failed or report.added != len(trip.texts):
         failures = "; ".join(f"{name}: {why}" for name, why in report.failures.items())
@@ -130,6 +134,8 @@ def _keyword(trip: _RoundTrip) -> str:
 
 
 def _dense(trip: _RoundTrip) -> str:
+    if is_keyword_only(trip.ctx):
+        raise Skipped(KEYWORD_ONLY)
     trip.need(corpus_files.SEMANTIC_QUERY, SEMANTIC_DOCUMENT, "a paraphrase sharing no word",
               "the embedding model does not place a paraphrase near its Document: "
               "RAG_EMBED_MODEL is not an embedding model, or vectors are not used", k=2)
@@ -146,6 +152,8 @@ def _tail_keyword(trip: _RoundTrip) -> str:
 
 
 def _tail_meaning(trip: _RoundTrip) -> str:
+    if is_keyword_only(trip.ctx):
+        raise Skipped(KEYWORD_ONLY)
     trip.need(corpus_files.TAIL_QUERY, LONG_DOCUMENT, "a paraphrase of the tail of a long Document",
               "the embedding model reads only the start of a Passage: RAG_CHUNK_TOKENS is above "
               "its real input limit; lower it, then run a Rebuild",

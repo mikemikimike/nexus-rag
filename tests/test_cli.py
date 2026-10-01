@@ -12,6 +12,9 @@ from conftest import SYNONYMS
 from fake_litellm_server import FakeLiteLLM
 
 
+EMBEDDING = {"RAG_EMBED_MODEL": "embed"}  # Hybrid retrieval, the default, needs one named
+
+
 @pytest.fixture
 def folder(tmp_path):
     root = tmp_path / "docs"
@@ -34,7 +37,7 @@ def cli(monkeypatch):
 
     def run(*argv, **environ):
         out, err = io.StringIO(), io.StringIO()
-        code = main(list(argv), environ, stdout=out, stderr=err,
+        code = main(list(argv), {**EMBEDDING, **environ}, stdout=out, stderr=err,
                     gateway=gateway, client=client)
         return code, out.getvalue(), err.getvalue()
     run.client, run.gateway = client, gateway
@@ -234,7 +237,8 @@ def test_an_unreachable_model_gateway_fails_each_document_and_exits_non_zero(fol
     out, err = io.StringIO(), io.StringIO()
 
     code = main(["sync", "--folder", str(folder)],
-                {"LITELLM_BASE_URL": "http://127.0.0.1:1/v1"},
+                {**EMBEDDING, "LITELLM_BASE_URL": "http://127.0.0.1:1/v1",
+                 "RAG_EMBED_RETRY_BACKOFF": "0"},
                 stdout=out, stderr=err, client=client)
 
     assert code == 1
@@ -245,8 +249,8 @@ def test_an_unreachable_model_gateway_fails_each_document_and_exits_non_zero(fol
 def test_the_real_model_gateway_is_built_from_the_environment(folder):
     server = FakeLiteLLM(FakeModelGateway(synonyms=SYNONYMS)).start()
     client = QdrantClient(location=":memory:")
-    environ = {"LITELLM_BASE_URL": server.base_url, "LITELLM_API_KEY": server.api_key,
-               "RAG_RERANK_MODEL": "rerank"}
+    environ = {**EMBEDDING, "LITELLM_BASE_URL": server.base_url,
+               "LITELLM_API_KEY": server.api_key, "RAG_RERANK_MODEL": "rerank"}
 
     def run(*argv):
         out = io.StringIO()
@@ -309,3 +313,43 @@ def test_a_roots_file_that_is_not_text_is_a_usage_error(cli, tmp_path):
     code, _, err = cli("sync", "--roots-file", str(roots))
 
     assert code == 2 and "cannot read the roots file" in err
+
+
+# --- the Retrieval mode ----------------------------------------------------------------
+
+def test_keyword_retrieval_runs_with_no_embedding_model_and_never_calls_a_gateway(folder):
+    client = QdrantClient(location=":memory:")
+    environ = {"RAG_RETRIEVAL": "keyword",
+               "LITELLM_BASE_URL": "http://127.0.0.1:1/v1"}  # nothing listens there
+
+    def run(*argv):
+        out, err = io.StringIO(), io.StringIO()
+        return main(list(argv), environ, stdout=out, stderr=err, client=client), \
+            out.getvalue(), err.getvalue()
+
+    assert run("sync", "--folder", str(folder))[0] == 0
+    code, out, _ = run("search", "ORA-00942")
+    assert code == 0 and "page id: dba/ora-00942.md" in out and "note:" not in out
+    code, out, _ = run("status")
+    assert code == 0 and "keyword-only" in out and "dimensions" not in out
+    assert run("rebuild", "--folder", str(folder))[0] == 0
+
+
+def test_a_search_that_fell_back_to_keywords_prints_the_notice(cli, folder, monkeypatch):
+    cli("sync", "--folder", str(folder))
+    cli("search", "ORA-00942")  # the dimension check passes while the gateway is up
+
+    def down(text):
+        raise ConnectionError("unreachable")
+    monkeypatch.setattr(cli.gateway, "embed_query", down)
+
+    code, out, _ = cli("search", "ORA-00942")
+
+    assert code == 0 and "page id: dba/ora-00942.md" in out
+    assert "note: Results are keyword-only" in out
+
+
+def test_hybrid_retrieval_without_an_embedding_model_is_a_settings_error(cli):
+    code, _, err = cli("status", RAG_EMBED_MODEL="")
+
+    assert code == 1 and "RAG_EMBED_MODEL" in err and "RAG_RETRIEVAL=keyword" in err

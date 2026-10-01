@@ -80,13 +80,15 @@ class Host:
         return ""
 
 
-def run_suite(*argv, environ=None, gateway=None, qdrant=None, host=None):
-    """Run the suite offline; returns (exit code, stdout, stderr)."""
+def run_suite(*argv, environ=None, gateway=None, qdrant=None, host=None, no_gateway=False):
+    """Run the suite offline; returns (exit code, stdout, stderr).
+
+    ``no_gateway`` leaves the suite to build the Model gateway itself, as a real run does."""
     out, err = io.StringIO(), io.StringIO()
     qdrant = qdrant or Qdrant()
     code = acceptance.main(
         list(argv), {**ENVIRONMENT, **(environ or {})},
-        gateway=gateway or good_gateway(), connect=qdrant.connect,
+        gateway=None if no_gateway else gateway or good_gateway(), connect=qdrant.connect,
         run=host or Host(), stdout=out, stderr=err)
     return code, out.getvalue(), err.getvalue()
 

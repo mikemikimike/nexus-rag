@@ -22,9 +22,10 @@ from local_rag.acceptance_host import SYSTEMD_UNITS
 from local_rag.acceptance_report import run_command
 from local_rag.environment import SettingsError, settings_from_environment
 from local_rag.gateway import ModelGateway
-from local_rag.gateway_litellm import LiteLLMGateway
+from local_rag.gateway_litellm import gateway_from_settings
 from local_rag.index import KnowledgeIndex
 from local_rag.index_format import Access
+from local_rag.settings import RetrievalMode
 
 PLACEHOLDER_PREFIX = "CHANGE_ME"
 
@@ -75,9 +76,9 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
         check("settings", lambda: _raise(error))
         return 1
 
-    gateway = gateway or (LiteLLMGateway.from_settings(settings) if _gateway_named(environ)
+    gateway = gateway or (gateway_from_settings(settings) if _gateway_named(environ, settings)
                           else None)
-    check("Model gateway (embeddings)", lambda: _embeddings(environ, gateway))
+    check("Model gateway (embeddings)", lambda: _embeddings(environ, settings, gateway))
     check("Rerank", lambda: _rerank(settings.rerank_model, gateway))
     check("Knowledge index", lambda: _index(settings, gateway, client))
     check("LiteParse", lambda: _version(run, settings.liteparse_bin))
@@ -97,11 +98,17 @@ def _tokens(environ: Mapping[str, str]) -> str:
     return f"{len(tokens)} token{'s' if len(tokens) != 1 else ''}"
 
 
-def _gateway_named(environ: Mapping[str, str]) -> bool:
+def _gateway_named(environ: Mapping[str, str], settings) -> bool:
+    """Whether the environment names a Model gateway this installation needs: Keyword-only
+    retrieval needs one only for a reranker."""
+    if settings.retrieval is RetrievalMode.KEYWORD:
+        return bool(environ.get("LITELLM_BASE_URL") and settings.rerank_model)
     return bool(environ.get("LITELLM_BASE_URL") and environ.get("RAG_EMBED_MODEL"))
 
 
-def _embeddings(environ: Mapping[str, str], gateway: ModelGateway | None) -> str:
+def _embeddings(environ: Mapping[str, str], settings, gateway: ModelGateway | None) -> str:
+    if settings.retrieval is RetrievalMode.KEYWORD:
+        raise _Skipped("RAG_RETRIEVAL=keyword, so no embedding model is used")
     # Settings would fill a default in for these, and a default is no Model gateway of ours.
     missing = [name for name in ("LITELLM_BASE_URL", "RAG_EMBED_MODEL") if not environ.get(name)]
     if missing:
@@ -114,7 +121,7 @@ def _rerank(model: str | None, gateway: ModelGateway | None) -> str:
     if not model:
         raise _Skipped("RAG_RERANK_MODEL is not set, so search does not rerank")
     if gateway is None:
-        raise ValueError("no Model gateway: LITELLM_BASE_URL and RAG_EMBED_MODEL are not set")
+        raise ValueError("no Model gateway: LITELLM_BASE_URL is not set")
     scores = gateway.rerank("smoke test", ["first text", "second text"])
     if len(scores) != 2:
         raise ValueError(f"asked to score 2 texts, got {len(scores)} scores")
@@ -122,6 +129,8 @@ def _rerank(model: str | None, gateway: ModelGateway | None) -> str:
 
 
 def _index(settings, gateway: ModelGateway | None, client: QdrantClient | None) -> str:
+    if gateway is None and (settings.retrieval is RetrievalMode.HYBRID or settings.rerank):
+        raise ValueError("no Model gateway: LITELLM_BASE_URL is not set")
     index = KnowledgeIndex(settings, gateway, client=client)
     health = index.health()
     if not health.qdrant or not health.knowledge_index:

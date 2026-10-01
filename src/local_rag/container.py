@@ -243,6 +243,10 @@ QDRANT_API_KEY={qdrant_key}
 MCP_TOKENS={mcp_token}
 MCP_PORT=8765
 
+# Retrieval mode: hybrid (the default) searches by meaning and keywords and needs an embedding
+# model; keyword searches by keywords alone and needs none. Changing it later means a Rebuild.
+# RAG_RETRIEVAL=hybrid
+
 # Model gateway (LiteLLM): set these before the first Sync
 # LITELLM_BASE_URL=http://GATEWAY_HOST:4000/v1
 # LITELLM_API_KEY=

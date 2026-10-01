@@ -152,10 +152,15 @@ Validate: A1 is one of the two routes and its pre-flight passes. A2 contains the
 
 > **B1.** What is the LiteLLM Model gateway's base URL, including `/v1`? (`LITELLM_BASE_URL`; example `http://gateway.example.test:4000/v1`.)
 > **B2.** What API key does the gateway want? Leave it blank if it needs none. (`LITELLM_API_KEY`)
-> **B3.** What is the embedding model's name as registered in LiteLLM, its `model_name`? (`RAG_EMBED_MODEL`; see `examples/litellm_config.yaml`.) Changing it later means a Rebuild.
+> **B3.** Does the Model gateway serve an embedding model: yes, no, or not sure? If yes, what is its name as registered in LiteLLM, its `model_name`? (`RAG_EMBED_MODEL`; see `examples/litellm_config.yaml`.) Changing it later means a Rebuild.
 > **B4.** Optional: the reranker's `model_name`? Leave it blank for no reranking. (`RAG_RERANK_MODEL`)
 
-Validate B1 to B3 by asking the gateway itself, from this host, with the request the adapter sends. `--noproxy '*'` matches the adapter, which never uses a proxy for the gateway:
+B3 decides the **Retrieval mode** (`RAG_RETRIEVAL`). With an embedding model the mode is `hybrid`, the default: searches match by meaning and by keywords. Without one it is `keyword`: searches match by keywords alone and nothing needs the gateway, so B1 and B2 matter only if B4 is answered. The mode is a deliberate choice: the system never switches by itself and refuses to start in `hybrid` without a named model.
+
+- **yes:** validate the name with the request below. A pass means `hybrid`. A failed request is reported to the operator, with its cause, and the **operator** chooses between fixing it and `keyword`; never pick `keyword` for them because a request failed.
+- **no or not sure:** set `RAG_RETRIEVAL=keyword` and tell the operator that adding an embedding model later means setting `RAG_RETRIEVAL=hybrid`, naming the model, and running a **Rebuild** (section 9). Until then the index is searched by keywords alone, which finds exact terms (error codes, hostnames) but not paraphrases.
+
+Validate B1 to B3, for `hybrid`, by asking the gateway itself, from this host, with the request the adapter sends. `--noproxy '*'` matches the adapter, which never uses a proxy for the gateway:
 
 ```bash
 curl -sS --noproxy '*' -m 30 -o /tmp/embed.json -w 'HTTP %{http_code}\n' "$LITELLM_BASE_URL/embeddings" \
@@ -230,7 +235,8 @@ Apply the section 3 answers with `set_env` (set `ENV_FILE` for your route). Only
 ```bash
 RAG_VALUE="$LITELLM_BASE_URL"  set_env LITELLM_BASE_URL
 RAG_VALUE="$LITELLM_API_KEY"   set_env LITELLM_API_KEY          # skip if the gateway needs none
-RAG_VALUE="$RAG_EMBED_MODEL"   set_env RAG_EMBED_MODEL
+RAG_VALUE="$RAG_EMBED_MODEL"   set_env RAG_EMBED_MODEL          # skip when B3 chose keyword
+RAG_VALUE=keyword              set_env RAG_RETRIEVAL            # only when B3 chose keyword
 RAG_VALUE="$RAG_RERANK_MODEL"  set_env RAG_RERANK_MODEL         # skip for no rerank
 # Confluence Corpus
 RAG_VALUE="$CONFLUENCE_DOMAIN"    set_env CONFLUENCE_DOMAIN
@@ -285,7 +291,7 @@ run_rag /opt/local-rag/venv/bin/python -m local_rag.smoke --systemd   # systemd 
 compose run --rm -T sync python -m local_rag.smoke                    # container route
 ```
 
-Pass is no `[FAIL]` line. Its checks: `MCP_TOKENS`, `Model gateway (embeddings)` (model answers, with its dimension), `Rerank` (`[SKIP]` when `RAG_RERANK_MODEL` is unset), `Knowledge index` (Qdrant reachable, document and passage counts), `LiteParse`, `Confluence CLI` (`[SKIP]` for a folder Corpus), and with `--systemd` the four units (`qdrant.service`, `local-rag-mcp.service`, `local-rag-sync.timer`, `local-rag-full.timer`). A `[WARN]` is not a pass: read it (a read-only index, for example).
+Pass is no `[FAIL]` line. Its checks: `MCP_TOKENS`, `Model gateway (embeddings)` (model answers, with its dimension; `[SKIP]` in `keyword` mode), `Rerank` (`[SKIP]` when `RAG_RERANK_MODEL` is unset), `Knowledge index` (Qdrant reachable, document and passage counts), `LiteParse`, `Confluence CLI` (`[SKIP]` for a folder Corpus), and with `--systemd` the four units (`qdrant.service`, `local-rag-mcp.service`, `local-rag-sync.timer`, `local-rag-full.timer`). A `[WARN]` is not a pass: read it (a read-only index, for example).
 
 Then run the acceptance suite, the end-to-end proof that the stack works (it builds its own throwaway collection and temp folder and removes them, so it is safe next to the Live index; the MCP and Confluence groups only read):
 
@@ -295,7 +301,7 @@ compose run --rm -T sync python -m local_rag.acceptance --skip install --mcp-url
 sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.acceptance --container --only install   # container route, on the host
 ```
 
-Pass is exit code 0 and the last line `ACCEPTANCE PASSED`. Every line is `[ OK ]`, `[FAIL]` or `[SKIP]` with a stable check name (`gateway.embeddings`, `qdrant.wrong-key`, `index.tail-meaning`, `mcp.no-token`, `install.timers`, `confluence.roots`, ...); a `[FAIL]` line states the likely cause and the section of this guide to read, so go there before changing anything. A `[SKIP]` states why (no `RAG_RERANK_MODEL`, no `CONFLUENCE_DOMAIN`, or an earlier check failed): report skips to the operator, they are not passes. Exit code 1 is a failed check, 2 a command line or setting it cannot use. `--only GROUP` (repeatable; groups `gateway`, `qdrant`, `index`, `mcp`, `install`, `confluence`) reruns one group after a fix. `index.tail-meaning` failing while `index.tail-keyword` passes means the embedding model reads less than a whole Passage: lower `RAG_CHUNK_TOKENS`, then a Rebuild (when the operator asks for one). The `install` group is not optional: without `--systemd` or `--container` it fails (`install.route`). Inside the stack, which has no `docker` or `systemctl`, leave it out with `--skip install` and run it on the host, as the second and third commands show.
+Pass is exit code 0 and the last line `ACCEPTANCE PASSED`. Every line is `[ OK ]`, `[FAIL]` or `[SKIP]` with a stable check name (`gateway.embeddings`, `qdrant.wrong-key`, `index.tail-meaning`, `mcp.no-token`, `install.timers`, `confluence.roots`, ...); a `[FAIL]` line states the likely cause and the section of this guide to read, so go there before changing anything. A `[SKIP]` states why (no `RAG_RERANK_MODEL`, no `CONFLUENCE_DOMAIN`, `RAG_RETRIEVAL=keyword` for the checks that need an embedding model, or an earlier check failed): report skips to the operator, they are not passes. In `hybrid` mode a dead embedding model is a `[FAIL]`, never a skip. Exit code 1 is a failed check, 2 a command line or setting it cannot use. `--only GROUP` (repeatable; groups `gateway`, `qdrant`, `index`, `mcp`, `install`, `confluence`) reruns one group after a fix. `index.tail-meaning` failing while `index.tail-keyword` passes means the embedding model reads less than a whole Passage: lower `RAG_CHUNK_TOKENS`, then a Rebuild (when the operator asks for one). The `install` group is not optional: without `--systemd` or `--container` it fails (`install.route`). Inside the stack, which has no `docker` or `systemctl`, leave it out with `--skip install` and run it on the host, as the second and third commands show.
 
 Then the rest:
 
@@ -346,6 +352,11 @@ Prefix `local-rag` commands with `run_rag /opt/local-rag/venv/bin/` (systemd) or
 | Upgrade | a new Binary drop, then section 2's drop checks and section 4's command again |
 | Undo a bad Rebuild | `local-rag switch-back` (the **Previous index** becomes the Live index) |
 | Change the embedding model | a **Rebuild**, only when the operator asks, see below |
+| Switch between `hybrid` and `keyword` | set `RAG_RETRIEVAL` (and `RAG_EMBED_MODEL` for `hybrid`), then a **Rebuild**, as below |
+
+Changing `RAG_RETRIEVAL`: the index records its Retrieval mode. A `keyword` index run under `hybrid` settings, or the reverse, is a **Read-only index**: searches work by keywords alone (a search under `hybrid` settings starts with a note saying so), Sync is refused, and nothing is rebuilt automatically. Follow the same sequence as for a new embedding model, below.
+
+When the embedding model cannot be reached while a `hybrid` index is running, searches fall back to keywords for that query and start with `Note: Results are keyword-only ...`; `/healthz` stays `200` and says so in its body, and `local-rag status` reports the dimension check as unreachable. During a Sync or Rebuild, an embedding call that failed for a reason that may pass (a timeout, a busy gateway, a 5xx) is tried `RAG_EMBED_ATTEMPTS` times (default 3), waiting `RAG_EMBED_RETRY_BACKOFF` seconds (default 0.5) before the second and twice as long before each later one; a wrong key or model name is not retried. A Document that still fails counts as failed: `sync` exits 1 and lists it, and a Rebuild is promoted only within `RAG_REBUILD_FAILURE_THRESHOLD`. If the gateway will be down for long, switch to `keyword` and run a Rebuild.
 
 Changing `RAG_EMBED_MODEL` (or its dimension): the index records the model and its dimension, and a mismatch makes it read-only (Sync refused) or, for a different dimension, refused (search too) until a Rebuild promotes. A running MCP server keeps the settings it started with, so edit the env file with the new model but **do not restart the MCP server yet**; run the Rebuild, which reads the new settings, and restart the server once it reports `promoted`. The hourly and weekly Syncs fail harmlessly in between. A Rebuild can run for hours: detach it,
 
@@ -370,7 +381,9 @@ Diagnose from the symptom; check the cause with the command before changing anyt
 | `gateway ... answered 401` | `LITELLM_API_KEY` wrong or missing | re-ask B2, `set_env`, no restart needed for a Sync; restart the MCP server |
 | `gateway ... answered 404` (or 400) | `LITELLM_BASE_URL` lacks `/v1`, or `RAG_EMBED_MODEL` is not a LiteLLM `model_name` | group B request, URL then model name |
 | `embedding dimension differs: index has X, the Model gateway returns Y`; access `refused` | the embedding model changed since the index was built | the Rebuild sequence in section 9; to go back, restore the old `RAG_EMBED_MODEL` |
-| `embedding model differs`, `sparse encoder parameters differ`, access `read-only` | model or code changed; Sync is refused | a Rebuild, when the operator asks |
+| `RAG_RETRIEVAL is hybrid but RAG_EMBED_MODEL is not set`, a command exits 1 or 2 | hybrid is the default and needs an embedding model named | name it (group B, B3), or `set_env RAG_RETRIEVAL keyword` to run without one |
+| search results start with `Note: Results are keyword-only` | the embedding model could not be reached for that search, or the index was built without one | the first: the `curl --noproxy '*'` of group B; the second: `local-rag status` says `retrieval mode differs`, so run a Rebuild when the operator asks |
+| `retrieval mode differs`, `embedding model differs`, `sparse encoder parameters differ`, access `read-only` | model or code changed; Sync is refused | a Rebuild, when the operator asks |
 | Sync: `confluence not found` | the service user's PATH lacks the CLI | install it where `/usr/local/bin:/usr/bin:/bin` finds it, or set `CONFLUENCE_BIN` |
 | Sync: `confluence ... failed (...)`, 401 or 403 | token, `CONFLUENCE_AUTH_TYPE`, or the account cannot see the page | `run_rag confluence spaces` and `confluence info ROOT --json`; re-ask C4 |
 | Sync: `failed root <id>` (an incomplete listing) | a Root or attachment listing failed | nothing was removed (a Sync removes nothing after an incomplete listing, and a Rebuild is refused); fix the Root, run again |

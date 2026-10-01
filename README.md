@@ -18,6 +18,8 @@ An agent can install, configure, verify and operate it from [`docs/agents/closed
 
 **Hybrid retrieval.** A Document is split into Passages of about `RAG_CHUNK_TOKENS` tokens, each prefixed with the Document's title when it is embedded, so a long page is searchable by any part of it; results still point at the Document. Every Passage gets a dense vector (your embedding model) and a BM25-style sparse vector. A query runs both, Qdrant fuses the rankings with Reciprocal Rank Fusion, and optionally the Model gateway's reranker reorders the best candidates. Exact identifiers such as `ORA-00942`, `OPS-4711` or hostnames match reliably. No more than a few Passages of one Document are returned per search.
 
+**Keyword-only mode.** With `RAG_RETRIEVAL=keyword` the system needs no embedding model at all: Passages get only the BM25-style vector, search runs only the keyword side, and nothing reaches the Model gateway unless a reranker is named. It finds exact terms but not paraphrases, so the search tool says so to Claude. The mode is a choice you make, recorded in the Index format; `hybrid` is the default and refuses to start without `RAG_EMBED_MODEL`. Moving between the two is a Rebuild, like changing the embedding model. If the embedding model cannot be reached for a search in `hybrid` mode, that search falls back to keywords and its results begin with a note saying so; `/healthz` keeps answering 200 and `status` reports it. During a Sync or Rebuild a failed embedding call is retried (`RAG_EMBED_ATTEMPTS`), and a Document that still fails counts as failed: `sync` exits 1, and a Rebuild is promoted only within the failure threshold. The reasons are in [ADR 0003](docs/adr/0003-retrieval-mode-is-explicit-and-never-mixed.md).
+
 **Safe Rebuilds.** A **Rebuild** re-embeds every Document into a fresh index and makes it the **Live index** only if its failure rate is within `RAG_REBUILD_FAILURE_THRESHOLD` (default `0`); otherwise the current Live index stays and the refusal says why. The **Previous index** is kept for one generation and `local-rag switch-back` returns to it. Searches keep working during a Sync or Rebuild.
 
 ## 1. Security model (read this first)
@@ -44,7 +46,7 @@ The air-gapped network has a **Mirror** of public package sources, populated on 
 | LibreOffice or ImageMagick, only if `lit` reports missing converters for Office or image files; OCR language data, only with `RAG_OCR=1` | OS packages (see `lit parse --help`) |
 | Claude Code on each client, plus your internal CA certificate if TLS uses one | your usual channel |
 
-There are no embedding model files and no torch: embeddings and rerank come from the Model gateway.
+There are no embedding model files and no torch: embeddings and rerank come from the Model gateway, and with `RAG_RETRIEVAL=keyword` nothing needs the gateway but an optional reranker.
 
 The Qdrant release the system is tested against is recorded as `QDRANT` in `src/local_rag/binary_drop.py` (version and sha256 of the release tarball) and, for the container route, in the image tag of `deploy/container/compose.yaml`. To move to another release change them together.
 
@@ -76,7 +78,7 @@ It checks the prerequisites and the drop, then creates (only what is missing): t
 
 Then configure and start working:
 
-1. Edit `/etc/local-rag/local-rag.env`: `LITELLM_BASE_URL` (ends with `/v1`), `LITELLM_API_KEY`, `RAG_EMBED_MODEL` (the `model_name` registered in LiteLLM, see `examples/litellm_config.yaml`), optionally `RAG_RERANK_MODEL`, and the `CONFLUENCE_*` block (bearer token, `CONFLUENCE_READ_ONLY=true`). Settings are read at start: `sudo systemctl restart local-rag-mcp` afterwards.
+1. Edit `/etc/local-rag/local-rag.env`: `LITELLM_BASE_URL` (ends with `/v1`), `LITELLM_API_KEY`, `RAG_EMBED_MODEL` (the `model_name` registered in LiteLLM, see `examples/litellm_config.yaml`; or `RAG_RETRIEVAL=keyword` instead, if the network has no embedding model), optionally `RAG_RERANK_MODEL`, and the `CONFLUENCE_*` block (bearer token, `CONFLUENCE_READ_ONLY=true`). Settings are read at start: `sudo systemctl restart local-rag-mcp` afterwards.
 2. List the Confluence Roots, one page id or URL per line, in `/etc/local-rag/confluence_roots.txt`. A Space's home page as a Root covers the whole Space.
 3. Run the smoke check (section 6), then the first Sync: `sudo systemctl start local-rag-sync.service` (it runs until done; follow it with `journalctl -fu local-rag-sync`).
 4. Health: `curl http://HOST:8765/healthz` answers `ok`. Your first token: `sudo grep '^MCP_TOKENS=' /etc/local-rag/local-rag.env`.
@@ -163,9 +165,9 @@ It runs these groups, each check on its own line with a stable name (`--only GRO
 
 | Group | Proves |
 |---|---|
-| `gateway` | `/embeddings` answers and reports its dimension; a text far longer than one Passage is split into Passages the model accepts; rerank, only if `RAG_RERANK_MODEL` is set |
+| `gateway` | (not in `keyword` mode, where these are skipped with the reason) `/embeddings` answers and reports its dimension; a text far longer than one Passage is split into Passages the model accepts; rerank, only if `RAG_RERANK_MODEL` is set |
 | `qdrant` | Qdrant answers with the configured key and refuses a wrong one |
-| `index` | on a throwaway collection and a temp folder of generated Documents: Sync; a distinctive term (keyword) and a paraphrase sharing no word (meaning) find their Documents; text from the tail of a long Document is found by term and by meaning, which shows the real embedding model reads whole Passages; `status` counts; a changed Document is replaced and a removed one disappears; Rebuild and `switch-back` |
+| `index` | on a throwaway collection and a temp folder of generated Documents: Sync; a distinctive term (keyword) and a paraphrase sharing no word (meaning) find their Documents; text from the tail of a long Document is found by term and by meaning, which shows the real embedding model reads whole Passages (the meaning checks are skipped in `keyword` mode); `status` counts; a changed Document is replaced and a removed one disappears; Rebuild and `switch-back` |
 | `mcp` | the running MCP server, over HTTP with a token from `MCP_TOKENS` (or `--token`): `search_docs`, `list_spaces`, `get_page` answer; no token and a wrong token get 401; `/healthz` answers 200 without a token. It listens where `MCP_HOST` and `MCP_PORT` say, or `--mcp-url` (inside the container stack the server is another container: `--mcp-url http://mcp:8765`, as above) |
 | `install` | needs `--systemd` or `--container`. Units exist, are active and enabled, the env file is not world-readable, the sync timers are scheduled; container route: the stack's `qdrant` and `mcp` containers are up and healthy. The container route's checks need `docker` and `systemctl`, so run them on the host (third command above, where only the standard library is needed), not inside the stack |
 | `confluence` | only when `CONFLUENCE_DOMAIN` is set: the read-only `confluence spaces` call works and every Root of the roots file (`--roots-file`, default `/etc/local-rag/confluence_roots.txt`) resolves |
@@ -179,7 +181,7 @@ It never touches the live index: the `index` group works in its own collection `
 | Status: Live index generation, Documents, Passages, Index format, last Sync | `local-rag status` |
 | Try a query | `local-rag search "ORA-00942" [--space ENG] [-k 5]` |
 | Sync now | `local-rag sync --roots-file /etc/local-rag/confluence_roots.txt`, or `systemctl start local-rag-sync.service` |
-| Rebuild (new embedding model) | `local-rag rebuild --roots-file /etc/local-rag/confluence_roots.txt` |
+| Rebuild (new embedding model, or `RAG_RETRIEVAL` changed) | `local-rag rebuild --roots-file /etc/local-rag/confluence_roots.txt` |
 | Undo a bad Rebuild | `local-rag switch-back` |
 | Logs | `journalctl -u local-rag-mcp -f`, `journalctl -u local-rag-sync` (container route: `docker logs`, journal of the `local-rag-container-*` units) |
 | Add or revoke a user | edit `MCP_TOKENS`, restart the MCP server (`compose up -d` on the container route) |
@@ -188,9 +190,9 @@ Exit codes of `local-rag`: `0` success; `1` failure or refusal (a Sync with fail
 
 A folder Corpus works the same way (`local-rag sync --folder DIR`; the Space is the top-level folder), but one Knowledge index follows one Corpus: a Sync of another Corpus removes every Document it does not list. Try a folder with its own `RAG_COLLECTION`.
 
-**Index format.** The index records how it was built (schema version, sparse encoder parameters, chunk size and overlap, embedding model name and dimension). After an upgrade, a model change or a change of `RAG_CHUNK_TOKENS` or `RAG_CHUNK_OVERLAP`, `local-rag status` tells whether it still matches. A mismatching index that can still be searched is served as a **Read-only index** with a warning and refuses Sync until you run a Rebuild; an unusable one is refused. Nothing is ever rebuilt automatically. After changing the embedding model or the chunk settings, run a Rebuild. An index built before Documents were split into Passages did not record its chunk settings, so it shows up as a Read-only index until you run one.
+**Index format.** The index records how it was built (schema version, Retrieval mode, sparse encoder parameters, chunk size and overlap, and for a hybrid index the embedding model name and dimension). After an upgrade, a model change, a change of `RAG_RETRIEVAL` or a change of `RAG_CHUNK_TOKENS` or `RAG_CHUNK_OVERLAP`, `local-rag status` tells whether it still matches. A mismatching index that can still be searched is served as a **Read-only index** with a warning and refuses Sync until you run a Rebuild; an unusable one is refused. Nothing is ever rebuilt automatically. After changing the embedding model, the Retrieval mode or the chunk settings, run a Rebuild. An index built before Documents were split into Passages did not record its chunk settings, so it shows up as a Read-only index until you run one.
 
-**Settings** (the env file; unset means the default): `RAG_TOP_K` (6), `RAG_HYBRID_CANDIDATES` per retriever (40), `RAG_MAX_PER_DOC` (2), `RAG_CHUNK_TOKENS` (400, the target Passage size in tokens), `RAG_CHUNK_OVERLAP` (60, tokens shared by neighbouring Passages; must be smaller than the size), `RAG_EMBED_BATCH` (16), `RAG_GATEWAY_TIMEOUT` (60 s), `RAG_RERANK_MODEL` (off), `RAG_REBUILD_FAILURE_THRESHOLD` (0, a share between 0 and 1), `RAG_COLLECTION`, `RAG_BM25_*`, `RAG_OCR`, `LIT_BIN`, `CONFLUENCE_BIN`. The authoritative list is `src/local_rag/environment.py`.
+**Settings** (the env file; unset means the default): `RAG_TOP_K` (6), `RAG_HYBRID_CANDIDATES` per retriever (40), `RAG_MAX_PER_DOC` (2), `RAG_CHUNK_TOKENS` (400, the target Passage size in tokens), `RAG_CHUNK_OVERLAP` (60, tokens shared by neighbouring Passages; must be smaller than the size), `RAG_RETRIEVAL` (`hybrid`, or `keyword` to run without an embedding model), `RAG_EMBED_BATCH` (16), `RAG_EMBED_ATTEMPTS` (3, tries at one Document's embeddings in a Sync or Rebuild; a search never retries), `RAG_EMBED_RETRY_BACKOFF` (0.5 s before the second try, doubling), `RAG_GATEWAY_TIMEOUT` (60 s), `RAG_RERANK_MODEL` (off), `RAG_REBUILD_FAILURE_THRESHOLD` (0, a share between 0 and 1), `RAG_COLLECTION`, `RAG_BM25_*`, `RAG_OCR`, `LIT_BIN`, `CONFLUENCE_BIN`. The authoritative list is `src/local_rag/environment.py`.
 
 **Backup.** The Knowledge index can be rebuilt from the Corpus and the Model gateway; back up the env file (the settings and secrets), and optionally Qdrant snapshots.
 
@@ -201,7 +203,9 @@ A folder Corpus works the same way (`local-rag sync --folder DIR`; the Space is 
 | `/healthz` answers 503 | Qdrant is down or `QDRANT_API_KEY` differs from `QDRANT__SERVICE__API_KEY` (the systemd env file keeps them equal), or the Live index is unusable: `local-rag status` |
 | `search_docs` says "No results" | Nothing indexed yet: run a Sync and read its output or the journal |
 | Embedding errors, 401 or 404 | `LITELLM_BASE_URL` must end with `/v1`; `RAG_EMBED_MODEL` is the LiteLLM `model_name`; the gateway is always contacted directly, ignoring proxy variables. The smoke check shows the gateway's answer |
-| `status` warns about the embedding dimension or Index format | The model, the chunk settings or the code changed since the index was built: run a Rebuild |
+| `status` warns about the embedding dimension or Index format | The model, `RAG_RETRIEVAL`, the chunk settings or the code changed since the index was built: run a Rebuild |
+| A command stops with `RAG_RETRIEVAL is hybrid but RAG_EMBED_MODEL is not set` | Name the embedding model, or set `RAG_RETRIEVAL=keyword` to run without one |
+| Search results begin with `Note: Results are keyword-only` | The embedding model could not be reached for that search (see the smoke check), or the index was built without one and `status` says `retrieval mode differs`: run a Rebuild |
 | A Rebuild is refused | The failure rate exceeded the threshold, or a listing was incomplete (a Root or an Attachment listing failed): read the reason, fix it, retry; the Live index is untouched |
 | 401 from clients | The header must be `Authorization: Bearer <token>`, and the token one of `MCP_TOKENS` at the last restart |
 | Streaming timeouts through nginx | Use `examples/nginx.conf.example` (`proxy_buffering off`) |

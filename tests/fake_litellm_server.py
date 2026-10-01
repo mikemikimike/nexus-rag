@@ -10,8 +10,9 @@ from local_rag.sparse import tokenize
 class FakeLiteLLM:
     """Embeds with a FakeModelGateway; rerank scores by query-word overlap.
 
-    Set `fail_with = (status, body)` to make every request fail, `garbage = True` to
-    answer with a body that is not JSON. Every request is recorded in `requests`.
+    Set `fail_with = (status, body)` to make every request fail (or, with `fail_for = n`,
+    only the next n), `garbage = True` to answer with a body that is not JSON. Every request
+    is recorded in `requests`.
     """
 
     def __init__(self, embedder: FakeModelGateway | None = None, api_key: str = "sk-test"):
@@ -19,6 +20,7 @@ class FakeLiteLLM:
         self.api_key = api_key
         self.requests: list[dict] = []
         self.fail_with: tuple[int, str] | None = None
+        self.fail_for: int | None = None  # requests left to fail; None fails them all
         self.garbage = False
         self.rerank_results: list[dict] | None = None  # overrides the computed results
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
@@ -53,6 +55,10 @@ class FakeLiteLLM:
                                       "auth": self.headers.get("Authorization")})
                 if fake.fail_with:
                     status, text = fake.fail_with
+                    if fake.fail_for is not None:
+                        fake.fail_for -= 1
+                        if fake.fail_for <= 0:
+                            fake.fail_with = fake.fail_for = None
                     return self._send(status, text.encode())
                 if fake.garbage:
                     return self._send(200, b"<html>not json</html>")

@@ -83,11 +83,23 @@ def test_a_gateway_that_does_not_know_the_url_or_model_names_both():
 
 
 def test_an_unset_gateway_fails_instead_of_using_a_default():
-    code, out, _ = gateway_only(environ={"LITELLM_BASE_URL": "", "RAG_EMBED_MODEL": ""})
+    code, out, _ = gateway_only(environ={"LITELLM_BASE_URL": ""})
 
     assert code == 1
-    failed = line(out, "gateway.embeddings")
-    assert "LITELLM_BASE_URL" in failed and "RAG_EMBED_MODEL" in failed
+    assert "LITELLM_BASE_URL" in line(out, "gateway.embeddings")
+
+
+def test_hybrid_retrieval_without_an_embedding_model_is_refused_before_any_check():
+    code, out, err = gateway_only(environ={"RAG_EMBED_MODEL": ""})
+
+    assert code == 2 and out == ""
+    assert "RAG_EMBED_MODEL" in err and "RAG_RETRIEVAL=keyword" in err
+
+
+def test_the_groups_that_never_embed_need_no_embedding_model():
+    code, out, _ = run_suite("--only", "qdrant", environ={"RAG_EMBED_MODEL": ""})
+
+    assert code == 0, out
 
 
 class DriftingGateway(FakeModelGateway):
@@ -828,3 +840,49 @@ def do_nothing_after(allowed):
             return real(*args, **kwargs) if len(calls) <= allowed else None
         return method
     return broken
+
+
+# --- the Retrieval mode ----------------------------------------------------------------
+
+KEYWORD_ONLY = {"RAG_RETRIEVAL": "keyword", "RAG_EMBED_MODEL": "", "LITELLM_BASE_URL": ""}
+NO_STACK_EXTRAS = ("--skip", "install", "--skip", "mcp", "--skip", "confluence")
+
+
+def test_a_keyword_only_suite_passes_with_no_gateway_and_skips_what_needs_embeddings():
+    code, out, _ = run_suite(*NO_STACK_EXTRAS, environ=KEYWORD_ONLY, no_gateway=True)
+
+    assert code == 0, out
+    assert "ACCEPTANCE PASSED" in out and "[FAIL]" not in out
+    for name in ("gateway.embeddings", "gateway.dimension", "gateway.input-limit",
+                 "gateway.rerank", "index.dense", "index.tail-meaning"):
+        assert line(out, name).startswith("[SKIP]"), name
+    assert "keyword" in line(out, "gateway.embeddings")
+    for name in ("index.sync", "index.keyword", "index.tail-keyword", "index.status",
+                 "index.replace", "index.remove", "index.rebuild", "index.switch-back"):
+        assert line(out, name).startswith("[ OK ]"), name
+
+
+def test_a_keyword_only_suite_still_checks_a_reranker_that_is_named():
+    code, out, _ = run_suite(
+        *NO_STACK_EXTRAS, environ={**KEYWORD_ONLY, "RAG_RERANK_MODEL": "rerank-model",
+                                   "LITELLM_BASE_URL": "http://gateway.example.test:4000/v1"})
+
+    assert code == 0, out
+    assert line(out, "gateway.embeddings").startswith("[SKIP]")
+    assert line(out, "gateway.rerank").startswith("[ OK ]")
+
+
+def test_a_hybrid_suite_with_a_dead_embedding_model_fails_instead_of_skipping():
+    code, out, _ = run_suite(
+        *NO_STACK_EXTRAS, gateway=DownGateway(GatewayError("gateway unreachable")))
+
+    assert code == 1
+    assert line(out, "gateway.embeddings").startswith("[FAIL]")
+
+
+def test_the_suite_says_which_retrieval_mode_it_ran_in():
+    _, keyword, _ = run_suite("--only", "qdrant", environ=KEYWORD_ONLY)
+    _, hybrid, _ = run_suite("--only", "qdrant")
+
+    assert "retrieval:        keyword" in keyword
+    assert "retrieval:        hybrid" in hybrid

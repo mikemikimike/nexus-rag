@@ -5,7 +5,8 @@ import secrets
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from local_rag import acceptance_corpus
-from local_rag.acceptance_report import QDRANT_DOWN, Context, Failure, Skipped
+from local_rag.acceptance_report import (
+    KEYWORD_ONLY, QDRANT_DOWN, Context, Failure, Skipped, is_keyword_only)
 from local_rag.chunker import Chunker
 from local_rag.gateway_litellm import GatewayError
 
@@ -51,10 +52,14 @@ def run_gateway(ctx: Context) -> None:
     check("gateway.embeddings", lambda: _embeddings(ctx))
     check("gateway.dimension", lambda: _dimension(ctx), needs=["gateway.embeddings"])
     check("gateway.input-limit", lambda: _input_limit(ctx), needs=["gateway.embeddings"])
-    check("gateway.rerank", lambda: _rerank(ctx), needs=["gateway.embeddings"])
+    # A reranker is checked on its own in Keyword-only retrieval, which has no embedding check.
+    check("gateway.rerank", lambda: _rerank(ctx),
+          needs=[] if is_keyword_only(ctx) else ["gateway.embeddings"])
 
 
 def _embeddings(ctx: Context) -> str:
+    if is_keyword_only(ctx):
+        raise Skipped(KEYWORD_ONLY)
     gateway = _require_gateway(ctx)
     try:
         vector = gateway.embed_query("acceptance probe")
@@ -119,6 +124,10 @@ def _rerank(ctx: Context) -> str:
     model = ctx.settings.rerank_model
     if not model:
         raise Skipped("RAG_RERANK_MODEL is not set, so search does not rerank")
+    if ctx.gateway is None:
+        raise Failure("no Model gateway: LITELLM_BASE_URL is not set",
+                      cause="the env file lacks the Model gateway's address, which RAG_RERANK_MODEL "
+                            "needs", see="section 5 (Configure)")
     relevant = "Reset a forgotten password from the account page."
     unrelated = "The cafeteria serves soup on Tuesdays."
     try:
