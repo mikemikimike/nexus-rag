@@ -394,3 +394,25 @@ def test_a_listing_of_unchanged_files_reads_no_blob_again_even_in_a_new_process(
 
     assert second == first
     assert "cat-file" not in log.read_text()
+
+
+def test_changing_the_primary_ref_updates_stored_documents_whose_files_did_not_change(
+        gitlab, cache):
+    gitlab.git(REPOSITORY, "tag", "v1", "main")  # the same files, so the same blobs
+    index = KnowledgeIndex(Settings(), FakeModelGateway())
+
+    def sync(main_is_primary):
+        return index.sync(corpus(gitlab, cache, Repository(REPOSITORY, "main", main_is_primary),
+                                 Repository(REPOSITORY, "v1", not main_is_primary), name="code"))
+
+    def refs_found():
+        return {p.ref for p in index.search("post_entry ledger", k=15)}
+
+    sync(main_is_primary=True)
+    assert refs_found() == {"main"}
+
+    report = sync(main_is_primary=False)
+
+    assert refs_found() == {"v1"}
+    assert (report.replaced, report.failed) == (len(FILES) * 2, 0)
+    assert sync(main_is_primary=False).unchanged == len(FILES) * 2

@@ -130,7 +130,8 @@ class GitLabCorpus:
                 if fetched[repository.path]:
                     raise GitLabError(fetched[repository.path])
                 refs += [DocumentRef(_document_id(repository, f.path), f.blob,
-                                     (repository.part,))
+                                     (repository.part,),
+                                     self._placement(repository, f.path))
                          for f in self._files(repository)]
             except GitLabError as error:
                 failures[repository.part] = str(error)
@@ -157,10 +158,17 @@ class GitLabCorpus:
         parent, _, name = repository.path.rpartition("/")
         return RawDocument(
             id=document_id, title=f"{name}/{path}", space=parent, version=blob,
-            url=f"{self._url}/{repository.path}/-/blob/{quote(repository.ref)}/{quote(path)}",
+            url=self._link(repository, path),
             content=content, media_type=_media_type(path), repository=repository.path,
             ref=repository.ref, primary=repository.primary,
             path=path)
+
+    def _link(self, repository: Repository, path: str) -> str:
+        return f"{self._url}/{repository.path}/-/blob/{quote(repository.ref)}/{quote(path)}"
+
+    def _placement(self, repository: Repository, path: str) -> str:
+        """The listing's own say on a file: whether its ref is primary, and its link."""
+        return f"{'primary' if repository.primary else 'tracked'} {self._link(repository, path)}"
 
     def _locate(self, document_id: str) -> tuple[Repository, str]:
         repository_and_ref, _, path = document_id.partition(":")
