@@ -31,7 +31,7 @@ from local_rag.corpus import DocumentRef, Listing, RawDocument, check_corpus_nam
 
 DEFAULT_MAX_SIZE = 200_000  # bytes; a larger file is data or generated, not something to read
 _MAX_ERROR_LENGTH = 500
-_SNIFF = 8000  # the part of a file that is checked for binary content, as git does
+_VERDICTS_FILE = ".verdicts-1"  # in the cache; its suffix changes with the rules of a verdict
 _GENERATED_HEAD = 1024
 _BATCH = 200
 
@@ -58,8 +58,8 @@ _SUFFIXES = {
     ".sh": "text/x-shellscript", ".bash": "text/x-shellscript", ".zsh": "text/x-shellscript",
     ".ps1": "text/x-powershell", ".bat": "text/x-batch",
     ".sql": "text/x-sql", ".proto": "text/x-protobuf", ".graphql": "text/x-graphql",
-    ".css": "text/css", ".scss": "text/x-scss", ".html": "text/html", ".htm": "text/html",
-    ".json": "application/json", ".yaml": "text/x-yaml", ".yml": "text/x-yaml",
+    ".css": "text/css", ".scss": "text/x-scss", ".html": "text/x-html-source", ".htm": "text/x-html-source",
+    ".json": "text/x-json", ".yaml": "text/x-yaml", ".yml": "text/x-yaml",
     ".toml": "text/x-toml", ".ini": "text/x-ini", ".cfg": "text/x-ini",
     ".xml": "text/xml", ".tf": "text/x-terraform", ".gradle": "text/x-groovy",
     ".cmake": "text/x-cmake", ".mk": "text/x-makefile",
@@ -118,7 +118,7 @@ class GitLabCorpus:
         self._max_size = max_size
         self._timeout = timeout
         self._pinned: dict[str, str] = {}  # part -> the commit its listing was taken at
-        self._verdicts: dict[tuple[str, bool], bool] = {}  # (blob, as code) -> worth indexing
+        self._verdicts: dict[tuple[str, bool], bool] | None = None  # loaded when first needed
 
     def list(self) -> Listing:
         refs, failures = [], {}
@@ -130,7 +130,8 @@ class GitLabCorpus:
                 if fetched[repository.path]:
                     raise GitLabError(fetched[repository.path])
                 refs += [DocumentRef(_document_id(repository, f.path), f.blob,
-                                     (repository.part,))
+                                     (repository.part,),
+                                     self._placement(repository, f.path))
                          for f in self._files(repository)]
             except GitLabError as error:
                 failures[repository.part] = str(error)
@@ -157,10 +158,17 @@ class GitLabCorpus:
         parent, _, name = repository.path.rpartition("/")
         return RawDocument(
             id=document_id, title=f"{name}/{path}", space=parent, version=blob,
-            url=f"{self._url}/{repository.path}/-/blob/{quote(repository.ref)}/{quote(path)}",
+            url=self._link(repository, path),
             content=content, media_type=_media_type(path), repository=repository.path,
             ref=repository.ref, primary=repository.primary,
             path=path)
+
+    def _link(self, repository: Repository, path: str) -> str:
+        return f"{self._url}/{repository.path}/-/blob/{quote(repository.ref)}/{quote(path)}"
+
+    def _placement(self, repository: Repository, path: str) -> str:
+        """The listing's own say on a file: whether its ref is primary, and its link."""
+        return f"{'primary' if repository.primary else 'tracked'} {self._link(repository, path)}"
 
     def _locate(self, document_id: str) -> tuple[Repository, str]:
         repository_and_ref, _, path = document_id.partition(":")
@@ -190,10 +198,12 @@ class GitLabCorpus:
 
     def _sniff(self, files: Sequence[_File], mirror: Path) -> dict[tuple[str, bool], bool]:
         """Whether each blob is text worth indexing: not binary, not blank and, as code, not
-        generated. A blob's verdict is remembered, so one is only read once."""
+        generated. A blob's verdict never changes, so it is remembered in the cache and a blob
+        is only ever read once."""
+        verdicts = self._remembered()
         wanted = {(f.blob, f.media_type not in _PROSE) for f in files}
-        unknown = sorted({blob for blob, as_code in wanted
-                          if (blob, as_code) not in self._verdicts})
+        unknown = sorted({blob for blob, as_code in wanted if (blob, as_code) not in verdicts})
+        learned = []
         for start in range(0, len(unknown), _BATCH):
             batch = unknown[start:start + _BATCH]
             output = self._git("cat-file", "--batch", cwd=mirror, binary=True,
@@ -205,8 +215,26 @@ class GitLabCorpus:
                 content = output[header_end + 1:header_end + 1 + size]
                 offset = header_end + 1 + size + 1
                 for as_code in (True, False):
-                    self._verdicts[blob, as_code] = _is_worth_indexing(content, code=as_code)
-        return {key: self._verdicts[key] for key in wanted}
+                    verdicts[blob, as_code] = _is_worth_indexing(content, code=as_code)
+                    learned.append(f"{blob} {int(as_code)} {int(verdicts[blob, as_code])}\n")
+        if learned:
+            self._cache.mkdir(parents=True, exist_ok=True)
+            with open(self._cache / _VERDICTS_FILE, "a", encoding="ascii") as file:
+                file.writelines(learned)
+        return {key: verdicts[key] for key in wanted}
+
+    def _remembered(self) -> dict[tuple[str, bool], bool]:
+        if self._verdicts is None:
+            self._verdicts = {}
+            try:
+                lines = (self._cache / _VERDICTS_FILE).read_text(encoding="ascii").splitlines()
+            except (OSError, UnicodeDecodeError):
+                lines = []  # no memory yet, or a damaged one: blobs are read again
+            for line in lines:
+                fields = line.split()
+                if len(fields) == 3 and fields[1] in ("0", "1") and fields[2] in ("0", "1"):
+                    self._verdicts[fields[0], fields[1] == "1"] = fields[2] == "1"
+        return self._verdicts
 
     def _mirror(self, repository: Repository) -> Path:
         return self._cache / f"{repository.path}.git"
@@ -308,6 +336,10 @@ def _glob(glob: str) -> re.Pattern:
 
 
 def _is_worth_indexing(content: bytes, *, code: bool) -> bool:
-    if b"\0" in content[:_SNIFF] or not content.strip():
+    if b"\0" in content or not content.strip():
+        return False
+    try:
+        content.decode("utf-8")
+    except UnicodeDecodeError:
         return False
     return not code or not any(marker in content[:_GENERATED_HEAD] for marker in _GENERATED_MARKERS)

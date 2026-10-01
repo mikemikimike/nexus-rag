@@ -365,3 +365,73 @@ def test_the_declaration_rejects_unusable_refs(tmp_path, refs):
     with pytest.raises(DeclarationError):
         declared_code(tmp_path, tmp_path / "c", refs).corpus(
             "code", {"GITLAB_URL": "x", "GITLAB_TOKEN": "y"})
+
+
+def test_a_file_that_is_not_utf_8_or_has_a_nul_anywhere_is_left_out(gitlab, cache):
+    gitlab.commit(REPOSITORY, {
+        "legacy.py": "# café\n".encode("latin-1") + b"x = 1\n",
+        "late_nul.py": b"x = 1\n" * 3000 + b"\x00 tail\n",
+        "utf8.py": "# café\nx = 1\n",
+    })
+
+    found = document_ids(corpus(gitlab, cache))
+
+    assert f"{REPOSITORY}@main:utf8.py" in found
+    assert not found & {f"{REPOSITORY}@main:legacy.py", f"{REPOSITORY}@main:late_nul.py"}
+
+
+def test_a_listing_of_unchanged_files_reads_no_blob_again_even_in_a_new_process(
+        gitlab, cache, tmp_path):
+    log = tmp_path / "tool.log"
+    wrapper = tmp_path / "tool-logged"
+    wrapper.write_text(f'#!/bin/sh\necho "$@" >> {log}\nexec git "$@"\n')
+    wrapper.chmod(0o755)
+
+    first = document_ids(corpus(gitlab, cache, git_bin=str(wrapper)))
+    assert "cat-file --batch" in log.read_text()
+    log.unlink()
+    second = document_ids(corpus(gitlab, cache, git_bin=str(wrapper)))  # a new Corpus object
+
+    assert second == first
+    assert "cat-file" not in log.read_text()
+
+
+def test_changing_the_primary_ref_updates_stored_documents_whose_files_did_not_change(
+        gitlab, cache):
+    gitlab.git(REPOSITORY, "tag", "v1", "main")  # the same files, so the same blobs
+    index = KnowledgeIndex(Settings(), FakeModelGateway())
+
+    def sync(main_is_primary):
+        return index.sync(corpus(gitlab, cache, Repository(REPOSITORY, "main", main_is_primary),
+                                 Repository(REPOSITORY, "v1", not main_is_primary), name="code"))
+
+    def refs_found():
+        return {p.ref for p in index.search("post_entry ledger", k=15)}
+
+    sync(main_is_primary=True)
+    assert refs_found() == {"main"}
+
+    report = sync(main_is_primary=False)
+
+    assert refs_found() == {"v1"}
+    assert (report.replaced, report.failed) == (len(FILES) * 2, 0)
+    assert sync(main_is_primary=False).unchanged == len(FILES) * 2
+
+
+def test_every_indexed_file_comes_back_from_get_document_as_it_is_or_as_prose(gitlab, cache):
+    page = "<html>\n  <body>\n    <p>ledger  page</p>\n  </body>\n</html>\n"
+    data = '{\n    "ledger":   [1,   2],\n    "ok": true\n}\n'
+    gitlab.commit(REPOSITORY, {"web/index.html": page, "web/old.htm": page,
+                               "config/ledger.json": data, "config/ledger.xml": "<a>\n  <b/>\n</a>\n",
+                               "config/ledger.yaml": "a:   1\nb:\n    - 2\n"})
+    index = KnowledgeIndex(Settings(), FakeModelGateway())
+
+    report = index.sync(corpus(gitlab, cache, name="code"))
+
+    assert report.failed == 0
+    stored = lambda name: index.get_document(f"code:{REPOSITORY}@main:{name}")
+    assert stored("web/index.html") == page
+    assert stored("web/old.htm") == page
+    assert stored("config/ledger.json") == data
+    assert stored("config/ledger.xml") == "<a>\n  <b/>\n</a>\n"
+    assert stored("config/ledger.yaml") == "a:   1\nb:\n    - 2\n"

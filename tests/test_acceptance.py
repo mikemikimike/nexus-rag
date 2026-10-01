@@ -956,3 +956,12 @@ def test_the_suite_says_which_retrieval_mode_it_ran_in():
 
     assert "retrieval:        keyword" in keyword
     assert "retrieval:        hybrid" in hybrid
+
+
+def test_the_identifiers_of_a_run_are_never_split_into_parts_by_keyword_search():
+    from local_rag.acceptance_corpus import Run
+    from local_rag.sparse import tokenize
+
+    for run in (Run.new() for _ in range(200)):
+        for identifier in (run.keyword, run.replacement, run.tail):
+            assert tokenize(identifier) == [identifier]

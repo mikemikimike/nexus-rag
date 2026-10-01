@@ -11,6 +11,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
@@ -24,6 +25,23 @@ from local_rag.gateway_litellm import gateway_from_settings
 from local_rag.index import IndexStatus, KnowledgeIndex, Passage, RebuildReport, SyncReport
 from local_rag.index_format import Access
 from local_rag.settings import RetrievalMode
+
+
+@dataclass(frozen=True)
+class _Session:
+    """What a command runs against: the Knowledge index, the environment, where it prints and
+    how to read the Corpus declaration, which only the commands that need it do."""
+
+    index: KnowledgeIndex
+    environ: Mapping[str, str]
+    out: TextIO
+    read_declaration: Callable[[], Declaration]
+
+    def declared[R](self, build: Callable[[Declaration], R]) -> R:
+        try:
+            return build(self.read_declaration())
+        except DeclarationError as error:
+            raise UsageError(str(error)) from None
 
 
 class UsageError(Exception):
@@ -45,11 +63,9 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
         return int(stop.code or 0)
     try:
         settings = settings_from_environment(environ)
-        args.environ = environ
-        corpora = _corpora(args, environ)
         index = KnowledgeIndex(settings, gateway or gateway_from_settings(settings),
                                client=client)
-        return args.run(args, index, corpora, out)
+        return args.run(args, _Session(index, environ, out, _declaration_reader(args, environ)))
     except UsageError as error:
         print(f"error: {error}", file=err)
         return 2
@@ -102,49 +118,44 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _corpora(args: argparse.Namespace, environ: Mapping[str, str]) -> Callable[[], Declaration]:
-    """The declaration, read when a command needs it: search and status never read the file."""
+def _declaration_reader(args: argparse.Namespace,
+                        environ: Mapping[str, str]) -> Callable[[], Declaration]:
+    """Reads the declaration when called: search and status never read the file."""
     path = getattr(args, "corpora", None) or environ.get("RAG_CORPORA_FILE") or DEFAULT_PATH
     return lambda: Declaration.read(path)
 
 
-def _sync(args, index: KnowledgeIndex, declaration, out: TextIO) -> int:
-    corpus = _declared(lambda d: d.corpus(args.corpus, args.environ), declaration)
-    report = index.sync(corpus)
-    _print_sync(report, out)
+def _sync(args, session: _Session) -> int:
+    corpus = session.declared(lambda d: d.corpus(args.corpus, session.environ))
+    report = session.index.sync(corpus)
+    _print_sync(report, session.out)
     return 1 if report.failed else 0
 
 
-def _rebuild(args, index: KnowledgeIndex, declaration, out: TextIO) -> int:
-    corpora = _declared(lambda d: d.corpora(args.environ), declaration)
-    report = index.rebuild(corpora)
-    _print_rebuild(report, out)
+def _rebuild(args, session: _Session) -> int:
+    corpora = session.declared(lambda d: d.corpora(session.environ))
+    report = session.index.rebuild(corpora)
+    _print_rebuild(report, session.out)
     return 0 if report.promoted else 1
 
 
-def _declared[R](build: Callable[[Declaration], R], declaration: Callable[[], Declaration]) -> R:
-    try:
-        return build(declaration())
-    except DeclarationError as error:
-        raise UsageError(str(error)) from None
-
-
-def _forget(args, index: KnowledgeIndex, declaration, out: TextIO) -> int:
+def _forget(args, session: _Session) -> int:
     # Any name that has Documents may be forgotten: the point is to remove a Corpus that is
     # no longer declared, so the declaration is not consulted.
-    removed = index.forget(args.corpus)
-    print(f"Forget: removed {removed} Documents of Corpus {args.corpus!r}", file=out)
+    removed = session.index.forget(args.corpus)
+    print(f"Forget: removed {removed} Documents of Corpus {args.corpus!r}", file=session.out)
     return 0
 
 
-def _switch_back(args, index: KnowledgeIndex, corpora, out: TextIO) -> int:
-    index.switch_back()
-    print("Switched back to the previous index.", file=out)
+def _switch_back(args, session: _Session) -> int:
+    session.index.switch_back()
+    print("Switched back to the previous index.", file=session.out)
     return 0
 
 
-def _search(args, index: KnowledgeIndex, corpora, out: TextIO) -> int:
-    passages = index.search(args.query, k=args.k, space=args.space,
+def _search(args, session: _Session) -> int:
+    out = session.out
+    passages = session.index.search(args.query, k=args.k, space=args.space,
                            repository=args.repository, ref=args.ref)
     if not passages:
         print("No results.", file=out)
@@ -155,13 +166,13 @@ def _search(args, index: KnowledgeIndex, corpora, out: TextIO) -> int:
     return 0
 
 
-def _status(args, index: KnowledgeIndex, declaration, out: TextIO) -> int:
+def _status(args, session: _Session) -> int:
     try:
-        declared = declaration().names
+        declared = session.read_declaration().names
     except DeclarationError:
         declared = None  # status works without a usable declaration; it just cannot compare
-    status = index.status(declared)
-    _print_status(status, out)
+    status = session.index.status(declared)
+    _print_status(status, session.out)
     return 1 if status.access is Access.REFUSED else 0
 
 
@@ -190,11 +201,8 @@ def _print_failures(failures: Mapping[str, str], out: TextIO) -> None:
 def _print_passage(number: int, passage: Passage, out: TextIO) -> None:
     print(f"{number}. {passage.title}", file=out)
     print(f"   link: {passage.link}", file=out)
-    if passage.start_line is not None:
-        print(f"   file: {passage.path or passage.title}", file=out)
-        print(f"   lines: {passage.line_range}", file=out)
-        if passage.symbol:
-            print(f"   symbol: {passage.symbol}", file=out)
+    for name, value in passage.code_location:
+        print(f"   {name}: {value}", file=out)
     print(f"   space: {passage.space}", file=out)
     if passage.ref:
         print(f"   ref: {passage.ref}", file=out)

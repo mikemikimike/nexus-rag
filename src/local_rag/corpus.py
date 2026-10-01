@@ -46,6 +46,7 @@ class Document:
     ref: str | None = None  # code: the Tracked ref the file was read at
     primary: bool = True  # code: whether that is the Repository's Primary ref
     path: str | None = None  # a code file's path within its Repository
+    placement: str = ""  # see DocumentRef.placement; set by the index
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,9 @@ class DocumentRef:
     # them could not be listed, the Document is not removed. A Document may sit in several
     # parts at once (an Attachment is in its page's Root and in its page's Attachments).
     parts: tuple[str, ...] = ()
+    # What else the stored copy says that comes from the listing, not the content (a code file's
+    # Primary ref mark and link): a change re-adds the Document though its version is the same.
+    placement: str = ""
 
 
 class Listing(list[DocumentRef]):

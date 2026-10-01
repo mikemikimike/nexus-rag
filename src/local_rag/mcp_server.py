@@ -35,24 +35,24 @@ DEFAULT_PORT = 8765
 type Serve = Callable[..., None]  # (app, *, host, port, certfile, keyfile), blocks until stopped
 
 
+_CODE_PARAGRAPH = """Code results show the file, its line range, the enclosing symbol and their `ref`. Searches see each
+Repository's Primary ref only: pass `ref` to search another Tracked ref (a branch or tag), and
+`repository` (its path) to search one Repository."""
+
 _SEARCH_DESCRIPTION = {
-    RetrievalMode.HYBRID: """Hybrid (semantic + keyword) search over indexed pages, attachments and code files from GitLab repositories.
-Returns the best passages with title, link, page_id and space.
+    RetrievalMode.HYBRID: f"""Hybrid (semantic + keyword) search over indexed Documents: pages, attachments and code files from GitLab Repositories.
+Returns the best Passages with title, link, page_id and space.
 Exact identifiers (error codes, hostnames, ticket ids) work well in the query.
 Optional `space` restricts the search to one space (see list_spaces); spaces include GitLab groups.
-Code results show the file, its line range, the enclosing symbol and their `ref`. Searches see each
-repository's primary ref only: pass `ref` to search another tracked ref (a branch or tag), and
-`repository` (its path) to search one repository.
-For the whole page or file use get_page with the returned page_id.""",
-    RetrievalMode.KEYWORD: """Keyword search over indexed pages, attachments and code files from GitLab repositories. It matches the
-words you give, not their meaning: use the terms the page itself would use.
-Returns the best passages with title, link, page_id and space.
+{_CODE_PARAGRAPH}
+For the whole Document use get_page with the returned page_id.""",
+    RetrievalMode.KEYWORD: f"""Keyword search over indexed Documents: pages, attachments and code files from GitLab Repositories. It matches the
+words you give, not their meaning: use the terms the Document itself would use.
+Returns the best Passages with title, link, page_id and space.
 Exact identifiers (error codes, hostnames, ticket ids) work well in the query.
 Optional `space` restricts the search to one space (see list_spaces); spaces include GitLab groups.
-Code results show the file, its line range, the enclosing symbol and their `ref`. Searches see each
-repository's primary ref only: pass `ref` to search another tracked ref (a branch or tag), and
-`repository` (its path) to search one repository.
-For the whole page or file use get_page with the returned page_id.""",
+{_CODE_PARAGRAPH}
+For the whole Document use get_page with the returned page_id.""",
 }
 
 
@@ -77,8 +77,8 @@ def build_server(index: KnowledgeIndex) -> MCPServer:
 
     @server.tool()
     async def get_page(page_id: str, max_chars: int = 20000) -> str:
-        """Return the full indexed text of a page or a file by the page_id search_docs gave
-        (or of an attachment by its attachment id). It is a snapshot as of the last sync."""
+        """Return the full indexed text of a page or a file (a Document) by the page_id
+        search_docs gave (or of an attachment by its attachment id), as of the last Sync."""
         text = await anyio.to_thread.run_sync(index.get_document, page_id)
         if text is None:
             return f"Page {page_id} is not in the index."
@@ -203,11 +203,8 @@ def _format_passages(passages: list[Passage]) -> str:
             header += f" | ref: {passage.ref}"
         if passage.parent_id:
             header += f" | attachment: {passage.document_id}"
-        if passage.start_line is not None:
-            header += f" | file: {passage.path or passage.title}"
-            header += f" | lines: {passage.line_range}"
-            if passage.symbol:
-                header += f" | symbol: {passage.symbol}"
+        for name, value in passage.code_location:
+            header += f" | {name}: {value}"
         blocks.append(f"[{number}] {passage.title}\n{header}\n{passage.text.strip()}")
     return "\n\n---\n\n".join(blocks)
 

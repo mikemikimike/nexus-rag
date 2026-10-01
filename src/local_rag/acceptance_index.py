@@ -60,8 +60,11 @@ class _RoundTrip:
     def search(self, query: str, k: int = SEARCH_K):
         return self.index.search(query, k=k)
 
+    def stored_id(self, document_id: str) -> str:
+        return qualified_id(self.corpus.name, document_id)
+
     def found(self, query: str, document_id: str) -> bool:
-        stored = qualified_id(self.corpus.name, document_id)
+        stored = self.stored_id(document_id)
         return any(p.document_id == stored for p in self.search(query))
 
     def mentions(self, query: str, term: str) -> bool:
@@ -72,7 +75,7 @@ class _RoundTrip:
     def need(self, query: str, document_id: str, what: str, cause: str,
              *, containing: str | None = None, k: int = SEARCH_K) -> None:
         passages = self.search(query, k)
-        stored = qualified_id(self.corpus.name, document_id)
+        stored = self.stored_id(document_id)
         if not any(p.document_id == stored and (containing is None or containing in p.text)
                    for p in passages):
             seen = ", ".join(sorted({p.document_id for p in passages})) or "nothing"

@@ -51,6 +51,16 @@ class Passage:
         return f"{self.start_line}-{self.end_line}"
 
     @property
+    def code_location(self) -> list[tuple[str, str]]:
+        """What names where a code Passage is, as (label, value): its file, lines and enclosing
+        symbol when known; empty for a Passage that is not code."""
+        if self.start_line is None:
+            return []
+        found = [("file", self.path or self.title), ("lines", self.line_range),
+                 ("symbol", self.symbol)]
+        return [(name, value) for name, value in found if value]
+
+    @property
     def link(self) -> str:
         """Where to read it: the Document's URL, at its lines for code (GitLab's anchor)."""
         return self.url if self.start_line is None else f"{self.url}#L{self.line_range}"
@@ -202,7 +212,7 @@ class KnowledgeIndex:
                 unchanged += 1
                 continue
             try:
-                document = self._extract(corpus, corpus.fetch(ref.id), ref.parts)
+                document = self._extract(corpus, corpus.fetch(ref.id), ref)
                 if live is None:  # a Sync of another Corpus may have made an index live meanwhile
                     live = self._generations.live()
                     if live is not None:
@@ -290,7 +300,7 @@ class KnowledgeIndex:
                 total += len(refs)
                 for ref in refs:
                     try:
-                        self._add(self._extract(corpus, corpus.fetch(ref.id), ref.parts),
+                        self._add(self._extract(corpus, corpus.fetch(ref.id), ref),
                                   generation)
                     except Exception as error:
                         failures[qualified_id(corpus.name, ref.id)] = _describe(error)
@@ -633,7 +643,7 @@ class KnowledgeIndex:
             points, offset = self._client.scroll(
                 collection, limit=1000, offset=offset, with_vectors=False,
                 scroll_filter=models.Filter(must=[_match("corpus", corpus)]),
-                with_payload=["document_id", "version", "parts"])
+                with_payload=["document_id", "version", "parts", "placement"])
             for point in points:
                 found.setdefault(point.payload["document_id"], _Stored()).add(point.payload)
             if offset is None:
@@ -652,14 +662,14 @@ class KnowledgeIndex:
             if offset is None:
                 return found
 
-    def _extract(self, corpus: Corpus, raw: RawDocument,
-                 parts: tuple[str, ...] = ()) -> Document:
+    def _extract(self, corpus: Corpus, raw: RawDocument, ref: DocumentRef) -> Document:
         """The Document as the index stores it: owned by the Corpus, its ids namespaced."""
         return Document(
             id=qualified_id(corpus.name, raw.id), title=raw.title, url=raw.url,
             space=raw.space, version=raw.version, text=self._extractor.extract(raw),
             parent_id=None if raw.parent_id is None else qualified_id(corpus.name, raw.parent_id),
-            media_type=raw.media_type, corpus=corpus.name, parts=parts,
+            media_type=raw.media_type, corpus=corpus.name, parts=ref.parts,
+            placement=ref.placement,
             repository=raw.repository, ref=raw.ref, path=raw.path,
             primary=raw.primary)
 
@@ -689,7 +699,8 @@ class KnowledgeIndex:
                          "title": document.title, "url": document.url,
                          "space": document.space, "text": piece.text,
                          "parent_id": document.parent_id, "corpus": document.corpus,
-                         "parts": list(document.parts), **_of_code(document),
+                         "parts": list(document.parts), "placement": document.placement,
+                 **_of_code(document),
                          **_code_payload(document, piece)}))
         # Write the new Passages first, then delete this Document's leftover old ones (those
         # of an earlier, longer version included), so a failure in between never leaves the
@@ -788,19 +799,22 @@ class _Stored:
     def __init__(self) -> None:
         self.versions: set[str | None] = set()
         self.parts: set[str] = set()
+        self.placements: set[str] = set()
         self.recorded = True  # False if any point predates recorded parts
 
     def add(self, payload: dict) -> None:
         self.versions.add(payload.get("version"))
+        self.placements.add(payload.get("placement") or "")
         if payload.get("parts") is None:
             self.recorded = False
         else:
             self.parts.update(payload["parts"])
 
     def is_current(self, ref: DocumentRef) -> bool:
-        """Unchanged: one stored version, the listed one, and the part it was listed under
-        (a Document that moved to another part is re-added so its part stays true)."""
-        return self.versions == {ref.version} and (
+        """Unchanged: one stored version, the listed one, and the part and placement it was
+        listed under (a Document that moved to another part, or whose Primary ref mark or link
+        changed, is re-added so what is stored stays true)."""
+        return self.versions == {ref.version} and self.placements == {ref.placement} and (
             not self.recorded or self.parts == set(ref.parts))
 
     def held_back_by(self, failures: Mapping[str, str]) -> bool:
@@ -836,7 +850,8 @@ def _document_point(document: Document) -> models.PointStruct:
                  "version": document.version, "title": document.title, "url": document.url,
                  "space": document.space, "full_text": document.text,
                  "parent_id": document.parent_id, "corpus": document.corpus,
-                 "parts": list(document.parts), **_of_code(document)})
+                 "parts": list(document.parts), "placement": document.placement,
+                 **_of_code(document)})
 
 
 def _of_code(document: Document) -> dict:

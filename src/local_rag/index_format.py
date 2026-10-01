@@ -19,8 +19,8 @@ SCHEMA_VERSION = 1
 # What the running code's keyword encoding does, recorded so a change shows as a Read-only index.
 IDENTIFIER_SPLITTING = True
 
-# How the running code splits code into Passages; the same string as chunker.CODE_SPLITTING
-# (kept apart so this module needs no splitter; a test pins them equal).
+# How the running code splits code into Passages, recorded so a change shows as a Read-only
+# index. A different splitting method changes it.
 CODE_SPLITTING = "lines"
 
 
@@ -68,13 +68,16 @@ class IndexFormat:
     @classmethod
     def written_by(cls, settings: Settings, dimension: int | None) -> "IndexFormat":
         """The format of an index the running code creates."""
-        if settings.retrieval is RetrievalMode.KEYWORD:
-            return cls(SCHEMA_VERSION, settings.sparse, None, None, settings.chunk_tokens,
-                       settings.chunk_overlap, RetrievalMode.KEYWORD, True, IDENTIFIER_SPLITTING,
-                       settings.code_chunk_tokens, CODE_SPLITTING, syntax_languages())
-        return cls(SCHEMA_VERSION, settings.sparse, settings.embed_model, dimension,
-                   settings.chunk_tokens, settings.chunk_overlap, RetrievalMode.HYBRID,
-                   True, IDENTIFIER_SPLITTING, settings.code_chunk_tokens, CODE_SPLITTING, syntax_languages())
+        keyword = settings.retrieval is RetrievalMode.KEYWORD
+        return cls(
+            schema_version=SCHEMA_VERSION, sparse=settings.sparse,
+            embed_model=None if keyword else settings.embed_model,
+            dimension=None if keyword else dimension,
+            chunk_tokens=settings.chunk_tokens, chunk_overlap=settings.chunk_overlap,
+            retrieval=settings.retrieval, corpus_ownership=True,
+            identifier_splitting=IDENTIFIER_SPLITTING,
+            code_chunk_tokens=settings.code_chunk_tokens, code_splitting=CODE_SPLITTING,
+            syntax_languages=syntax_languages())
 
     def to_payload(self) -> dict:
         return {"schema_version": self.schema_version, "retrieval": self.retrieval.value,
@@ -200,7 +203,6 @@ def assess(recorded: IndexFormat | None, stored_dimension: int | None, settings:
                 differences.append(
                     f"code splitting differs: index built by {recorded.code_splitting!r}, "
                     f"running {CODE_SPLITTING!r}")
-    if recorded is not None:
         if recorded.syntax_languages is None:
             differences.append(
                 "the languages split along their syntax were not recorded (built before "
@@ -209,10 +211,10 @@ def assess(recorded: IndexFormat | None, stored_dimension: int | None, settings:
             differences.append(
                 f"syntax-split languages differ: index built with "
                 f"{list(recorded.syntax_languages)}, running {list(syntax_languages())}")
-    if recorded is not None and recorded.identifier_splitting != IDENTIFIER_SPLITTING:
-        differences.append(
-            "keyword search does not split identifiers into their parts in this index "
-            "(built by an earlier version)")
+        if recorded.identifier_splitting != IDENTIFIER_SPLITTING:
+            differences.append(
+                "keyword search does not split identifiers into their parts in this index "
+                "(built by an earlier version)")
     unchecked = []
     unreachable = False
     if running_dimension is not None and both_hybrid:
