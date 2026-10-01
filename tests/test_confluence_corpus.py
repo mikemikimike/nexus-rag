@@ -163,35 +163,66 @@ def test_a_failed_root_listing_reports_a_failure_and_the_other_roots_are_still_s
     assert "failed (1)" in report.failures["root 200"] and "HTTP 500" in report.failures["root 200"]
 
 
-def test_nothing_is_removed_while_a_root_listing_failed(index, site):
+def test_a_failed_root_holds_back_removals_only_under_that_root(index, site):
     index.sync(corpus(site, "100", "200"))
     site.fail("200", "info")
     site.delete("101")
 
     report = index.sync(corpus(site, "100", "200"))
 
-    assert report.removed == 0 and report.failed == 1
+    assert (report.removed, report.failed) == (1, 1)
+    assert list(report.failures) == ["root 200"]
     assert index.get_document("confluence:200") is not None  # its root could not be listed
-    assert index.get_document("confluence:101") is not None  # gone, but removal waits for a clean listing
+    assert index.get_document("confluence:101") is None  # under a root that listed fine
 
     site.fail("200")
+    site.delete("200")
     report = index.sync(corpus(site, "100", "200"))
-    assert (report.removed, report.failed) == (1, 0)
-    assert index.get_document("confluence:101") is None
+    assert (report.removed, report.failed) == (0, 1)  # a deleted root page cannot be listed
+    assert index.get_document("confluence:200") is not None
 
 
-@pytest.mark.parametrize("page, command", [("100", "children"), ("102", "attachments")])
-def test_a_failed_children_or_attachment_listing_also_blocks_removal(
-        index, site, page, command):
+def test_a_failed_children_listing_holds_back_the_pages_under_that_root(index, site):
     site.attach("102", "runbook.txt", "Call the standby owner.")
-    index.sync(corpus(site))
-    site.fail(page, command)
+    site.page("201", "Ops notes", space="OPS", parent="200", body="Page the on-call.\n")
+    index.sync(corpus(site, "100", "200"))
+    site.fail("100", "children")
     site.delete("103")
+    site.delete("201")
+
+    report = index.sync(corpus(site, "100", "200"))
+
+    assert (report.removed, report.failed) == (1, 1)
+    assert index.get_document("confluence:103") is not None
+    assert index.get_document("confluence:102/attachments/runbook.txt") is not None
+    assert index.get_document("confluence:201") is None  # under the other root
+
+
+def test_a_failed_attachment_listing_holds_back_only_that_pages_attachments(index, site):
+    site.attach("102", "runbook.txt", "Call the standby owner.")
+    site.attach("101", "notes.txt", "Escalate to the DBA on call.")
+    index.sync(corpus(site))
+    site.fail("102", "attachments")
+    site.delete("103")
+    site.detach("101", "notes.txt")
 
     report = index.sync(corpus(site))
 
-    assert report.removed == 0 and report.failed == 1
-    assert index.get_document("confluence:103") is not None
+    assert (report.removed, report.failed) == (2, 1)
+    assert list(report.failures) == ["attachments of page 102"]
+    assert index.get_document("confluence:102/attachments/runbook.txt") is not None
+    assert index.get_document("confluence:103") is None
+    assert index.get_document("confluence:101/attachments/notes.txt") is None
+
+
+def test_a_failed_root_also_holds_back_its_pages_attachments(index, site):
+    site.attach("102", "runbook.txt", "Call the standby owner.")
+    index.sync(corpus(site, "100", "200"))
+    site.fail("100", "info")
+
+    report = index.sync(corpus(site, "100", "200"))
+
+    assert (report.removed, report.failed) == (0, 1)
     assert index.get_document("confluence:102/attachments/runbook.txt") is not None
 
 
