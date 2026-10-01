@@ -2,6 +2,8 @@
 
 A retrieval system that lets a team's Claude Code search internal documentation on a fully air-gapped network. Documents come from a **Corpus** (Confluence through `confluence-cli`, or a plain folder), are embedded through the network's **Model gateway** (LiteLLM), and are served from a **Knowledge index** by one shared MCP server. The terms in bold are defined in [`CONTEXT.md`](CONTEXT.md) and used the same way here and in the code.
 
+An agent can install, configure, verify and operate it from [`docs/agents/closed-network-setup.md`](docs/agents/closed-network-setup.md), which also interviews the operator for the settings and tokens.
+
 ```
  Corpus ── Confluence (confluence-cli, read-only)  or  a folder of files
     │            Sync / Rebuild   (local-rag CLI, run by systemd timers)

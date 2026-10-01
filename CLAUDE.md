@@ -11,3 +11,7 @@ Default vocabulary: needs-triage, needs-info, ready-for-agent, ready-for-human, 
 ### Domain docs
 
 Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Operator setup
+
+Installing, configuring, verifying or operating local-rag on a closed network, or collecting an operator's settings and tokens: `docs/agents/closed-network-setup.md`.
