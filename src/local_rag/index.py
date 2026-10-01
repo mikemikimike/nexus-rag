@@ -51,6 +51,16 @@ class Passage:
         return f"{self.start_line}-{self.end_line}"
 
     @property
+    def code_location(self) -> list[tuple[str, str]]:
+        """What names where a code Passage is, as (label, value): its file, lines and enclosing
+        symbol when known; empty for a Passage that is not code."""
+        if self.start_line is None:
+            return []
+        found = [("file", self.path or self.title), ("lines", self.line_range),
+                 ("symbol", self.symbol)]
+        return [(name, value) for name, value in found if value]
+
+    @property
     def link(self) -> str:
         """Where to read it: the Document's URL, at its lines for code (GitLab's anchor)."""
         return self.url if self.start_line is None else f"{self.url}#L{self.line_range}"
