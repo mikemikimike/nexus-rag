@@ -20,6 +20,6 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.lock
       # The pinned packages the Installer ships (x86_64 Linux, Python 3.12), then the code itself.
-      - run: pip install -r requirements.lock
-      - run: pip install --no-deps -e . pytest pyyaml
+      - run: pip install -r requirements.lock pytest pyyaml
+      - run: pip install --no-deps -e .
       - run: pytest -q -rs
