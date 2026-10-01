@@ -1,6 +1,8 @@
 """Command line adapter over the Knowledge index: Sync, Rebuild, switch-back, search, status.
 
-Settings come from the environment (see ``environment``). Each command prints what
+Settings come from the environment (see ``environment``). The Corpora come from the
+declaration file (see ``declaration``): ``--corpora FILE``, else ``RAG_CORPORA_FILE``, else
+``/etc/local-rag/corpora.toml``. Each command prints what
 happened and returns a process exit code: 0 on success, 1 on failure or refusal, 2 for a
 command line that cannot be understood.
 """
@@ -8,16 +10,15 @@ import argparse
 import logging
 import os
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TextIO
 
 from qdrant_client import QdrantClient
 
-from local_rag.confluence import DEFAULT_EXCLUDED_ATTACHMENTS, ConfluenceCorpus, read_roots
 from local_rag.corpus import Corpus
+from local_rag.declaration import DEFAULT_PATH, Declaration, DeclarationError
 from local_rag.environment import settings_from_environment
-from local_rag.folder import FolderCorpus
 from local_rag.gateway import ModelGateway
 from local_rag.gateway_litellm import gateway_from_settings
 from local_rag.index import IndexStatus, KnowledgeIndex, Passage, RebuildReport, SyncReport
@@ -26,7 +27,7 @@ from local_rag.settings import RetrievalMode
 
 
 class UsageError(Exception):
-    """The command line names a Corpus that cannot be used."""
+    """The command line, or the Corpus declaration it points to, cannot be used."""
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str], *,
@@ -44,10 +45,11 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
         return int(stop.code or 0)
     try:
         settings = settings_from_environment(environ)
-        corpus = _corpus(args, environ) if args.command in ("sync", "rebuild") else None
+        args.environ = environ
+        corpora = _corpora(args, environ)
         index = KnowledgeIndex(settings, gateway or gateway_from_settings(settings),
                                client=client)
-        return args.run(args, index, corpus, out)
+        return args.run(args, index, corpora, out)
     except UsageError as error:
         print(f"error: {error}", file=err)
         return 2
@@ -66,27 +68,19 @@ def _parser() -> argparse.ArgumentParser:
         prog="local-rag", description="Sync, search and inspect the Knowledge index.")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    source = argparse.ArgumentParser(add_help=False)
-    group = source.add_argument_group(
-        "Corpus", "give a folder, or Confluence roots (page ids or URLs), not both")
-    group.add_argument("--folder", type=Path, help="a folder of documents")
-    group.add_argument("--root", action="append", default=[], metavar="PAGE",
-                       help="a Confluence page id or URL; its whole subtree is indexed")
-    group.add_argument("--roots-file", type=Path,
-                       help="a file with one Confluence root per line")
-    group.add_argument("--max-depth", type=int, default=0,
-                       help="Confluence: how deep below a root to go (0 = all)")
-    group.add_argument("--no-attachments", action="store_true",
-                       help="Confluence: leave attachments out")
-    group.add_argument("--exclude-attachments", metavar="GLOBS",
-                       default=",".join(DEFAULT_EXCLUDED_ATTACHMENTS),
-                       help="Confluence: comma-separated attachment name patterns to skip")
+    declared = argparse.ArgumentParser(add_help=False)
+    declared.add_argument(
+        "--corpora", type=Path, metavar="FILE",
+        help=f"the Corpus declaration file (default: $RAG_CORPORA_FILE, else {DEFAULT_PATH})")
 
-    sync = commands.add_parser("sync", parents=[source], help="bring the index up to date")
+    sync = commands.add_parser(
+        "sync", parents=[declared], help="bring one Corpus's Documents up to date")
+    sync.add_argument("corpus", help="the name of a Corpus in the declaration file")
     sync.set_defaults(run=_sync)
     rebuild = commands.add_parser(
-        "rebuild", parents=[source],
-        help="re-embed everything into a fresh index and make it live if complete enough")
+        "rebuild", parents=[declared],
+        help="re-embed every declared Corpus into a fresh index and make it live if complete "
+             "enough")
     rebuild.set_defaults(run=_rebuild)
     commands.add_parser(
         "switch-back", help="make the previous index the Live index again"
@@ -102,49 +96,40 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _corpus(args: argparse.Namespace, environ: Mapping[str, str]) -> Corpus:
-    roots = list(args.root)
-    if args.roots_file is not None:
-        try:
-            roots += read_roots(args.roots_file)
-        except (OSError, UnicodeDecodeError) as error:
-            raise UsageError(f"cannot read the roots file: {error}") from None
-    if args.folder is not None and roots:
-        raise UsageError("give a folder or Confluence roots, not both")
-    if args.folder is not None:
-        if not args.folder.is_dir():
-            # An absent folder (an unmounted share) must not look like an empty Corpus,
-            # which a Sync would answer by removing every Document.
-            raise UsageError(f"{args.folder} is not a folder")
-        return FolderCorpus(args.folder)
-    if not roots:
-        raise UsageError("give a Corpus: --folder, or --root / --roots-file for Confluence")
-    return ConfluenceCorpus(
-        roots, confluence_bin=environ.get("CONFLUENCE_BIN") or "confluence",
-        max_depth=args.max_depth, attachments=not args.no_attachments,
-        exclude_attachments=[g.strip() for g in args.exclude_attachments.split(",")
-                             if g.strip()])
+def _corpora(args: argparse.Namespace, environ: Mapping[str, str]) -> Callable[[], Declaration]:
+    """The declaration, read when a command needs it: search and status never read the file."""
+    path = getattr(args, "corpora", None) or environ.get("RAG_CORPORA_FILE") or DEFAULT_PATH
+    return lambda: Declaration.read(path)
 
 
-def _sync(args, index: KnowledgeIndex, corpus: Corpus, out: TextIO) -> int:
+def _sync(args, index: KnowledgeIndex, declaration, out: TextIO) -> int:
+    corpus = _declared(lambda d: d.corpus(args.corpus, args.environ), declaration)
     report = index.sync(corpus)
     _print_sync(report, out)
     return 1 if report.failed else 0
 
 
-def _rebuild(args, index: KnowledgeIndex, corpus: Corpus, out: TextIO) -> int:
-    report = index.rebuild(corpus)
+def _rebuild(args, index: KnowledgeIndex, declaration, out: TextIO) -> int:
+    corpora = _declared(lambda d: d.corpora(args.environ), declaration)
+    report = index.rebuild(corpora)
     _print_rebuild(report, out)
     return 0 if report.promoted else 1
 
 
-def _switch_back(args, index: KnowledgeIndex, corpus: None, out: TextIO) -> int:
+def _declared[R](build: Callable[[Declaration], R], declaration: Callable[[], Declaration]) -> R:
+    try:
+        return build(declaration())
+    except DeclarationError as error:
+        raise UsageError(str(error)) from None
+
+
+def _switch_back(args, index: KnowledgeIndex, corpora, out: TextIO) -> int:
     index.switch_back()
     print("Switched back to the previous index.", file=out)
     return 0
 
 
-def _search(args, index: KnowledgeIndex, corpus: None, out: TextIO) -> int:
+def _search(args, index: KnowledgeIndex, corpora, out: TextIO) -> int:
     passages = index.search(args.query, k=args.k, space=args.space)
     if not passages:
         print("No results.", file=out)
@@ -155,7 +140,7 @@ def _search(args, index: KnowledgeIndex, corpus: None, out: TextIO) -> int:
     return 0
 
 
-def _status(args, index: KnowledgeIndex, corpus: None, out: TextIO) -> int:
+def _status(args, index: KnowledgeIndex, corpora, out: TextIO) -> int:
     status = index.status()
     _print_status(status, out)
     return 1 if status.access is Access.REFUSED else 0
@@ -228,6 +213,9 @@ def _print_status(status: IndexStatus, out: TextIO) -> None:
         last = status.last_sync
         show("last sync", f"{last.kind} {last.outcome} at "
                           f"{last.at.isoformat(timespec='seconds')}: {last.detail}")
+    for name, last in sorted(status.corpora.items()):
+        show(f"corpus {name}", f"{last.kind} {last.outcome} at "
+                               f"{last.at.isoformat(timespec='seconds')}: {last.detail}")
     for warning in status.warnings:
         print(f"warning: {warning}", file=out)
 

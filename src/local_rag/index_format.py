@@ -45,21 +45,25 @@ class IndexFormat:
     chunk_overlap: int | None = None
     # Indexes built before the Retrieval mode existed were all Hybrid.
     retrieval: RetrievalMode = RetrievalMode.HYBRID
+    # Whether every Document records the Corpus that owns it and has an id namespaced by it.
+    # Indexes built before named Corpora held one anonymous Corpus.
+    corpus_ownership: bool = False
 
     @classmethod
     def written_by(cls, settings: Settings, dimension: int | None) -> "IndexFormat":
         """The format of an index the running code creates."""
         if settings.retrieval is RetrievalMode.KEYWORD:
             return cls(SCHEMA_VERSION, settings.sparse, None, None, settings.chunk_tokens,
-                       settings.chunk_overlap, RetrievalMode.KEYWORD)
+                       settings.chunk_overlap, RetrievalMode.KEYWORD, True)
         return cls(SCHEMA_VERSION, settings.sparse, settings.embed_model, dimension,
-                   settings.chunk_tokens, settings.chunk_overlap, RetrievalMode.HYBRID)
+                   settings.chunk_tokens, settings.chunk_overlap, RetrievalMode.HYBRID, True)
 
     def to_payload(self) -> dict:
         return {"schema_version": self.schema_version, "retrieval": self.retrieval.value,
                 "embed_model": self.embed_model,
                 "dimension": self.dimension, "chunk_tokens": self.chunk_tokens,
-                "chunk_overlap": self.chunk_overlap, "sparse": {
+                "chunk_overlap": self.chunk_overlap,
+                "corpus_ownership": self.corpus_ownership, "sparse": {
                     "k1": self.sparse.k1, "b": self.sparse.b,
                     "avg_doc_length": self.sparse.avg_doc_length}}
 
@@ -80,7 +84,8 @@ class IndexFormat:
                 dimension=_optional_int(dimension),
                 chunk_tokens=_optional_int(payload.get("chunk_tokens")),
                 chunk_overlap=_optional_int(payload.get("chunk_overlap")),
-                retrieval=retrieval)
+                retrieval=retrieval,
+                corpus_ownership=bool(payload.get("corpus_ownership", False)))
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ValueError(f"unreadable index format {payload!r}") from error
 
@@ -135,6 +140,10 @@ def assess(recorded: IndexFormat | None, stored_dimension: int | None, settings:
             differences.append(
                 f"embedding model differs: index built with {recorded.embed_model!r}, "
                 f"running with {settings.embed_model!r}")
+        if not recorded.corpus_ownership:
+            differences.append(
+                "its Documents do not record the Corpus that owns them (built before "
+                "named Corpora)")
         if recorded.chunk_tokens is None or recorded.chunk_overlap is None:
             differences.append(
                 "its chunk size and overlap were not recorded (built before Documents "

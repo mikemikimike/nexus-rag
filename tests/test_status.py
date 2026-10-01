@@ -38,7 +38,7 @@ def test_status_follows_the_live_index_through_a_rebuild(index):
     index.sync(InMemoryCorpus(DOCUMENTS))
     first = index.status().generation
 
-    index.rebuild(InMemoryCorpus(DOCUMENTS[:2]))
+    index.rebuild([InMemoryCorpus(DOCUMENTS[:2])])
 
     status = index.status()
     assert status.generation != first
@@ -80,9 +80,9 @@ def test_status_reports_a_sync_that_could_not_finish(index):
 
 
 def test_status_reports_the_last_rebuild_promoted_or_refused(index):
-    index.rebuild(InMemoryCorpus(DOCUMENTS))
+    index.rebuild([InMemoryCorpus(DOCUMENTS)])
     promoted = index.status().last_sync
-    index.rebuild(FlakyCorpus(DOCUMENTS, failing={"dba/ora-12154"}))
+    index.rebuild([FlakyCorpus(DOCUMENTS, failing={"dba/ora-12154"})])
     refused = index.status().last_sync
 
     assert (promoted.kind, promoted.outcome) == ("Rebuild", "promoted")

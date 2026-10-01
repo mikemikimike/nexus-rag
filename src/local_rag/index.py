@@ -1,13 +1,14 @@
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from qdrant_client import QdrantClient, models
 
 from local_rag.chunker import Chunker
-from local_rag.corpus import Corpus, Document, RawDocument, listing_failures
+from local_rag.corpus import (
+    Corpus, Document, RawDocument, check_corpus_name, listing_failures, qualified_id)
 from local_rag.exclusive import ExclusiveRun, Lease
 from local_rag.extraction import Extractor
 from local_rag.gateway import ModelGateway
@@ -31,6 +32,7 @@ class Passage:
     text: str
     score: float
     parent_id: str | None = None  # the page an Attachment belongs to
+    corpus: str | None = None  # None for an index built before named Corpora
 
 
 class SearchResults(list[Passage]):
@@ -80,6 +82,7 @@ class IndexStatus:
     format: IndexFormat | None  # as recorded when the generation was created
     warnings: tuple[str, ...]  # why the index is read-only or refused
     last_sync: LastSync | None  # None until a Sync or Rebuild has run
+    corpora: dict[str, LastSync] = field(default_factory=dict)  # each Corpus's last Sync
 
 
 @dataclass(frozen=True)
@@ -124,30 +127,37 @@ class KnowledgeIndex:
     def sync(self, corpus: Corpus) -> SyncReport:
         """Bring the index into agreement with the Corpus.
 
+        Only the Documents the Corpus owns are compared, replaced or removed; every other
+        Corpus's Documents are left alone. Document ids in the report are the ids the index
+        stores (the Corpus's name, a colon, then the Corpus's own id).
+
         Raises SyncInProgress at once if another Sync or Rebuild is running.
         """
+        check_corpus_name(corpus.name)
         with self._exclusive.hold("Sync") as lease:
-            return self._journaled("Sync", lambda: self._sync(corpus, lease))
+            return self._journaled(
+                "Sync", lambda: self._sync(corpus, lease), corpus=corpus.name)
 
     def _sync(self, corpus: Corpus, lease: Lease) -> SyncReport:
         live = self._generations.live()
         if live is not None:
             self._require_writable(live)
         target = live or self._generations.fresh_name()
-        indexed = self._indexed_versions(live)
+        indexed = self._indexed_versions(live, corpus.name)
         added = replaced = removed = unchanged = 0
         refs = corpus.list()
         unlisted = listing_failures(refs)
         failures = dict(unlisted)
         for ref in refs:
-            versions = indexed.get(ref.id)
+            stored = qualified_id(corpus.name, ref.id)
+            versions = indexed.get(stored)
             if versions == {ref.version}:
                 unchanged += 1
                 continue
             try:
-                self._add(self._extract(corpus.fetch(ref.id)), target)
+                self._add(self._extract(corpus, corpus.fetch(ref.id)), target)
             except Exception as error:
-                failures[ref.id] = _describe(error)
+                failures[stored] = _describe(error)
             else:
                 if live is None:  # the first Document makes a new index live
                     lease.check()
@@ -157,7 +167,7 @@ class KnowledgeIndex:
                     added += 1
                 else:
                     replaced += 1
-        current = {ref.id for ref in refs}
+        current = {qualified_id(corpus.name, ref.id) for ref in refs}
         # A Document missing from an incomplete listing may still exist.
         stale = set() if unlisted else indexed.keys() - current
         for document_id in stale:
@@ -170,34 +180,43 @@ class KnowledgeIndex:
         return SyncReport(added=added, replaced=replaced, removed=removed,
                           unchanged=unchanged, failed=len(failures), failures=failures)
 
-    def rebuild(self, corpus: Corpus) -> RebuildReport:
-        """Re-embed every Document into a fresh index and make it live if it is complete enough.
+    def rebuild(self, corpora: Sequence[Corpus]) -> RebuildReport:
+        """Re-embed every Document of every Corpus into a fresh index and make it live if
+        complete enough. Pass all the declared Corpora: the fresh index holds only these.
 
         Searches keep reading the Live index until then. Raises SyncInProgress at once if
         another Sync or Rebuild is running.
         """
         with self._exclusive.hold("Rebuild") as lease:
-            return self._journaled("Rebuild", lambda: self._rebuild(corpus, lease))
+            return self._journaled("Rebuild", lambda: self._rebuild(corpora, lease))
 
-    def _rebuild(self, corpus: Corpus, lease: Lease) -> RebuildReport:
+    def _rebuild(self, corpora: Sequence[Corpus], lease: Lease) -> RebuildReport:
+        names = [check_corpus_name(c.name) for c in corpora]
+        if len(set(names)) != len(names):
+            raise ValueError(f"Corpus names must be unique, got {', '.join(names)}")
         warnings = self._sweep()  # generations a crashed Rebuild left behind
         generation = self._generations.fresh_name()
         promoted = False
         try:
-            refs = corpus.list()
-            if unlisted := listing_failures(refs):
+            listed = [(corpus, corpus.list()) for corpus in corpora]
+            unlisted = {f"{corpus.name}: {part}": why
+                        for corpus, refs in listed for part, why in listing_failures(refs).items()}
+            if unlisted:
                 return RebuildReport(
                     indexed=0, failed=len(unlisted), failures=unlisted,
-                    reason=f"the Corpus could not be listed completely "
+                    reason=f"a Corpus could not be listed completely "
                            f"({', '.join(unlisted)})", warnings=warnings)
             failures: dict[str, str] = {}
-            for ref in refs:
-                try:
-                    self._add(self._extract(corpus.fetch(ref.id)), generation)
-                except Exception as error:
-                    failures[ref.id] = _describe(error)
+            total = 0
+            for corpus, refs in listed:
+                total += len(refs)
+                for ref in refs:
+                    try:
+                        self._add(self._extract(corpus, corpus.fetch(ref.id)), generation)
+                    except Exception as error:
+                        failures[qualified_id(corpus.name, ref.id)] = _describe(error)
             failed = len(failures)
-            reason = self._refusal(len(refs), failed)
+            reason = self._refusal(total, failed)
             if reason is None:
                 lease.check()
                 self._generations.promote(generation)
@@ -205,7 +224,7 @@ class KnowledgeIndex:
         finally:
             if not promoted:
                 self._discard(generation)
-        return RebuildReport(indexed=len(refs) - failed, failed=failed, reason=reason,
+        return RebuildReport(indexed=total - failed, failed=failed, reason=reason,
                              failures=failures, warnings=warnings)
 
     def _sweep(self) -> tuple[str, ...]:
@@ -234,12 +253,13 @@ class KnowledgeIndex:
                     "the previous index cannot be used", self._assessment(previous)))
             self._generations.switch_back()
 
-    def _journaled[R: (SyncReport, RebuildReport)](self, kind: str, run: Callable[[], R]) -> R:
+    def _journaled[R: (SyncReport, RebuildReport)](
+            self, kind: str, run: Callable[[], R], corpus: str | None = None) -> R:
         """Run a Sync or Rebuild and keep its result for ``status``."""
         try:
             report = run()
         except Exception as error:
-            self._note(kind, "failed", _describe(error))
+            self._note(kind, "failed", _describe(error), corpus)
             raise
         if isinstance(report, SyncReport):
             outcome = "completed with failures" if report.failed else "completed"
@@ -251,12 +271,12 @@ class KnowledgeIndex:
             detail = "; ".join([detail, *report.warnings])
         else:
             outcome, detail = "refused", report.reason
-        self._note(kind, outcome, detail)
+        self._note(kind, outcome, detail, corpus)
         return report
 
-    def _note(self, kind: str, outcome: str, detail: str) -> None:
+    def _note(self, kind: str, outcome: str, detail: str, corpus: str | None = None) -> None:
         try:
-            self._journal.record(kind, outcome, detail)
+            self._journal.record(kind, outcome, detail, corpus)
         except Exception:
             # The run itself is what matters; status just keeps showing the one before.
             log.warning("could not record the result of the %s", kind, exc_info=True)
@@ -266,7 +286,7 @@ class KnowledgeIndex:
         # Whatever the threshold, an index with no Documents cannot be made live: its
         # collection is only created by the first Document.
         if total == 0:
-            return "the Corpus has no Documents"
+            return "the Corpora have no Documents"
         if failed == total:
             return "no Document could be indexed"
         rate, threshold = failed / total, self._settings.rebuild_failure_threshold
@@ -324,7 +344,8 @@ class KnowledgeIndex:
         passages = [Passage(
             document_id=p.payload["document_id"], title=p.payload["title"],
             url=p.payload["url"], space=p.payload["space"], text=p.payload["text"],
-            score=float(p.score), parent_id=p.payload.get("parent_id"))
+            score=float(p.score), parent_id=p.payload.get("parent_id"),
+            corpus=p.payload.get("corpus"))
             for p in points]
         passages = cap_per_document(passages, settings.max_passages_per_document)
         if settings.rerank:
@@ -392,12 +413,12 @@ class KnowledgeIndex:
         return Health(True, status.access is not Access.REFUSED, notes)
 
     def _status(self, *, verify_dimension: bool) -> IndexStatus:
-        last_sync, unreadable = self._last_sync()
+        last_sync, corpora, unreadable = self._last_sync()
         try:
             live = self._generations.live()
             if live is None:
                 return IndexStatus(
-                    None, Access.READ_WRITE, 0, 0, None, unreadable, last_sync)
+                    None, Access.READ_WRITE, 0, 0, None, unreadable, last_sync, corpora)
             assessment = self._assessment(live, verify_dimension=verify_dimension)
             documents = self._client.count(
                 live, count_filter=models.Filter(must=[_match("kind", _DOCUMENT_KIND)]),
@@ -406,17 +427,19 @@ class KnowledgeIndex:
             return IndexStatus(
                 generation=live, access=assessment.access, documents=documents,
                 passages=total - documents, format=self._generations.format_of(live),
-                warnings=(*assessment.warnings, *unreadable), last_sync=last_sync)
+                warnings=(*assessment.warnings, *unreadable), last_sync=last_sync,
+                corpora=corpora)
         except CorruptIndex as error:
             return IndexStatus(
-                None, Access.REFUSED, None, None, None, (str(error), *unreadable), last_sync)
+                None, Access.REFUSED, None, None, None, (str(error), *unreadable), last_sync,
+                corpora)
 
-    def _last_sync(self) -> tuple[LastSync | None, tuple[str, ...]]:
+    def _last_sync(self) -> tuple[LastSync | None, dict[str, LastSync], tuple[str, ...]]:
         try:
-            return self._journal.last(), ()
+            return self._journal.last(), self._journal.last_of_each_corpus(), ()
         except ValueError as error:
             # Only a report: the next Sync or Rebuild writes a readable record again.
-            return None, (str(error),)
+            return None, {}, (str(error),)
 
     def _readable(self) -> str | None:
         """What to query for the Live index, or None if there is none; refuses an unusable one."""
@@ -475,8 +498,8 @@ class KnowledgeIndex:
                     f"index {generation} is {assessment.access}", assessment))
         return assessment
 
-    def _indexed_versions(self, collection: str | None) -> dict[str, set[str]]:
-        """Versions found in the index per Document id.
+    def _indexed_versions(self, collection: str | None, corpus: str) -> dict[str, set[str]]:
+        """Versions found in the index per Document id, among the Documents ``corpus`` owns.
 
         More than one version means an interrupted replace, so the Document is re-synced.
         """
@@ -487,6 +510,7 @@ class KnowledgeIndex:
         while True:
             points, offset = self._client.scroll(
                 collection, limit=1000, offset=offset, with_vectors=False,
+                scroll_filter=models.Filter(must=[_match("corpus", corpus)]),
                 with_payload=["document_id", "version"])
             for point in points:
                 found.setdefault(point.payload["document_id"], set()).add(
@@ -494,10 +518,13 @@ class KnowledgeIndex:
             if offset is None:
                 return found
 
-    def _extract(self, raw: RawDocument) -> Document:
+    def _extract(self, corpus: Corpus, raw: RawDocument) -> Document:
+        """The Document as the index stores it: owned by the Corpus, its ids namespaced."""
         return Document(
-            id=raw.id, title=raw.title, url=raw.url, space=raw.space, version=raw.version,
-            text=self._extractor.extract(raw), parent_id=raw.parent_id)
+            id=qualified_id(corpus.name, raw.id), title=raw.title, url=raw.url,
+            space=raw.space, version=raw.version, text=self._extractor.extract(raw),
+            parent_id=None if raw.parent_id is None else qualified_id(corpus.name, raw.parent_id),
+            corpus=corpus.name)
 
     def _add(self, document: Document, collection: str) -> None:
         # A Document with no text is still found by its title: it gets one empty Passage.
@@ -524,7 +551,7 @@ class KnowledgeIndex:
                 payload={"document_id": document.id, "version": document.version,
                          "title": document.title, "url": document.url,
                          "space": document.space, "text": chunk,
-                         "parent_id": document.parent_id}))
+                         "parent_id": document.parent_id, "corpus": document.corpus}))
         # Write the new Passages first, then delete this Document's leftover old ones (those
         # of an earlier, longer version included), so a failure in between never leaves the
         # Document missing from search.
@@ -585,6 +612,8 @@ class KnowledgeIndex:
         if self._settings.qdrant_location != ":memory:":  # in-process Qdrant has no indexes
             self._client.create_payload_index(
                 collection, "document_id", models.PayloadSchemaType.KEYWORD)
+            self._client.create_payload_index(
+                collection, "corpus", models.PayloadSchemaType.KEYWORD)
 
 
 def _explain(what: str, assessment: Assessment) -> str:
@@ -620,7 +649,7 @@ def _document_point(document: Document) -> models.PointStruct:
         payload={"kind": _DOCUMENT_KIND, "document_id": document.id,
                  "version": document.version, "title": document.title, "url": document.url,
                  "space": document.space, "full_text": document.text,
-                 "parent_id": document.parent_id})
+                 "parent_id": document.parent_id, "corpus": document.corpus})
 
 
 def _connect(settings: Settings) -> QdrantClient:

@@ -5,18 +5,18 @@ from local_rag.fakes import FakeModelGateway
 def test_get_document_returns_the_full_text_by_document_id(index, corpus):
     index.sync(corpus)
 
-    assert index.get_document("garage/battery") == (
+    assert index.get_document("default:garage/battery") == (
         "When the car will not start, the battery is dead more often than not.")
 
 
 def test_get_document_returns_none_for_an_unknown_document_id(index, corpus):
     index.sync(corpus)
 
-    assert index.get_document("nope/missing") is None
+    assert index.get_document("default:nope/missing") is None
 
 
 def test_get_document_on_an_empty_index_returns_none(index):
-    assert index.get_document("dba/ora-00942") is None
+    assert index.get_document("default:dba/ora-00942") is None
 
 
 def test_list_spaces_lists_exactly_the_indexed_spaces(index, corpus):
@@ -87,7 +87,7 @@ def test_enabled_rerank_reorders_results_by_the_gateway_scores(corpus):
     index.sync(corpus)
     passages = index.search("check", k=10)
 
-    assert passages[0].document_id == "garage/battery"
+    assert passages[0].document_id == "default:garage/battery"
     assert passages[0].score == 1.0
     assert sorted(p.document_id for p in passages) == sorted(fused_ids)
 

@@ -30,7 +30,7 @@ def assert_reported_not_empty(index, gateway):
     assert status.documents is None and status.passages is None
     assert status.warnings and "Rebuild" in status.warnings[0]
     for use in (lambda: index.search("ORA-00942"), index.list_spaces,
-                lambda: index.get_document("dba/ora-00942"),
+                lambda: index.get_document("default:dba/ora-00942"),
                 lambda: index.sync(InMemoryCorpus(DOCUMENTS))):
         with pytest.raises(CorruptIndex, match="Rebuild"):
             use()
@@ -46,8 +46,8 @@ def gateway():
 @pytest.fixture
 def two_generations(gateway):
     index = KnowledgeIndex(Settings(), gateway)
-    index.rebuild(InMemoryCorpus(DOCUMENTS))
-    index.rebuild(InMemoryCorpus(DOCUMENTS))
+    index.rebuild([InMemoryCorpus(DOCUMENTS)])
+    index.rebuild([InMemoryCorpus(DOCUMENTS)])
     return index
 
 
@@ -106,18 +106,18 @@ def test_a_collection_that_is_not_an_index_is_reported(two_generations, gateway)
 def test_a_rebuild_repairs_corrupt_state(two_generations, damage):
     damage(two_generations)
 
-    report = two_generations.rebuild(InMemoryCorpus(DOCUMENTS))
+    report = two_generations.rebuild([InMemoryCorpus(DOCUMENTS)])
 
     assert report.promoted
     assert two_generations.status().access == Access.READ_WRITE
-    assert two_generations.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert two_generations.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
     assert two_generations.sync(InMemoryCorpus(DOCUMENTS)).unchanged == 3
 
 
 def test_a_rebuild_over_an_unreadable_registry_says_so(two_generations):
     overwrite_registry(two_generations, {"unexpected": True})
 
-    report = two_generations.rebuild(InMemoryCorpus(DOCUMENTS))
+    report = two_generations.rebuild([InMemoryCorpus(DOCUMENTS)])
 
     assert report.promoted
     assert any("unreadable" in warning for warning in report.warnings)
@@ -125,4 +125,4 @@ def test_a_rebuild_over_an_unreadable_registry_says_so(two_generations):
 
 
 def test_a_rebuild_over_a_healthy_registry_has_nothing_to_warn_about(two_generations):
-    assert two_generations.rebuild(InMemoryCorpus(DOCUMENTS)).warnings == ()
+    assert two_generations.rebuild([InMemoryCorpus(DOCUMENTS)]).warnings == ()

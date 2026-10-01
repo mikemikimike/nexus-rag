@@ -45,9 +45,9 @@ def test_a_folder_of_markdown_pdf_and_docx_is_synced_and_searched(index, folder)
     report = index.sync(FolderCorpus(folder))
 
     assert (report.added, report.failed) == (3, 0)
-    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942.md"
-    assert index.search("failover runbook")[0].document_id == "dba/failover.pdf"
-    assert index.search("ZX-9000")[0].document_id == "security/rotation.docx"
+    assert index.search("ORA-00942")[0].document_id == "folder:dba/ora-00942.md"
+    assert index.search("failover runbook")[0].document_id == "folder:dba/failover.pdf"
+    assert index.search("ZX-9000")[0].document_id == "folder:security/rotation.docx"
 
 
 def test_identity_is_the_relative_path_and_space_the_top_level_folder(index, folder):
@@ -56,7 +56,7 @@ def test_identity_is_the_relative_path_and_space_the_top_level_folder(index, fol
     assert index.list_spaces() == ["dba", "security"]
     found = index.search("ZX-9000")[0]
     assert (found.document_id, found.space) == ("security/rotation.docx", "security")
-    assert "ZX-9000" in index.get_document("security/rotation.docx")
+    assert "ZX-9000" in index.get_document("folder:security/rotation.docx")
     assert {p.space for p in index.search("standby", space="security")} == {"security"}
 
 
@@ -86,8 +86,8 @@ def test_a_changed_file_is_replaced_and_a_deleted_file_removed(index, folder):
     report = index.sync(FolderCorpus(folder))
 
     assert (report.replaced, report.removed, report.unchanged) == (1, 1, 1)
-    assert index.search("ORA-99999")[0].document_id == "dba/ora-00942.md"
-    assert index.get_document("security/rotation.docx") is None
+    assert index.search("ORA-99999")[0].document_id == "folder:dba/ora-00942.md"
+    assert index.get_document("folder:security/rotation.docx") is None
 
 
 def test_an_html_file_is_indexed_as_markdown_without_scripts_or_styles(index, folder):
@@ -98,7 +98,7 @@ def test_an_html_file_is_indexed_as_markdown_without_scripts_or_styles(index, fo
 
     index.sync(FolderCorpus(folder))
 
-    text = index.get_document("dba/page.html")
+    text = index.get_document("folder:dba/page.html")
     assert "# Standby setup" in text and "**redo transport**" in text
     assert "leaked" not in text and "color" not in text
 
@@ -121,8 +121,8 @@ def test_a_document_that_fails_extraction_counts_as_failed_and_the_rest_is_index
     report = index.sync(FolderCorpus(folder))
 
     assert (report.added, report.failed) == (3, 1)
-    assert "could not read the document" in report.failures["dba/scan.pdf"]
-    assert index.get_document("dba/scan.pdf") is None
+    assert "could not read the document" in report.failures["folder:dba/scan.pdf"]
+    assert index.get_document("folder:dba/scan.pdf") is None
 
 
 def test_a_failed_extraction_keeps_the_old_version_searchable(index, folder):
@@ -132,7 +132,7 @@ def test_a_failed_extraction_keeps_the_old_version_searchable(index, folder):
     report = index.sync(FolderCorpus(folder))
 
     assert (report.failed, report.replaced) == (1, 0)
-    assert index.search("failover runbook")[0].document_id == "dba/failover.pdf"
+    assert index.search("failover runbook")[0].document_id == "folder:dba/failover.pdf"
 
 
 def test_an_empty_extraction_is_reported_not_indexed(index, folder):
@@ -144,8 +144,8 @@ def test_an_empty_extraction_is_reported_not_indexed(index, folder):
     assert (report.added, report.failed) == (3, 2)
     assert {"dba/scanned.pdf", "dba/blank.md"} == set(report.failures)
     assert all(reason.startswith("empty extraction") for reason in report.failures.values())
-    assert index.get_document("dba/scanned.pdf") is None
-    assert index.get_document("dba/blank.md") is None
+    assert index.get_document("folder:dba/scanned.pdf") is None
+    assert index.get_document("folder:dba/blank.md") is None
 
 
 def test_a_document_that_became_empty_keeps_its_old_version(index, folder):
@@ -155,7 +155,7 @@ def test_a_document_that_became_empty_keeps_its_old_version(index, folder):
     report = index.sync(FolderCorpus(folder))
 
     assert (report.failed, report.replaced) == (1, 0)
-    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942.md"
+    assert index.search("ORA-00942")[0].document_id == "folder:dba/ora-00942.md"
 
 
 def test_a_missing_liteparse_fails_only_the_documents_that_need_it(folder, tmp_path):
@@ -165,7 +165,7 @@ def test_a_missing_liteparse_fails_only_the_documents_that_need_it(folder, tmp_p
     report = index.sync(FolderCorpus(folder))
 
     assert (report.added, report.failed) == (1, 2)
-    assert "LiteParse" in report.failures["dba/failover.pdf"]
+    assert "LiteParse" in report.failures["folder:dba/failover.pdf"]
 
 
 def test_a_hung_liteparse_fails_the_document_after_the_timeout(make_index, folder, lit):
@@ -175,7 +175,7 @@ def test_a_hung_liteparse_fails_the_document_after_the_timeout(make_index, folde
     report = index.sync(FolderCorpus(folder))
 
     assert report.failed == 2
-    assert "timed out" in report.failures["dba/failover.pdf"]
+    assert "timed out" in report.failures["folder:dba/failover.pdf"]
 
 
 def test_ocr_is_off_for_documents_unless_enabled(make_index, folder, lit, tmp_path):
@@ -201,7 +201,7 @@ def test_an_image_is_read_with_ocr_whatever_the_setting(make_index, tmp_path, li
 
     assert (report.added, report.failed) == (1, 0)
     assert "--no-ocr" not in seen.read_text()
-    assert index.search("ZX-9000")[0].document_id == "shots/whiteboard.png"
+    assert index.search("ZX-9000")[0].document_id == "folder:shots/whiteboard.png"
 
 
 def test_a_utf8_byte_order_mark_is_not_part_of_the_text(index, folder):
@@ -209,7 +209,7 @@ def test_a_utf8_byte_order_mark_is_not_part_of_the_text(index, folder):
 
     index.sync(FolderCorpus(folder))
 
-    assert index.get_document("dba/bom.md") == "Hello from Windows"
+    assert index.get_document("folder:dba/bom.md") == "Hello from Windows"
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can read any file")
@@ -233,7 +233,7 @@ def test_an_unknown_media_type_fails_the_document(index):
     report = index.sync(corpus)
 
     assert report.failed == 1
-    assert "application/x-mystery" in report.failures["x"]
+    assert "application/x-mystery" in report.failures["folder:x"]
 
 
 @pytest.mark.skipif(shutil.which("lit") is None, reason="LiteParse (`lit`) is not installed")
@@ -245,7 +245,7 @@ def test_a_real_pdf_goes_through_the_real_liteparse(tmp_path):
     report = index.sync(FolderCorpus(tmp_path))
 
     assert (report.added, report.failed) == (1, 0)
-    assert index.search("failover")[0].document_id == "dba/runbook.pdf"
+    assert index.search("failover")[0].document_id == "folder:dba/runbook.pdf"
 
 
 def _minimal_pdf(line: str) -> bytes:
@@ -273,11 +273,11 @@ def test_a_rebuild_extracts_and_reports_which_documents_failed(make_index, folde
     (folder / "dba" / "scan.pdf").write_bytes(fake_lit.pdf(""))
     index = make_index()
 
-    report = index.rebuild(FolderCorpus(folder))
+    report = index.rebuild([FolderCorpus(folder)])
 
     assert not report.promoted
     assert list(report.failures) == ["dba/scan.pdf"]
-    assert report.failures["dba/scan.pdf"].startswith("empty extraction")
+    assert report.failures["folder:dba/scan.pdf"].startswith("empty extraction")
     assert index.search("ORA-00942") == []  # nothing went live
 
 
@@ -285,7 +285,7 @@ def test_a_rebuild_within_the_threshold_serves_extracted_text(make_index, folder
     (folder / "dba" / "scan.pdf").write_bytes(fake_lit.pdf(""))
     index = make_index(rebuild_failure_threshold=0.5)
 
-    report = index.rebuild(FolderCorpus(folder))
+    report = index.rebuild([FolderCorpus(folder)])
 
     assert report.promoted and report.indexed == 3
-    assert index.search("ZX-9000")[0].document_id == "security/rotation.docx"
+    assert index.search("ZX-9000")[0].document_id == "folder:security/rotation.docx"

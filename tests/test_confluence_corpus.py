@@ -52,9 +52,9 @@ def test_a_root_page_and_all_its_descendants_are_synced_and_searched(index, site
     found = index.search("ORA-00942")[0]
     assert (found.document_id, found.title, found.space) == ("101", "Fixing ORA-00942", "ENG")
     assert found.url == "https://wiki.example.test/pages/viewpage.action?pageId=101"
-    assert index.search("ZX-9000")[0].document_id == "103"
-    assert index.get_document("200") is None
-    assert "Promote the standby database." in index.get_document("102")
+    assert index.search("ZX-9000")[0].document_id == "confluence:103"
+    assert index.get_document("confluence:200") is None
+    assert "Promote the standby database." in index.get_document("confluence:102")
 
 
 def downloads(site):
@@ -70,13 +70,13 @@ def test_an_attachment_is_its_own_document_citing_its_parent_page(index, site):
 
     assert (report.added, report.failed) == (6, 0)
     found = index.search("REPORTING role")[0]
-    assert found.document_id == "101/attachments/grants.pdf"
-    assert found.parent_id == "101"
+    assert found.document_id == "confluence:101/attachments/grants.pdf"
+    assert found.parent_id == "confluence:101"
     assert found.title == "Fixing ORA-00942 / grants.pdf"
     assert found.url == "https://wiki.example.test/pages/viewpage.action?pageId=101"
     assert found.space == "ENG"
-    assert index.get_document("101/attachments/notes.txt") == "Escalate to the DBA on call."
-    page = next(p for p in index.search("ORA-00942") if p.document_id == "101")
+    assert index.get_document("confluence:101/attachments/notes.txt") == "Escalate to the DBA on call."
+    page = next(p for p in index.search("ORA-00942") if p.document_id == "confluence:101")
     assert page.parent_id is None
 
 
@@ -100,8 +100,8 @@ def test_a_new_page_version_replaces_only_that_page(index, site):
 
     assert (report.replaced, report.unchanged, report.failed) == (1, 3, 0)
     assert [c[1] for c in site.calls("export")][-1:] == ["102"]
-    assert index.search("QX-5 check")[0].document_id == "102"
-    assert "QX-5" in index.get_document("102")
+    assert index.search("QX-5 check")[0].document_id == "confluence:102"
+    assert "QX-5" in index.get_document("confluence:102")
 
 
 def test_an_attachment_is_replaced_when_its_own_version_changes(index, site):
@@ -112,7 +112,7 @@ def test_an_attachment_is_replaced_when_its_own_version_changes(index, site):
     report = index.sync(corpus(site))
 
     assert (report.replaced, report.unchanged) == (1, 4)
-    assert index.get_document("101/attachments/notes.txt") == "Escalate to the platform team."
+    assert index.get_document("confluence:101/attachments/notes.txt") == "Escalate to the platform team."
 
 
 def test_a_new_page_version_does_not_replace_an_attachment_that_did_not_change(index, site):
@@ -135,9 +135,9 @@ def test_a_deleted_page_and_its_attachments_are_removed(index, site):
     report = index.sync(corpus(site))
 
     assert (report.removed, report.unchanged, report.failed) == (3, 2, 0)
-    assert index.get_document("102") is None
-    assert index.get_document("102/attachments/runbook.txt") is None
-    assert "103" not in {p.document_id for p in index.search("ZX-9000")}
+    assert index.get_document("confluence:102") is None
+    assert index.get_document("confluence:102/attachments/runbook.txt") is None
+    assert "confluence:103" not in {p.document_id for p in index.search("ZX-9000")}
 
 
 def test_a_deleted_attachment_is_removed_and_its_page_kept(index, site):
@@ -148,7 +148,7 @@ def test_a_deleted_attachment_is_removed_and_its_page_kept(index, site):
     report = index.sync(corpus(site))
 
     assert (report.removed, report.unchanged) == (1, 4)
-    assert index.get_document("101/attachments/notes.txt") is None
+    assert index.get_document("confluence:101/attachments/notes.txt") is None
 
 
 def test_a_failed_root_listing_reports_a_failure_and_the_other_roots_are_still_synced(
@@ -171,13 +171,13 @@ def test_nothing_is_removed_while_a_root_listing_failed(index, site):
     report = index.sync(corpus(site, "100", "200"))
 
     assert report.removed == 0 and report.failed == 1
-    assert index.get_document("200") is not None  # its root could not be listed
-    assert index.get_document("101") is not None  # gone, but removal waits for a clean listing
+    assert index.get_document("confluence:200") is not None  # its root could not be listed
+    assert index.get_document("confluence:101") is not None  # gone, but removal waits for a clean listing
 
     site.fail("200")
     report = index.sync(corpus(site, "100", "200"))
     assert (report.removed, report.failed) == (1, 0)
-    assert index.get_document("101") is None
+    assert index.get_document("confluence:101") is None
 
 
 @pytest.mark.parametrize("page, command", [("100", "children"), ("102", "attachments")])
@@ -191,8 +191,8 @@ def test_a_failed_children_or_attachment_listing_also_blocks_removal(
     report = index.sync(corpus(site))
 
     assert report.removed == 0 and report.failed == 1
-    assert index.get_document("103") is not None
-    assert index.get_document("102/attachments/runbook.txt") is not None
+    assert index.get_document("confluence:103") is not None
+    assert index.get_document("confluence:102/attachments/runbook.txt") is not None
 
 
 def test_an_export_failure_is_reported_for_that_document_and_the_rest_is_synced(index, site):
@@ -203,10 +203,10 @@ def test_an_export_failure_is_reported_for_that_document_and_the_rest_is_synced(
     report = index.sync(corpus(site))
 
     assert (report.added, report.failed) == (3, 2)
-    assert "HTTP 500" in report.failures["102"]
-    assert "could not download" in report.failures["101/attachments/notes.txt"]
-    assert index.get_document("102") is None
-    assert index.get_document("103") is not None
+    assert "HTTP 500" in report.failures["confluence:102"]
+    assert "could not download" in report.failures["confluence:101/attachments/notes.txt"]
+    assert index.get_document("confluence:102") is None
+    assert index.get_document("confluence:103") is not None
 
 
 def test_a_failed_export_keeps_the_old_version_searchable_and_is_retried(index, site):
@@ -217,12 +217,12 @@ def test_a_failed_export_keeps_the_old_version_searchable_and_is_retried(index, 
     report = index.sync(corpus(site))
 
     assert (report.failed, report.replaced) == (1, 0)
-    assert "standby" in index.get_document("102")
+    assert "standby" in index.get_document("confluence:102")
 
     site.fail("102")
     report = index.sync(corpus(site))
     assert (report.failed, report.replaced) == (0, 1)
-    assert "QX-5" in index.get_document("102")
+    assert "QX-5" in index.get_document("confluence:102")
 
 
 def test_an_attachment_that_cannot_be_read_fails_only_itself(index, site):
@@ -231,17 +231,17 @@ def test_an_attachment_that_cannot_be_read_fails_only_itself(index, site):
     report = index.sync(corpus(site))
 
     assert (report.added, report.failed) == (4, 1)
-    assert "could not read the document" in report.failures["101/attachments/scan.pdf"]
+    assert "could not read the document" in report.failures["confluence:101/attachments/scan.pdf"]
 
 
 def test_export_failures_count_toward_the_rebuild_threshold(make_index, site):
     site.fail("102", "export")
 
-    refused = make_index().rebuild(corpus(site))
+    refused = make_index().rebuild([corpus(site)])
     assert not refused.promoted and list(refused.failures) == ["102"]
     assert "1 of 4 Documents failed" in refused.reason
 
-    promoted = make_index(rebuild_failure_threshold=0.25).rebuild(corpus(site))
+    promoted = make_index(rebuild_failure_threshold=0.25).rebuild([corpus(site)])
     assert promoted.promoted and (promoted.indexed, promoted.failed) == (3, 1)
 
 
@@ -250,11 +250,11 @@ def test_a_rebuild_is_refused_when_a_root_listing_failed(make_index, site):
     index.sync(corpus(site, "100", "200"))
     site.fail("200", "info")
 
-    report = index.rebuild(corpus(site, "100", "200"))
+    report = index.rebuild([corpus(site, "100", "200")])
 
     assert not report.promoted and "root 200" in report.reason
     assert "root 200" in report.failures
-    assert index.get_document("200") is not None  # the Live index is untouched
+    assert index.get_document("confluence:200") is not None  # the Live index is untouched
     assert len(site.calls("export")) == 5  # the refused Rebuild fetched nothing
 
 
@@ -273,7 +273,7 @@ def test_images_media_and_unreadable_types_are_left_out_of_the_attachments(index
     report = index.sync(corpus(site))
 
     assert (report.added, report.failed) == (5, 0)
-    assert index.get_document("101/attachments/notes.txt") == "x"
+    assert index.get_document("confluence:101/attachments/notes.txt") == "x"
 
 
 def test_attachments_can_be_turned_off_or_filtered_by_name(index, site):
@@ -286,8 +286,8 @@ def test_attachments_can_be_turned_off_or_filtered_by_name(index, site):
     report = index.sync(corpus(site, exclude_attachments=["draft-*"]))
 
     assert report.added == 1
-    assert index.get_document("101/attachments/notes.txt") == "Escalate."
-    assert index.get_document("101/attachments/draft-plan.txt") is None
+    assert index.get_document("confluence:101/attachments/notes.txt") == "Escalate."
+    assert index.get_document("confluence:101/attachments/draft-plan.txt") is None
 
 
 def test_max_depth_is_passed_to_the_cli(index, site):
@@ -331,7 +331,7 @@ def test_a_malformed_listing_is_a_root_failure_not_a_crash(index, site):
 
     assert (report.removed, report.failed) == (0, 2)
     assert set(report.failures) == {"root 100", "root 200"}
-    assert index.get_document("200") is not None
+    assert index.get_document("confluence:200") is not None
 
 
 def test_a_page_without_a_version_cannot_be_told_unchanged_so_it_is_replaced_each_time(
@@ -342,4 +342,4 @@ def test_a_page_without_a_version_cannot_be_told_unchanged_so_it_is_replaced_eac
     report = index.sync(corpus(site, "300"))
 
     assert (report.replaced, report.unchanged, report.failed) == (1, 0, 0)
-    assert index.get_document("300") == "Some text."
+    assert index.get_document("confluence:300") == "Some text."

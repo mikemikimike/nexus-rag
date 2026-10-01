@@ -54,7 +54,7 @@ def test_a_changed_version_replaces_the_document_and_only_that_one(index):
 
     assert (report.added, report.replaced, report.unchanged) == (0, 1, 2)
     passages = index.search("ZX-9000")
-    assert passages[0].document_id == "garage/battery"
+    assert passages[0].document_id == "default:garage/battery"
     assert "ZX-9000" in passages[0].text
     assert [p for p in index.search("battery dead") if "dead more often" in p.text] == []
 
@@ -65,7 +65,7 @@ def test_a_replaced_document_leaves_no_duplicate_passages(index):
 
     passages = index.search("battery", k=10)
 
-    assert [p.document_id for p in passages].count("garage/battery") == 1
+    assert [p.document_id for p in passages].count("default:garage/battery") == 1
 
 
 def test_documents_removed_from_the_corpus_disappear_from_search(index):
@@ -74,7 +74,7 @@ def test_documents_removed_from_the_corpus_disappear_from_search(index):
     report = index.sync(InMemoryCorpus(DOCUMENTS[:2]))
 
     assert (report.removed, report.unchanged) == (1, 2)
-    assert "garage/battery" not in {p.document_id for p in index.search("car battery", k=10)}
+    assert "default:garage/battery" not in {p.document_id for p in index.search("car battery", k=10)}
 
 
 def test_a_document_added_later_is_reported_as_added(index):
@@ -114,7 +114,7 @@ def test_a_failed_fetch_of_a_changed_document_keeps_its_old_passages_searchable(
     report = index.sync(flaky)
 
     assert (report.failed, report.replaced, report.unchanged) == (1, 0, 2)
-    assert index.search("car will not start")[0].document_id == "garage/battery"
+    assert index.search("car will not start")[0].document_id == "default:garage/battery"
     assert not any("ZX-9000" in p.text for p in index.search("ZX-9000"))
 
 
@@ -154,7 +154,7 @@ def test_a_failed_embed_of_a_changed_document_keeps_its_old_passages_searchable(
 
     assert (report.failed, report.replaced) == (1, 0)
     gateway.fail = False
-    assert index.search("car battery dead")[0].document_id == "garage/battery"
+    assert index.search("car battery dead")[0].document_id == "default:garage/battery"
 
 
 def test_search_keeps_returning_results_while_a_sync_runs(index):
@@ -210,7 +210,7 @@ def test_a_failed_listing_removes_nothing(index):
     with pytest.raises(OSError):
         index.sync(BrokenListing(DOCUMENTS))
 
-    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
 
 
 def test_exclusive_run_is_shared_by_holders_of_the_same_qdrant():

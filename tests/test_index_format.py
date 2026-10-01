@@ -42,9 +42,9 @@ def test_a_differing_but_searchable_index_is_served_read_only_with_a_warning(
     assert status.access == Access.READ_ONLY
     assert any(difference in warning for warning in status.warnings)
     assert any("Rebuild" in warning for warning in status.warnings)
-    assert upgraded.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert upgraded.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
     assert upgraded.list_spaces() == ["DBA", "GARAGE"]
-    assert upgraded.get_document("garage/battery") == DOCUMENTS[2].text
+    assert upgraded.get_document("default:garage/battery") == DOCUMENTS[2].text
 
 
 def test_a_read_only_index_is_logged_when_first_served(index, caplog):
@@ -73,14 +73,14 @@ def test_a_read_only_index_refuses_a_sync_and_never_rebuilds_on_its_own():
     assert len(gateway.embedded) == embedded  # nothing re-embedded
     assert {n for n in collections(index) if ".gen-" in n} == \
         {n for n in before if ".gen-" in n}
-    assert upgraded.get_document("garage/battery") == DOCUMENTS[2].text
+    assert upgraded.get_document("default:garage/battery") == DOCUMENTS[2].text
 
 
 def test_a_rebuild_makes_a_read_only_index_current_again(index):
     index.sync(InMemoryCorpus(DOCUMENTS))
     upgraded = after_an_upgrade(index, embed_model="embed-v2")
 
-    report = upgraded.rebuild(InMemoryCorpus(DOCUMENTS))
+    report = upgraded.rebuild([InMemoryCorpus(DOCUMENTS)])
 
     assert report.promoted
     status = upgraded.status()
@@ -101,7 +101,7 @@ def test_an_index_of_another_embedding_dimension_is_refused(index):
     assert status.access == Access.REFUSED
     assert any("dimension" in warning and "64" in warning for warning in status.warnings)
     for use in (lambda: upgraded.search("ORA-00942"), upgraded.list_spaces,
-                lambda: upgraded.get_document("dba/ora-00942"),
+                lambda: upgraded.get_document("default:dba/ora-00942"),
                 lambda: upgraded.sync(InMemoryCorpus(DOCUMENTS))):
         with pytest.raises(IndexRefused, match="dimension"):
             use()
@@ -120,23 +120,23 @@ def test_a_refused_index_is_replaced_by_a_rebuild_not_by_a_sync(index, monkeypat
     index.sync(InMemoryCorpus(DOCUMENTS))
     monkeypatch.setattr(index_format, "SCHEMA_VERSION", 2)
 
-    assert index.rebuild(InMemoryCorpus(DOCUMENTS)).promoted
+    assert index.rebuild([InMemoryCorpus(DOCUMENTS)]).promoted
 
     assert index.status().access == Access.READ_WRITE
-    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
 
 
 def test_switching_back_to_a_refused_index_is_itself_refused(index, monkeypatch):
     index.sync(InMemoryCorpus(DOCUMENTS))
     monkeypatch.setattr(index_format, "SCHEMA_VERSION", 2)
-    index.rebuild(InMemoryCorpus(DOCUMENTS))
+    index.rebuild([InMemoryCorpus(DOCUMENTS)])
     live = index.status().generation
 
     with pytest.raises(IndexRefused, match="previous index"):
         index.switch_back()
 
     assert index.status().generation == live
-    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
 
 
 def test_an_index_of_another_dimension_is_refused_even_under_the_same_model_name(index):
@@ -189,10 +189,10 @@ def test_an_index_built_before_chunks_were_recorded_is_served_read_only_until_a_
 
     assert status.access == Access.READ_ONLY
     assert any("chunk" in warning and "not recorded" in warning for warning in status.warnings)
-    assert upgraded.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert upgraded.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
     with pytest.raises(IndexReadOnly, match="Rebuild"):
         upgraded.sync(InMemoryCorpus(DOCUMENTS))
-    assert upgraded.rebuild(InMemoryCorpus(DOCUMENTS)).promoted
+    assert upgraded.rebuild([InMemoryCorpus(DOCUMENTS)]).promoted
     assert upgraded.status().access == Access.READ_WRITE
 
 
@@ -216,7 +216,7 @@ def test_a_rebuild_records_the_chunk_settings_it_used(index):
     index.sync(InMemoryCorpus(DOCUMENTS))
     upgraded = after_an_upgrade(index, chunk_tokens=200, chunk_overlap=20)
 
-    assert upgraded.rebuild(InMemoryCorpus(DOCUMENTS)).promoted
+    assert upgraded.rebuild([InMemoryCorpus(DOCUMENTS)]).promoted
 
     status = upgraded.status()
     assert (status.format.chunk_tokens, status.format.chunk_overlap) == (200, 20)

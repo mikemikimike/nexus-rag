@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from local_rag.corpus import DocumentRef, Listing, RawDocument
+from local_rag.corpus import DocumentRef, Listing, RawDocument, check_corpus_name
 from local_rag.extraction import MEDIA_TYPES
 
 _MAX_ERROR_LENGTH = 400
@@ -49,10 +49,12 @@ class ConfluenceCorpus:
     that cannot be read, or matching ``exclude_attachments`` (file name globs), are left out.
     """
 
-    def __init__(self, roots: Sequence[str], *, confluence_bin: str = "confluence",
+    def __init__(self, roots: Sequence[str], *, name: str = "confluence",
+                 confluence_bin: str = "confluence",
                  max_depth: int = 0, attachments: bool = True,
                  exclude_attachments: Sequence[str] = DEFAULT_EXCLUDED_ATTACHMENTS,
                  timeout: float = 600.0):
+        self.name = check_corpus_name(name)
         self._roots = list(roots)
         self._bin = confluence_bin
         self._max_depth = max_depth

@@ -42,7 +42,7 @@ def test_a_keyword_only_index_is_synced_and_searched_with_no_gateway(corpus):
 
     assert (report.added, report.failed) == (3, 0)
     found = index.search("ORA-00942")
-    assert found and found[0].document_id == "dba/ora-00942"
+    assert found and found[0].document_id == "default:dba/ora-00942"
 
 
 def test_a_keyword_only_index_never_asks_the_gateway_to_embed(corpus):
@@ -51,7 +51,7 @@ def test_a_keyword_only_index_never_asks_the_gateway_to_embed(corpus):
 
     index.sync(corpus)
     index.search("battery")
-    index.rebuild(corpus)
+    index.rebuild([corpus])
     index.status()
 
     assert gateway.attempts == 0
@@ -75,7 +75,7 @@ def test_a_keyword_only_index_under_hybrid_settings_is_read_only_and_searched_by
     status = hybrid.status()
     assert status.access == Access.READ_ONLY
     assert any("retrieval mode" in warning for warning in status.warnings)
-    assert hybrid.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert hybrid.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
     with pytest.raises(IndexReadOnly):
         hybrid.sync(corpus)
     assert gateway.attempts == 0
@@ -90,7 +90,7 @@ def test_a_hybrid_index_under_keyword_settings_is_read_only_and_searched_by_keyw
     status = keyword.status()
     assert status.access == Access.READ_ONLY
     assert any("retrieval mode" in warning for warning in status.warnings)
-    assert keyword.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert keyword.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
     with pytest.raises(IndexReadOnly):
         keyword.sync(corpus)
 
@@ -99,7 +99,7 @@ def test_a_rebuild_brings_an_index_to_the_mode_the_code_runs_in(index, corpus):
     index.sync(corpus)
     keyword = reopened(index, None, retrieval=KEYWORD)
 
-    assert keyword.rebuild(corpus).promoted
+    assert keyword.rebuild([corpus]).promoted
 
     status = keyword.status()
     assert status.access == Access.READ_WRITE and status.warnings == ()
@@ -109,7 +109,7 @@ def test_a_rebuild_brings_an_index_to_the_mode_the_code_runs_in(index, corpus):
 
     hybrid = reopened(index, FakeModelGateway(synonyms=SYNONYMS), retrieval=HYBRID)
     assert hybrid.status().access == Access.READ_ONLY
-    assert hybrid.rebuild(corpus).promoted
+    assert hybrid.rebuild([corpus]).promoted
     status = hybrid.status()
     assert status.access == Access.READ_WRITE and status.warnings == ()
     assert (status.format.retrieval, status.format.dimension) == (HYBRID, 64)
@@ -166,7 +166,7 @@ def test_a_search_falls_back_to_keywords_and_says_so_when_the_embedding_call_fai
 
     results = hybrid.search("ORA-00942")
 
-    assert results[0].document_id == "dba/ora-00942"
+    assert results[0].document_id == "default:dba/ora-00942"
     assert "keyword" in results.notice and "embedding" in results.notice
 
 
@@ -180,7 +180,7 @@ def test_a_fallback_does_not_stop_the_next_search_using_the_embedding_model(hybr
     results = hybrid.search("vehicle ignition")
 
     assert results.notice is None
-    assert results[0].document_id == "garage/battery"
+    assert results[0].document_id == "default:garage/battery"
 
 
 def test_a_gateway_that_is_down_from_the_start_is_asked_once_per_search(hybrid, flaky):
@@ -190,7 +190,7 @@ def test_a_gateway_that_is_down_from_the_start_is_asked_once_per_search(hybrid, 
 
     results = restarted.search("ORA-00942")
 
-    assert results.notice and results[0].document_id == "dba/ora-00942"
+    assert results.notice and results[0].document_id == "default:dba/ora-00942"
     assert flaky.query_attempts == 1
 
 

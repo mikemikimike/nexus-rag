@@ -114,7 +114,7 @@ def test_a_rebuild_whose_embedding_recovers_within_the_attempts_is_promoted(serv
     index.sync(ONE)
     server.fail_with, server.fail_for = (503, "overloaded"), 1
 
-    report = index.rebuild(ONE)
+    report = index.rebuild([ONE])
 
     assert report.promoted and report.failed == 0
 
@@ -124,11 +124,11 @@ def test_a_rebuild_whose_embedding_keeps_failing_is_refused_by_the_threshold(ser
     index.sync(ONE)
     server.fail_with = (503, "overloaded")
 
-    report = index.rebuild(ONE)
+    report = index.rebuild([ONE])
 
     assert not report.promoted and report.failed == 1
-    assert "503" in report.failures["dba/ora-00942"]
-    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"  # the Live index stays
+    assert "503" in report.failures["default:dba/ora-00942"]
+    assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"  # the Live index stays
 
 
 def test_failed_attempts_are_a_health_note_and_a_success_clears_it(server):

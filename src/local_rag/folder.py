@@ -2,7 +2,7 @@
 import hashlib
 from pathlib import Path
 
-from local_rag.corpus import DocumentRef, RawDocument
+from local_rag.corpus import DocumentRef, RawDocument, check_corpus_name
 from local_rag.extraction import MEDIA_TYPES
 
 _UNREADABLE = "unreadable"
@@ -15,7 +15,8 @@ class FolderCorpus:
     name) are left out.
     """
 
-    def __init__(self, root: Path | str):
+    def __init__(self, root: Path | str, *, name: str = "folder"):
+        self.name = check_corpus_name(name)
         self._root = Path(root).resolve()
 
     def list(self) -> list[DocumentRef]:

@@ -216,7 +216,7 @@ def _remove(trip: _RoundTrip) -> str:
 
 def _rebuild(trip: _RoundTrip) -> str:
     before = trip.index.status().generation
-    report = trip.index.rebuild(trip.corpus)
+    report = trip.index.rebuild([trip.corpus])
     if not report.promoted:
         raise Failure(f"Rebuild was refused: {report.reason}",
                       cause="a Rebuild of two generated Documents should always be complete; "
