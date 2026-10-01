@@ -1,12 +1,10 @@
 .env
+*.env
 .venv/
 __pycache__/
 *.pyc
-data/
-state/
-wheelhouse/
-vendor/
 confluence_roots.txt
+drop/
 .scratch/
 *.egg-info/
 .pytest_cache/
