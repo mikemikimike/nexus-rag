@@ -8,6 +8,7 @@ Document, that the embedding model read all of a Passage).
 """
 import random
 import secrets
+import string
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,7 +50,8 @@ class Run:
 
     @classmethod
     def new(cls) -> "Run":
-        return cls(secrets.token_hex(5))
+        # Letters only: digits would split an identifier into parts that other runs share.
+        return cls("".join(secrets.choice(string.ascii_lowercase) for _ in range(10)))
 
     keyword = property(lambda self: f"acc{self.mark}k")  # in the keyword Document
     replacement = property(lambda self: f"acc{self.mark}r")  # there, once it has been changed
