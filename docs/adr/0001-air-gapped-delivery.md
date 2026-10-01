@@ -9,7 +9,7 @@ The system runs on a network with no internet access. That network has a **Mirro
 
 ## Considered options
 
-- **Carry everything by hand** (the previous `download_wheels` / `offline_install` scripts): rejected. The Mirror already exists, and hand-carried wheels are an unreviewed, unpinned second path for the same packages.
+- **Carry everything by hand** (the earlier hand-run download and offline-install scripts): rejected. The Mirror already exists, and hand-carried wheels are an unreviewed, unpinned second path for the same packages.
 - **Carry nothing, ask the Mirror for Qdrant too**: not possible today, since Qdrant releases are not available from it.
 
 ## Consequences
