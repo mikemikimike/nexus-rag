@@ -497,11 +497,12 @@ class KnowledgeIndex:
     def _extract(self, raw: RawDocument) -> Document:
         return Document(
             id=raw.id, title=raw.title, url=raw.url, space=raw.space, version=raw.version,
-            text=self._extractor.extract(raw), parent_id=raw.parent_id)
+            text=self._extractor.extract(raw), parent_id=raw.parent_id,
+            media_type=raw.media_type)
 
     def _add(self, document: Document, collection: str) -> None:
         # A Document with no text is still found by its title: it gets one empty Passage.
-        chunks = self._chunker.split(document.text) or [""]
+        chunks = self._chunker.split(document.text, document.media_type) or [""]
         contents = [f"{document.title}\n\n{chunk}" for chunk in chunks]  # the title as context
         if self._settings.retrieval is RetrievalMode.HYBRID:
             dense = self._embed(contents)

@@ -103,3 +103,11 @@ def test_chunking_neither_needs_nor_touches_global_llamaindex_settings():
 
     assert (LlamaSettings._tokenizer, LlamaSettings._node_parser,
             LlamaSettings._embed_model) == before == (None, None, None)
+
+
+def test_every_media_type_is_split_as_prose_for_now():
+    text = sentences(40)
+    prose = Chunker(words, size=30, overlap=5).split(text)
+
+    for media_type in ("text/plain", "text/markdown", "text/x-python", "application/pdf"):
+        assert Chunker(words, size=30, overlap=5).split(text, media_type) == prose

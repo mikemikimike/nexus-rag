@@ -12,6 +12,7 @@ class Document:
     version: str
     text: str
     parent_id: str | None = None  # the page an Attachment belongs to
+    media_type: str = "text/plain"  # the Media type its Corpus gave it, kept past extraction
 
 
 @dataclass(frozen=True)
