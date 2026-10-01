@@ -363,6 +363,7 @@ Prefix `local-rag` commands with `run_rag /opt/local-rag/venv/bin/` (systemd) or
 | Add a user | generate a token (section 3 E), `RAG_VALUE=... RAG_APPEND=1 set_env MCP_TOKENS`, restart the MCP server (section 5), give the user their snippet |
 | Revoke a user | edit `MCP_TOKENS` by hand to drop that token, restart the MCP server |
 | Upgrade | a new Binary drop, then section 2's drop checks and section 4's command again |
+| Remove a Corpus that is no longer wanted | `local-rag forget NAME` (dropping it from `corpora.toml` removes nothing: `local-rag status` warns while its Documents remain, and a **Rebuild** also leaves them out) |
 | Undo a bad Rebuild | `local-rag switch-back` (the **Previous index** becomes the Live index) |
 | Change the embedding model | a **Rebuild**, only when the operator asks, see below |
 | Switch between `hybrid` and `keyword` | set `RAG_RETRIEVAL` (and `RAG_EMBED_MODEL` for `hybrid`), then a **Rebuild**, as below |

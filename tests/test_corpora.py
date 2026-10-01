@@ -119,3 +119,46 @@ def test_an_undeclared_corpus_is_named_in_the_error(tmp_path):
 
     with pytest.raises(DeclarationError, match=r"'nope'.*wiki"):
         declaration.corpus("nope")
+
+
+def test_a_rebuild_leaves_out_a_corpus_it_is_not_given(index):
+    a = InMemoryCorpus([doc("a1", "alpha ZX-1")], name="a")
+    index.sync(a)
+    index.sync(InMemoryCorpus([doc("b1", "bravo QX-2")], name="b"))
+
+    report = index.rebuild([a])
+
+    assert report.promoted and report.indexed == 1
+    assert index.get_document("b:b1") is None
+    assert index.get_document("a:a1")
+
+
+def test_forgetting_a_corpus_removes_its_documents_and_counts_them(index):
+    index.sync(InMemoryCorpus([doc("a1", "alpha ZX-1"), doc("a2", "alpha ZX-2")], name="a"))
+    index.sync(InMemoryCorpus([doc("b1", "bravo QX-2")], name="b"))
+
+    removed = index.forget("a")
+
+    assert removed == 2
+    assert index.get_document("a:a1") is None
+    assert index.get_document("b:b1") == "bravo QX-2"
+    assert not any(p.corpus == "a" for p in index.search("alpha ZX-1", k=10))
+    assert index.status().documents == 1
+    assert index.forget("a") == 0
+
+
+def test_forgetting_before_anything_is_indexed_removes_nothing(index):
+    assert index.forget("a") == 0
+
+
+def test_documents_of_an_undeclared_corpus_stay_searchable_and_status_names_it(index):
+    index.sync(InMemoryCorpus([doc("a1", "alpha ZX-1")], name="a"))
+    index.sync(InMemoryCorpus([doc("b1", "bravo QX-2")], name="b"))
+
+    status = index.status(declared=["a"])
+
+    assert any("'b'" in w and "undeclared" in w and "forget" in w for w in status.warnings)
+    assert not any("'a'" in w for w in status.warnings)
+    assert index.get_document("b:b1") == "bravo QX-2"
+    assert not any("undeclared" in w for w in index.status(declared=["a", "b"]).warnings)
+    assert not any("undeclared" in w for w in index.status().warnings)

@@ -103,11 +103,11 @@ def flags_of(parser: argparse.ArgumentParser) -> set[str]:
 
 def test_every_local_rag_command_and_flag_in_the_guide_exists():
     known = parsers()
-    commands = set(re.findall(r"local-rag (sync|rebuild|switch-back|search|status)\b", GUIDE))
+    commands = set(re.findall(r"local-rag (sync|rebuild|forget|switch-back|search|status)\b", GUIDE))
     assert commands == {name.split()[1] for name in known if name.startswith("local-rag")}
 
     for line in "\n".join(code_spans()).splitlines():
-        for name in ("sync", "rebuild", "search", "status", "switch-back"):
+        for name in ("sync", "rebuild", "forget", "search", "status", "switch-back"):
             if re.search(rf"local-rag {name}\b", line):
                 unknown = set(re.findall(r"(?<![\w-])--?[a-z][\w-]*", line.split(f"local-rag {name}")[1]))
                 allowed = flags_of(known[f"local-rag {name}"]) | {"-m"}
