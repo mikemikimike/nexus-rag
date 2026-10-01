@@ -231,3 +231,11 @@ def test_set_env_refuses_a_value_the_env_file_syntax_would_misread(tmp_path):
 
         assert done.returncode != 0 and "refused" in done.stderr
         assert env_file.read_text() == fresh
+
+
+def test_both_install_sections_of_the_readme_send_the_operator_to_the_acceptance_suite():
+    for heading, next_heading in (("## 3. Install, systemd route", "## 4."),
+                                  ("## 4. Install, container route", "## 5.")):
+        section = README.split(heading)[1].split(next_heading)[0]
+
+        assert "local_rag.acceptance" in section and "ACCEPTANCE PASSED" in section, heading

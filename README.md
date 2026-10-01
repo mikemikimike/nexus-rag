@@ -80,6 +80,7 @@ Then configure and start working:
 2. List the Confluence Roots, one page id or URL per line, in `/etc/local-rag/confluence_roots.txt`. A Space's home page as a Root covers the whole Space.
 3. Run the smoke check (section 6), then the first Sync: `sudo systemctl start local-rag-sync.service` (it runs until done; follow it with `journalctl -fu local-rag-sync`).
 4. Health: `curl http://HOST:8765/healthz` answers `ok`. Your first token: `sudo grep '^MCP_TOKENS=' /etc/local-rag/local-rag.env`.
+5. When the first Sync is done, run the acceptance suite (section 6, "Acceptance suite"): `run_rag /opt/local-rag/venv/bin/python -m local_rag.acceptance --systemd` (the helper is defined below). The installation is accepted when it ends `ACCEPTANCE PASSED`.
 
 The hourly timer runs an incremental Sync; the weekly timer runs the same Sync as a safety net. Both read the roots file. Until step 1 and 2 are done they fail harmlessly.
 
@@ -122,6 +123,8 @@ compose up -d                              # apply an env file edit
 compose run --rm -T sync local-rag status  # run any local-rag command
 compose run --rm -T sync                   # one Sync (what the timers do)
 ```
+
+After the first Sync, run the acceptance suite (section 6, "Acceptance suite"): `compose run --rm -T sync python -m local_rag.acceptance --mcp-url http://mcp:8765` inside the stack, then its `install` group on the host, which needs `docker` and `systemctl` (the command is in section 6). The installation is accepted when both end `ACCEPTANCE PASSED`.
 
 Mind the missing TLS (section 1).
 
