@@ -100,6 +100,15 @@ max_depth = 2
     ('[corpus.a]\nkind = "confluence"\nroots = ["1"]\nmax_depth = -1', "max_depth"),
     ('[corpus."a:b"]\nkind = "folder"\npath = "x"', "cannot name a Corpus"),
     ('[other.a]\nkind = "folder"', "unknown top-level"),
+    ('[corpus.a]\nkind = "gitlab"', "repositories must be"),
+    ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = ["main"]',
+     "GITLAB_URL and GITLAB_TOKEN must be set"),
+    ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = []',
+     "exactly one branch or tag"),
+    ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\n'
+     'refs = ["main", "dev"]', "exactly one branch or tag"),
+    ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = ["m"]\n'
+     'branch = "x"', "unknown branch"),
 ])
 def test_a_wrong_declaration_is_rejected_when_it_is_read(tmp_path, text, message):
     with pytest.raises(DeclarationError, match=message):

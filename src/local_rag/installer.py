@@ -43,7 +43,7 @@ from local_rag.binary_drop import (
 
 SERVICE_USER = "ragsvc"
 PREREQUISITE_COMMANDS = {"systemctl": "systemd", "useradd": "passwd / shadow-utils",
-                         "chown": "coreutils"}
+                         "chown": "coreutils", "git": "git"}
 LOCKFILE = "requirements.lock"
 UNITS_DIRECTORY = "deploy/systemd"
 
@@ -320,6 +320,11 @@ MCP_PORT=8765
 # CONFLUENCE_AUTH_TYPE=bearer
 # CONFLUENCE_API_TOKEN=
 # CONFLUENCE_READ_ONLY=true
+
+# GitLab (read by a `kind = "gitlab"` Corpus; a read-only token that can see only code
+# suitable for every user of this server; the URL is the base, without a project path)
+# GITLAB_URL=https://gitlab.example.test
+# GITLAB_TOKEN=
 """
 
 
