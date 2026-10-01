@@ -174,7 +174,7 @@ A folder Corpus works the same way (`local-rag sync --folder DIR`; the Space is 
 |---|---|
 | `/healthz` answers 503 | Qdrant is down or `QDRANT_API_KEY` differs from `QDRANT__SERVICE__API_KEY` (the systemd env file keeps them equal), or the Live index is unusable: `local-rag status` |
 | `search_docs` says "No results" | Nothing indexed yet: run a Sync and read its output or the journal |
-| Embedding errors, 401 or 404 | `LITELLM_BASE_URL` must end with `/v1`; `RAG_EMBED_MODEL` is the LiteLLM `model_name`; `NO_PROXY` for the gateway. The smoke check shows the gateway's answer |
+| Embedding errors, 401 or 404 | `LITELLM_BASE_URL` must end with `/v1`; `RAG_EMBED_MODEL` is the LiteLLM `model_name`; the gateway is always contacted directly, ignoring proxy variables. The smoke check shows the gateway's answer |
 | `status` warns about the embedding dimension or Index format | The model or code changed since the index was built: run a Rebuild |
 | A Rebuild is refused | The failure rate exceeded the threshold, or a listing was incomplete (a Root or an Attachment listing failed): read the reason, fix it, retry; the Live index is untouched |
 | 401 from clients | The header must be `Authorization: Bearer <token>`, and the token one of `MCP_TOKENS` at the last restart |
