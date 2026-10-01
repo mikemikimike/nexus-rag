@@ -61,7 +61,7 @@ What an index records about how it was built (schema version, Retrieval mode, sp
 _Avoid_: version, schema
 
 **Retrieval mode**:
-How an index finds Passages, chosen by the operator and recorded in the Index format: _Hybrid_ (meaning and keywords, which needs an embedding model) or _Keyword-only_ (keywords alone, which needs none). Choosing Hybrid without naming an embedding model is a settings error, never a silent downgrade.
+How an index finds Passages, chosen by the operator and recorded in the Index format: _Hybrid_ (meaning and keywords, which needs an embedding model) or _Keyword-only_ (keywords alone, which needs none). Choosing Hybrid without naming an embedding model, or without naming the Model gateway, is a settings error, never a silent downgrade or a guessed address.
 _Avoid_: degraded mode, BM25 mode, no-embedding mode
 
 **Keyword fallback**:

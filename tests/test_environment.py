@@ -7,14 +7,17 @@ from local_rag.environment import SettingsError, settings_from_environment
 from local_rag.settings import RetrievalMode
 from local_rag.sparse import SparseParams
 
-EMBEDDING = {"RAG_EMBED_MODEL": "embed"}  # Hybrid retrieval, the default, needs one named
+EMBEDDING = {"RAG_EMBED_MODEL": "embed",  # Hybrid retrieval, the default, needs these named
+             "LITELLM_BASE_URL": "http://gateway.example.test:4000/v1"}
+BGE = {**EMBEDDING, "RAG_EMBED_MODEL": "bge"}
 
 
-def test_an_environment_naming_only_the_embedding_model_gives_the_defaults():
-    settings = settings_from_environment({"RAG_EMBED_MODEL": "embed"})
+def test_an_environment_naming_only_the_embedding_model_and_the_gateway_gives_the_defaults():
+    settings = settings_from_environment(EMBEDDING)
 
     assert replace(settings, liteparse_bin="lit") == Settings(
-        qdrant_location="http://127.0.0.1:6333")
+        qdrant_location="http://127.0.0.1:6333", embed_model="embed",
+        gateway_base_url="http://gateway.example.test:4000/v1")
     assert settings.retrieval is RetrievalMode.HYBRID
 
 
@@ -48,14 +51,14 @@ def test_a_retrieval_mode_that_is_neither_names_its_variable():
 
 def test_the_embedding_retry_settings_come_from_the_environment():
     settings = settings_from_environment({
-        "RAG_EMBED_MODEL": "bge", "RAG_EMBED_ATTEMPTS": "5", "RAG_EMBED_RETRY_BACKOFF": "2"})
+        **BGE, "RAG_EMBED_ATTEMPTS": "5", "RAG_EMBED_RETRY_BACKOFF": "2"})
 
     assert (settings.embed_attempts, settings.embed_retry_backoff) == (5, 2.0)
 
 
 def test_no_embedding_attempt_is_an_error():
     with pytest.raises(SettingsError, match="embed_attempts"):
-        settings_from_environment({"RAG_EMBED_MODEL": "bge", "RAG_EMBED_ATTEMPTS": "0"})
+        settings_from_environment({**BGE, "RAG_EMBED_ATTEMPTS": "0"})
 
 
 def test_each_variable_reaches_its_setting():

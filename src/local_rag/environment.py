@@ -21,11 +21,12 @@ class SettingsError(ValueError):
 
 
 def settings_from_environment(environ: Mapping[str, str], *,
-                              embedding_required: bool = True) -> Settings:
+                              gateway_required: bool = True) -> Settings:
     """The Settings the environment asks for; raises SettingsError for an unusable value.
 
-    Hybrid retrieval, the default, needs an embedding model named. A caller that never
-    embeds (the acceptance suite's checks of a host's units) passes ``embedding_required=False``.
+    Hybrid retrieval, the default, needs an embedding model named, and it and a reranker need
+    the Model gateway named. A caller that never reaches the gateway (the acceptance suite's
+    checks of a host's units) passes ``gateway_required=False``.
     """
     def text(name: str) -> str | None:
         return environ.get(name) or None
@@ -43,7 +44,7 @@ def settings_from_environment(environ: Mapping[str, str], *,
                     avg_doc_length=number("RAG_BM25_AVG_DL", float))
     rerank_model = text("RAG_RERANK_MODEL")
     retrieval = _retrieval_mode(text("RAG_RETRIEVAL"))
-    if embedding_required and retrieval is RetrievalMode.HYBRID \
+    if gateway_required and retrieval is RetrievalMode.HYBRID \
             and text("RAG_EMBED_MODEL") is None:
         # Settings would fill a default name in, and a default is no embedding model of ours.
         raise SettingsError(
@@ -76,9 +77,22 @@ def settings_from_environment(environ: Mapping[str, str], *,
         rebuild_failure_threshold=number("RAG_REBUILD_FAILURE_THRESHOLD", float),
     )
     try:
-        return Settings(**given)
+        settings = Settings(**given)
     except ValueError as error:
         raise SettingsError(str(error)) from None
+    if gateway_required and settings.needs_model_gateway and settings.gateway_base_url is None:
+        # Settings has no default address, and a guessed one would fail at the first search.
+        if settings.retrieval is RetrievalMode.HYBRID:
+            cause = "RAG_RETRIEVAL is hybrid"
+            other_way = "set RAG_RETRIEVAL=keyword (and leave RAG_RERANK_MODEL unset)"
+        else:
+            cause = "RAG_RERANK_MODEL is set"
+            other_way = "unset RAG_RERANK_MODEL"
+        raise SettingsError(
+            f"{cause} but LITELLM_BASE_URL is not set: name the Model gateway's address "
+            f"(ending in /v1, e.g. http://localhost:4000/v1), or {other_way} to run without "
+            "one (closed-network setup guide, group B)")
+    return settings
 
 
 def _retrieval_mode(value: str | None) -> RetrievalMode:

@@ -88,12 +88,13 @@ def test_a_placeholder_token_fails(smoke):
     assert line(out, "MCP_TOKENS").startswith("[FAIL]")
 
 
-def test_an_unset_model_gateway_fails_instead_of_using_a_default(smoke):
+def test_an_unset_model_gateway_is_refused_as_a_settings_error_before_any_check(smoke):
     code, out, _ = smoke(LITELLM_BASE_URL="")
 
     assert code == 1
-    failed = line(out, "Model gateway")
+    failed = line(out, "settings")
     assert failed.startswith("[FAIL]") and "LITELLM_BASE_URL" in failed
+    assert "Model gateway (embeddings)" not in out and "Knowledge index" not in out
 
 
 def test_hybrid_retrieval_without_an_embedding_model_fails_naming_both_ways_out(smoke):
@@ -137,7 +138,7 @@ def test_a_rerank_model_the_gateway_cannot_serve_fails(smoke):
     assert line(out, "Rerank").startswith("[FAIL]")
 
 
-def test_a_rerank_model_without_a_named_gateway_fails_with_a_reason():
+def test_a_rerank_model_without_a_named_gateway_is_refused_as_a_settings_error():
     out = io.StringIO()
     environment = {**ENVIRONMENT, "LITELLM_BASE_URL": "", "RAG_RETRIEVAL": "keyword",
                    "RAG_RERANK_MODEL": "rerank-model"}
@@ -145,8 +146,9 @@ def test_a_rerank_model_without_a_named_gateway_fails_with_a_reason():
     code = main([], environment, client=QdrantClient(":memory:"), run=Host(), stdout=out)
 
     assert code == 1
-    failed = line(out.getvalue(), "Rerank")
-    assert failed.startswith("[FAIL]") and "no Model gateway" in failed
+    failed = line(out.getvalue(), "settings")
+    assert failed.startswith("[FAIL]") and "LITELLM_BASE_URL" in failed
+    assert "RAG_RERANK_MODEL" in failed and "Rerank" not in out.getvalue()
 
 
 def test_an_unreachable_qdrant_fails_with_its_reason(smoke):

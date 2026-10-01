@@ -82,11 +82,26 @@ def test_a_gateway_that_does_not_know_the_url_or_model_names_both():
     assert "/v1" in failed and "RAG_EMBED_MODEL" in failed
 
 
-def test_an_unset_gateway_fails_instead_of_using_a_default():
-    code, out, _ = gateway_only(environ={"LITELLM_BASE_URL": ""})
+def test_an_unset_gateway_is_refused_before_any_check():
+    code, out, err = gateway_only(environ={"LITELLM_BASE_URL": ""})
+
+    assert code == 2 and out == ""
+    assert "LITELLM_BASE_URL" in err and "RAG_RETRIEVAL=keyword" in err
+
+
+def test_a_gateway_address_that_is_not_http_is_reported_as_a_gateway_problem():
+    code, out, _ = run_suite(
+        "--only", "gateway", no_gateway=True,
+        environ={"LITELLM_BASE_URL": "gateway.example.test:4000/v1"})
 
     assert code == 1
-    assert "LITELLM_BASE_URL" in line(out, "gateway.embeddings")
+    assert "http(s)" in line(out, "gateway.embeddings")
+
+
+def test_the_groups_that_do_not_reach_the_gateway_need_none_named():
+    code, out, _ = run_suite("--only", "qdrant", environ={"LITELLM_BASE_URL": ""})
+
+    assert code == 0, out
 
 
 def test_hybrid_retrieval_without_an_embedding_model_is_refused_before_any_check():
