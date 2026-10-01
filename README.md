@@ -182,6 +182,7 @@ It never touches the live index: the `index` group works in its own collection `
 | Try a query | `local-rag search "ORA-00942" [--space ENG] [-k 5]` |
 | Sync now | `local-rag sync confluence` (any declared Corpus by its name), or `systemctl start local-rag-sync.service` |
 | Rebuild (new embedding model, or `RAG_RETRIEVAL` changed) | `local-rag rebuild` (re-embeds every declared Corpus) |
+| Remove a Corpus no longer wanted | `local-rag forget NAME` |
 | Undo a bad Rebuild | `local-rag switch-back` |
 | Logs | `journalctl -u local-rag-mcp -f`, `journalctl -u local-rag-sync` (container route: `docker logs`, journal of the `local-rag-container-*` units) |
 | Add or revoke a user | edit `MCP_TOKENS`, restart the MCP server (`compose up -d` on the container route) |
@@ -203,7 +204,7 @@ kind = "folder"
 path = "/srv/docs"                  # relative paths are relative to the file; the Space is the top-level folder
 ```
 
-`local-rag sync NAME` syncs one Corpus and touches only its Documents, so Corpora share one Knowledge index. `local-rag rebuild` re-embeds every declared Corpus. A Document's id is its Corpus's name and its own id (`confluence:12345`), and Status shows the last Sync of each Corpus. A Corpus named that is not declared is a usage error (exit 2). An index built before named Corpora is a Read-only index until a Rebuild.
+`local-rag sync NAME` syncs one Corpus and touches only its Documents, so Corpora share one Knowledge index. `local-rag rebuild` re-embeds every declared Corpus. A Document's id is its Corpus's name and its own id (`confluence:12345`), and Status shows the last Sync of each Corpus. Removing a Corpus from the declaration does not remove its Documents: they stay searchable and Status warns about them until `local-rag forget NAME` removes them (a Rebuild leaves them out too). A Corpus named that is not declared is a usage error (exit 2). An index built before named Corpora is a Read-only index until a Rebuild.
 
 **Index format.** The index records how it was built (schema version, Retrieval mode, sparse encoder parameters, chunk size and overlap, and for a hybrid index the embedding model name and dimension). After an upgrade, a model change, a change of `RAG_RETRIEVAL` or a change of `RAG_CHUNK_TOKENS` or `RAG_CHUNK_OVERLAP`, `local-rag status` tells whether it still matches. A mismatching index that can still be searched is served as a **Read-only index** with a warning and refuses Sync until you run a Rebuild; an unusable one is refused. Nothing is ever rebuilt automatically. After changing the embedding model, the Retrieval mode or the chunk settings, run a Rebuild. An index built before Documents were split into Passages did not record its chunk settings, so it shows up as a Read-only index until you run one.
 

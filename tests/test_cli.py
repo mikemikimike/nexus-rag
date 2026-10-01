@@ -413,3 +413,65 @@ def test_hybrid_retrieval_without_an_embedding_model_is_a_settings_error(cli):
     code, _, err = cli("status", RAG_EMBED_MODEL="")
 
     assert code == 1 and "RAG_EMBED_MODEL" in err and "RAG_RETRIEVAL=keyword" in err
+
+
+def test_forget_removes_a_corpuss_documents_and_reports_how_many(cli, folder, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "notes.md").write_text("Notes about ZX-9000.")
+    declare(tmp_path, docs=f'kind = "folder"\npath = "{folder}"',
+            other=f'kind = "folder"\npath = "{other}"')
+    cli("sync", "docs")
+    cli("sync", "other")
+
+    code, out, _ = cli("forget", "docs")
+
+    assert code == 0 and "3 Documents" in out
+    assert "docs:" not in cli("search", "ORA-00942", "-k", "10")[1]
+    assert "other:notes.md" in cli("search", "ZX-9000")[1]
+
+
+def test_forget_works_for_a_corpus_that_is_no_longer_declared(cli, folder, tmp_path):
+    cli("sync", "docs")
+    declare(tmp_path, other='kind = "folder"\npath = "/nowhere"')
+
+    code, out, _ = cli("forget", "docs")
+
+    assert code == 0 and "3 Documents" in out
+
+
+def test_forget_of_a_name_with_no_documents_says_so(cli, folder):
+    cli("sync", "docs")
+
+    code, out, _ = cli("forget", "ghost")
+
+    assert code == 0 and "0 Documents" in out
+
+
+def test_status_warns_about_documents_of_an_undeclared_corpus(cli, folder, tmp_path):
+    cli("sync", "docs")
+    declare(tmp_path, other='kind = "folder"\npath = "/nowhere"')
+
+    code, out, _ = cli("status")
+
+    assert code == 0
+    assert "warning:" in out and "'docs'" in out and "forget docs" in out
+    assert "documents:   3" in out
+    assert "docs:dba/ora-00942.md" in cli("search", "ORA-00942")[1]
+
+
+def test_a_rebuild_leaves_out_an_undeclared_corpus(cli, folder, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "notes.md").write_text("Notes about ZX-9000.")
+    declare(tmp_path, docs=f'kind = "folder"\npath = "{folder}"',
+            other=f'kind = "folder"\npath = "{other}"')
+    cli("sync", "docs")
+    cli("sync", "other")
+    declare(tmp_path, docs=f'kind = "folder"\npath = "{folder}"')
+
+    code, _, _ = cli("rebuild")
+
+    assert code == 0
+    assert "other:" not in cli("search", "ZX-9000", "-k", "10")[1]
+    assert "undeclared" not in cli("status")[1]
