@@ -31,15 +31,14 @@ import secrets
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TextIO
 
 from local_rag.binary_drop import (
-    QDRANT, Artifact, DropRefused, place_binary, sha256_of, verified_qdrant_binary,
-    verify_against_sums)
+    QDRANT, Artifact, DropRefused, place_binary, sha256_of, unpack_code, verified_code_archive,
+    verified_qdrant_binary)
 
 
 SERVICE_USER = "ragsvc"
@@ -47,7 +46,6 @@ PREREQUISITE_COMMANDS = {"systemctl": "systemd", "useradd": "passwd / shadow-uti
                          "chown": "coreutils"}
 LOCKFILE = "requirements.lock"
 UNITS_DIRECTORY = "deploy/systemd"
-CODE_ARCHIVE_PATTERN = "local-rag-*.tar.gz"
 
 
 class Layout:
@@ -125,10 +123,11 @@ def main(argv: Sequence[str], *, host=None, qdrant: Artifact = QDRANT,
         return 1
     try:
         # Everything in the drop is verified before the machine is touched.
-        archive = _verified_code_archive(args.drop)
+        archive = verified_code_archive(args.drop)
         with (verified_qdrant_binary(args.drop / qdrant.filename, qdrant) as binary,
               tempfile.TemporaryDirectory(prefix="local-rag-code-") as scratch):
-            source = _unpack_code(archive, Path(scratch))
+            source = unpack_code(archive, Path(scratch),
+                                 requires=[LOCKFILE, UNITS_DIRECTORY])
             _Install(host, Layout(args.root), out, index_url=args.index_url).run(
                 binary, archive, source)
     except DropRefused as error:
@@ -160,7 +159,7 @@ class _Install:
         else:
             self.done("unchanged", layout.qdrant_binary)
         self._env_file()
-        if _create_text(layout.roots_file, ROOTS_FILE):
+        if create_text(layout.roots_file, ROOTS_FILE):
             self.done("created", layout.roots_file)
         if self._python_environment(archive, source):
             restart.append("local-rag-mcp.service")
@@ -262,22 +261,6 @@ def _read_state(path: Path) -> dict[str, str]:
     return state if isinstance(state, dict) else {}
 
 
-def _unpack_code(archive: Path, scratch: Path) -> Path:
-    """Unpack the code archive below ``scratch``; returns the source tree (holding the lockfile)."""
-    try:
-        with tarfile.open(archive) as tar:
-            tar.extractall(scratch, filter="data")
-    except (tarfile.TarError, OSError) as error:
-        raise DropRefused(f"cannot unpack {archive.name}: {error}") from None
-    entries = list(scratch.iterdir())
-    source = entries[0] if len(entries) == 1 and entries[0].is_dir() else scratch
-    if not (source / LOCKFILE).is_file():
-        raise DropRefused(f"{archive.name} has no {LOCKFILE}")
-    if not (source / UNITS_DIRECTORY).is_dir():
-        raise DropRefused(f"{archive.name} has no {UNITS_DIRECTORY}")
-    return source
-
-
 def _missing_prerequisites(host, *, real_root: bool) -> list[str]:
     """What the machine lacks. Operating system packages are checked, never carried."""
     problems = []
@@ -293,16 +276,6 @@ def _missing_prerequisites(host, *, real_root: bool) -> list[str]:
         if host.which(command) is None:
             problems.append(f"{command} not found ({package})")
     return problems
-
-
-def _verified_code_archive(drop: Path) -> Path:
-    """The drop's archive of this system's code, once its checksum agrees with SHA256SUMS."""
-    archives = sorted(drop.glob(CODE_ARCHIVE_PATTERN))
-    if len(archives) != 1:
-        raise DropRefused(
-            f"expected one code archive ({CODE_ARCHIVE_PATTERN}) in {drop}, found {len(archives)}")
-    verify_against_sums(archives[0], drop / "SHA256SUMS")
-    return archives[0]
 
 
 ENV_FILE = """\
@@ -351,13 +324,13 @@ ROOTS_FILE = """\
 
 def _create_env_file(path: Path, prepare: Callable[[Path], None] = lambda staged: None) -> bool:
     """Write the env file with fresh secrets unless one exists; True if it was written."""
-    return _create_text(path, ENV_FILE.format(
+    return create_text(path, ENV_FILE.format(
         qdrant_key=secrets.token_hex(24), mcp_token=secrets.token_hex(24)),
         mode=0o640, prepare=prepare)
 
 
-def _create_text(path: Path, text: str, mode: int = 0o644,
-                 prepare: Callable[[Path], None] = lambda staged: None) -> bool:
+def create_text(path: Path, text: str, mode: int = 0o644,
+                prepare: Callable[[Path], None] = lambda staged: None) -> bool:
     """Write ``path`` unless something is there already; True if it was written.
 
     The file is complete (and ``prepare`` has run on it, to set its owner) before it appears

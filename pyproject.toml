@@ -26,6 +26,7 @@ local-rag-mcp = "local_rag.mcp_server:run"
 [dependency-groups]
 dev = [
     "pytest",
+    "pyyaml",  # reads the compose file in tests
 ]
 
 [tool.setuptools.packages.find]

@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +39,12 @@ QDRANT = Artifact(
     filename="qdrant-x86_64-unknown-linux-gnu.tar.gz",
     sha256="eef986e769d4d3e806dd2d546e1b4ecdd416211e54d34b4ed764fac7c58e1085",
 )
+
+
+# The version of this system's own code, and of the container image built from it. It must
+# equal ``version`` in pyproject.toml (a test holds the two together).
+SYSTEM_VERSION = "0.1.0"
+CODE_ARCHIVE_PATTERN = "local-rag-*.tar.gz"
 
 
 def sha256_of(path: Path) -> str:
@@ -86,12 +92,43 @@ def verified_qdrant_binary(tarball: Path, record: Artifact = QDRANT) -> Iterator
     with tempfile.TemporaryDirectory(prefix="qdrant-drop-") as scratch:
         unpacked = Path(scratch) / "qdrant"
         _unpack_binary(tarball, unpacked)
-        reported = _reported_version(unpacked)
-        if reported != record.version:
-            raise DropRefused(
-                f"Qdrant version does not match: the repository expects {record.version}, "
-                f"the binary in {tarball.name} reports {reported or 'nothing'}")
+        require_version("Qdrant", record.version, _reported_version(unpacked),
+                        source=f"the binary in {tarball.name}")
         yield unpacked
+
+
+def require_version(name: str, expected: str, reported: str, *, source: str) -> None:
+    """Refuse unless ``reported`` (what ``source`` says its version is) is ``expected``."""
+    if reported != expected:
+        raise DropRefused(
+            f"{name} version does not match: the repository expects {expected}, "
+            f"{source} reports {reported or 'nothing'}")
+
+
+def verified_code_archive(drop: Path) -> Path:
+    """The drop's archive of this system's code, once its checksum agrees with SHA256SUMS."""
+    archives = sorted(drop.glob(CODE_ARCHIVE_PATTERN))
+    if len(archives) != 1:
+        raise DropRefused(
+            f"expected one code archive ({CODE_ARCHIVE_PATTERN}) in {drop}, found {len(archives)}")
+    verify_against_sums(archives[0], drop / "SHA256SUMS")
+    return archives[0]
+
+
+def unpack_code(archive: Path, scratch: Path, *, requires: Sequence[str]) -> Path:
+    """Unpack the code archive below ``scratch``; returns the source tree, which must hold
+    each of the paths in ``requires``."""
+    try:
+        with tarfile.open(archive) as tar:
+            tar.extractall(scratch, filter="data")
+    except (tarfile.TarError, OSError) as error:
+        raise DropRefused(f"cannot unpack {archive.name}: {error}") from None
+    entries = list(scratch.iterdir())
+    source = entries[0] if len(entries) == 1 and entries[0].is_dir() else scratch
+    for required in requires:
+        if not (source / required).exists():
+            raise DropRefused(f"{archive.name} has no {required}")
+    return source
 
 
 def place_binary(binary: Path, destination: Path) -> bool:
@@ -139,5 +176,10 @@ def _reported_version(binary: Path) -> str:
                                 timeout=30, check=True)
     except (OSError, subprocess.SubprocessError) as error:
         raise DropRefused(f"the Qdrant binary does not run: {error}") from None
-    words = result.stdout.split()
+    return parse_reported_version(result.stdout)
+
+
+def parse_reported_version(output: str) -> str:
+    """The version in what ``<program> --version`` prints (``qdrant 1.19.1``), or ""."""
+    words = output.split()
     return words[-1] if words else ""

@@ -1,0 +1,88 @@
+# local-rag as a compose stack: Qdrant, the MCP server, and (run on demand) a Sync.
+#
+# Works as a Portainer stack and with plain docker compose. Everything configurable comes
+# from variables, which the env file supplies (generated once by `local_rag.container start`
+# as /etc/local-rag/container.env):
+#   docker compose --env-file /etc/local-rag/container.env up -d
+# In Portainer, paste this file into a stack named "local-rag" and use "Load variables from
+# .env file" for the same env file. Never put a value in this file; it is the same for every
+# installation.
+#
+# The two image tags are the versions the repository records (src/local_rag/binary_drop.py);
+# `local_rag.container start` refuses images that are not those.
+name: local-rag
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    restart: always
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in the env file}
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - qdrant-storage:/qdrant/storage
+      - qdrant-snapshots:/qdrant/snapshots
+    # No published port: only the other services of this stack reach Qdrant.
+
+  mcp:
+    image: local-rag:0.1.0
+    restart: always
+    command: ["local-rag-mcp"]
+    depends_on: [qdrant]
+    environment: &settings
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in the env file}
+      MCP_TOKENS: ${MCP_TOKENS:?set MCP_TOKENS in the env file}
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: ${MCP_PORT:-8765}
+      LITELLM_BASE_URL: ${LITELLM_BASE_URL:-}
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-}
+      RAG_EMBED_MODEL: ${RAG_EMBED_MODEL:-}
+      RAG_RERANK_MODEL: ${RAG_RERANK_MODEL:-}
+      # Tuning: unset means the program's default (see src/local_rag/environment.py).
+      RAG_COLLECTION: ${RAG_COLLECTION:-}
+      RAG_TOP_K: ${RAG_TOP_K:-}
+      RAG_HYBRID_CANDIDATES: ${RAG_HYBRID_CANDIDATES:-}
+      RAG_MAX_PER_DOC: ${RAG_MAX_PER_DOC:-}
+      RAG_EMBED_BATCH: ${RAG_EMBED_BATCH:-}
+      RAG_GATEWAY_TIMEOUT: ${RAG_GATEWAY_TIMEOUT:-}
+      RAG_CHUNK_TOKENS: ${RAG_CHUNK_TOKENS:-}
+      RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-}
+      RAG_BM25_K1: ${RAG_BM25_K1:-}
+      RAG_BM25_B: ${RAG_BM25_B:-}
+      RAG_BM25_AVG_DL: ${RAG_BM25_AVG_DL:-}
+      RAG_OCR: ${RAG_OCR:-}
+      RAG_LIT_TIMEOUT: ${RAG_LIT_TIMEOUT:-}
+      LIT_BIN: ${LIT_BIN:-}
+      RAG_SYNC_LOCK_STALE_AFTER: ${RAG_SYNC_LOCK_STALE_AFTER:-}
+      RAG_REBUILD_FAILURE_THRESHOLD: ${RAG_REBUILD_FAILURE_THRESHOLD:-}
+      CONFLUENCE_DOMAIN: ${CONFLUENCE_DOMAIN:-}
+      CONFLUENCE_API_PATH: ${CONFLUENCE_API_PATH:-}
+      CONFLUENCE_AUTH_TYPE: ${CONFLUENCE_AUTH_TYPE:-}
+      CONFLUENCE_API_TOKEN: ${CONFLUENCE_API_TOKEN:-}
+      CONFLUENCE_READ_ONLY: ${CONFLUENCE_READ_ONLY:-true}
+    ports:
+      - "${MCP_PORT:-8765}:${MCP_PORT:-8765}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ['MCP_PORT'])"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # One Sync, started by a host timer (deploy/container/*.timer):
+  #   docker compose --env-file ... -f ... run --rm sync
+  # Not part of `up`: it is in a profile, which `run` enables for the service it names.
+  sync:
+    image: local-rag:0.1.0
+    profiles: [sync]
+    command: ["local-rag", "sync", "--roots-file", "/etc/local-rag/confluence_roots.txt"]
+    depends_on: [qdrant]
+    environment: *settings
+    volumes:
+      - rag-data:/data
+      - /etc/local-rag/confluence_roots.txt:/etc/local-rag/confluence_roots.txt:ro
+
+volumes:
+  qdrant-storage:
+  qdrant-snapshots:
+  rag-data:

@@ -91,3 +91,13 @@ def test_an_identical_binary_already_in_place_is_left_alone(tmp_path):
 
     assert (tmp_path / "out" / "qdrant").stat().st_mtime_ns == before
     assert [p.name for p in (tmp_path / "out").iterdir()] == ["qdrant"]
+
+
+def test_the_repository_records_the_system_version_it_ships_as_an_image():
+    import tomllib
+    from pathlib import Path
+
+    from local_rag.binary_drop import SYSTEM_VERSION
+
+    pyproject = tomllib.loads((Path(fake_drop.REPO) / "pyproject.toml").read_text())
+    assert SYSTEM_VERSION == pyproject["project"]["version"]
