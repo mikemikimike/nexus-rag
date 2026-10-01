@@ -29,7 +29,7 @@ def write_sums(directory: Path) -> None:
 
 def code_archive(path: Path, *, lock: str = "pytest==9.0.0\n",
                  extra: dict[str, bytes] | None = None) -> None:
-    """An archive of a tiny source tree carrying the real systemd units and a lockfile."""
+    """An archive of a tiny source tree carrying the real deployment files (systemd units, container compose file) and a lockfile."""
     with tarfile.open(path, "w:gz") as archive:
         def add(name: str, data: bytes, mode: int = 0o644) -> None:
             info = tarfile.TarInfo(f"local-rag/{name}")
@@ -40,8 +40,9 @@ def code_archive(path: Path, *, lock: str = "pytest==9.0.0\n",
         add("pyproject.toml", b"[project]\nname = 'local-rag'\n")
         for name, data in (extra or {}).items():
             add(name, data)
-        for unit in sorted((REPO / "deploy" / "systemd").iterdir()):
-            add(f"deploy/systemd/{unit.name}", unit.read_bytes())
+        for deployed in sorted((REPO / "deploy").rglob("*")):
+            if deployed.is_file():
+                add(deployed.relative_to(REPO).as_posix(), deployed.read_bytes())
 
 
 def drop(directory: Path, *, qdrant_version: str = "1.19.1", lock: str = "pytest==9.0.0\n"

@@ -1,0 +1,9 @@
+[Unit]
+Description=local-rag (container): weekly Sync of the Confluence Corpus
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker compose --project-name local-rag --env-file /etc/local-rag/container.env -f /opt/local-rag/container/compose.yaml run --rm -T sync
+TimeoutStartSec=12h
