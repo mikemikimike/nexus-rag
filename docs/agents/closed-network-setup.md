@@ -287,6 +287,16 @@ compose run --rm -T sync python -m local_rag.smoke                    # containe
 
 Pass is no `[FAIL]` line. Its checks: `MCP_TOKENS`, `Model gateway (embeddings)` (model answers, with its dimension), `Rerank` (`[SKIP]` when `RAG_RERANK_MODEL` is unset), `Knowledge index` (Qdrant reachable, document and passage counts), `LiteParse`, `Confluence CLI` (`[SKIP]` for a folder Corpus), and with `--systemd` the four units (`qdrant.service`, `local-rag-mcp.service`, `local-rag-sync.timer`, `local-rag-full.timer`). A `[WARN]` is not a pass: read it (a read-only index, for example).
 
+Then run the acceptance suite, the end-to-end proof that the stack works (it builds its own throwaway collection and temp folder and removes them, so it is safe next to the Live index; the MCP and Confluence groups only read):
+
+```bash
+run_rag /opt/local-rag/venv/bin/python -m local_rag.acceptance --systemd   # systemd route
+compose run --rm -T sync python -m local_rag.acceptance --mcp-url http://mcp:8765   # container route, inside the stack
+sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.acceptance --container --only install   # container route, on the host
+```
+
+Pass is exit code 0 and the last line `ACCEPTANCE PASSED`. Every line is `[ OK ]`, `[FAIL]` or `[SKIP]` with a stable check name (`gateway.embeddings`, `qdrant.wrong-key`, `index.tail-meaning`, `mcp.no-token`, `install.timers`, `confluence.roots`, ...); a `[FAIL]` line states the likely cause and the section of this guide to read, so go there before changing anything. A `[SKIP]` states why (no `RAG_RERANK_MODEL`, no `CONFLUENCE_DOMAIN`, or an earlier check failed): report skips to the operator, they are not passes. Exit code 1 is a failed check, 2 a command line or setting it cannot use. `--only GROUP` (repeatable; groups `gateway`, `qdrant`, `index`, `mcp`, `install`, `confluence`) reruns one group after a fix. `index.tail-meaning` failing while `index.tail-keyword` passes means the embedding model reads less than a whole Passage: lower `RAG_CHUNK_TOKENS`, then a Rebuild (when the operator asks for one). Inside the stack the `install` group is skipped, as it needs `docker` and `systemctl`: run it on the host as the third command shows.
+
 Then the rest:
 
 | Check | Command | Expected |
@@ -302,7 +312,7 @@ Then the rest:
 
 `/healthz` needs no token and asks Qdrant only, so it does not depend on the Model gateway; `status` and the smoke check do.
 
-**Gate:** the smoke check has no `[FAIL]`, `status` is `read-write`, `search` returns a Passage the operator recognises, `/healthz` answers `ok` from the clients' side, and an unauthenticated `/mcp` answers 401. Give the operator the result of each.
+**Gate:** the smoke check has no `[FAIL]`, the acceptance suite ends `ACCEPTANCE PASSED` (or its failures are understood and accepted by the operator), `status` is `read-write`, `search` returns a Passage the operator recognises, `/healthz` answers `ok` from the clients' side, and an unauthenticated `/mcp` answers 401. Give the operator the result of each.
 
 ## 8. Client provisioning
 

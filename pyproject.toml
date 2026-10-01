@@ -16,6 +16,8 @@ dependencies = [
     "markdownify",  # HTML to Markdown for extraction
     "mcp>=2.2",  # the MCP server adapter (MCPServer, streamable HTTP, stdio)
     "uvicorn",  # serves it over HTTP
+    "httpx2",  # the MCP client's HTTP layer, which the acceptance suite drives the server with
+    "anyio",  # runs that client (imported directly by the MCP server and the acceptance suite)
     "liteparse",  # PDF and Office text extraction; provides the `lit` command
 ]
 

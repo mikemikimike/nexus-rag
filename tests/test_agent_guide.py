@@ -7,7 +7,7 @@ import subprocess
 import pytest
 
 from fake_drop import REPO
-from local_rag import cli, container, installer, smoke
+from local_rag import acceptance, cli, container, installer, smoke
 
 GUIDE_PATH = REPO / "docs/agents/closed-network-setup.md"
 GUIDE = GUIDE_PATH.read_text()
@@ -81,7 +81,7 @@ def test_every_unit_the_guide_names_is_a_file_in_deploy():
 def test_every_module_the_guide_runs_exists():
     modules = set(re.findall(r"-m local_rag\.(\w+)", GUIDE))
 
-    assert modules == {"installer", "container", "smoke"}
+    assert modules == {"installer", "container", "smoke", "acceptance"}
     assert [m for m in modules if not (REPO / "src/local_rag" / f"{m}.py").exists()] == []
 
 
@@ -93,7 +93,8 @@ def parsers() -> dict[str, argparse.ArgumentParser]:
     return {
         **{f"local-rag {name}": sub for name, sub in subcommands(cli._parser()).items()},
         **{f"container {name}": sub for name, sub in subcommands(container._parser()).items()},
-        "installer": installer._parser(), "smoke": smoke._parser()}
+        "installer": installer._parser(), "smoke": smoke._parser(),
+        "acceptance": acceptance._parser()}
 
 
 def flags_of(parser: argparse.ArgumentParser) -> set[str]:
@@ -117,12 +118,22 @@ def test_every_flag_of_the_installer_container_and_smoke_commands_exists():
     known = parsers()
     for line in "\n".join(code_spans()).splitlines():
         for module, parser in (("installer", "installer"), ("container start", "container start"),
-                               ("smoke", "smoke")):
+                               ("smoke", "smoke"), ("acceptance", "acceptance")):
             word = module.split()[0]
             if f"-m local_rag.{word}" in line:
                 flags = set(re.findall(r"(?<![\w-])--[a-z][\w-]*",
                                        line.split(f"-m local_rag.{word}")[1]))
                 assert flags <= flags_of(known[parser]), (line, flags - flags_of(known[parser]))
+
+
+def test_the_acceptance_groups_and_check_names_the_guide_gives_exist():
+    groups = set(re.findall(r"`(gateway|qdrant|index|mcp|install|confluence)`", GUIDE))
+    names = set(re.findall(r"`((?:gateway|qdrant|index|mcp|install|confluence)\.[\w-]+)`", GUIDE))
+    source = "\n".join((REPO / "src/local_rag" / f"acceptance_{m}.py").read_text()
+                       for m in ("stack", "index", "mcp", "host"))
+
+    assert groups == set(acceptance.GROUPS)
+    assert names and [n for n in sorted(names) if f'"{n}"' not in source] == []
 
 
 def test_the_claude_commands_use_only_the_flags_of_claude_mcp_add():
