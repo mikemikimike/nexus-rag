@@ -1,7 +1,8 @@
 import logging
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from qdrant_client import QdrantClient, models
@@ -9,7 +10,7 @@ from qdrant_client import QdrantClient, models
 from local_rag.chunker import Chunker
 from local_rag.corpus import (
     Corpus, Document, RawDocument, check_corpus_name, listing_failures, qualified_id)
-from local_rag.exclusive import ExclusiveRun, Lease
+from local_rag.exclusive import ExclusiveRun, Lease, SyncInProgress
 from local_rag.extraction import Extractor
 from local_rag.gateway import ModelGateway
 from local_rag.generations import CorruptIndex, Generations
@@ -120,9 +121,35 @@ class KnowledgeIndex:
         self._embedding_failure: str | None = None
         self._journal = Journal(self._client, f"{settings.collection}.last-sync")
         self._generations = Generations(self._client, settings.collection)
-        self._exclusive = ExclusiveRun(
-            self._client, f"{settings.collection}.sync-lock",
-            stale_after=settings.sync_lock_stale_after)
+        # Held by a Rebuild or switch-back; a Sync holds only its own Corpus's lock.
+        self._exclusive = self._lock(f"{settings.collection}.sync-lock")
+
+    def _lock(self, name: str) -> ExclusiveRun:
+        return ExclusiveRun(
+            self._client, name, stale_after=self._settings.sync_lock_stale_after)
+
+    @contextmanager
+    def _syncing(self, corpus: str) -> Iterator[Lease]:
+        """Hold one Corpus's Sync lock, unless a Rebuild holds the whole index."""
+        prefix = f"{self._settings.collection}.sync-lock."
+        with self._lock(prefix + corpus).hold("Sync") as lease:
+            # The lock is taken before this check, and a Rebuild takes its lock before
+            # checking for Syncs, so at least one of two racing runs sees the other.
+            if self._exclusive.is_held():
+                raise SyncInProgress("cannot start Sync: another run holds the lock")
+            yield lease
+
+    @contextmanager
+    def _whole_index(self, what: str) -> Iterator[Lease]:
+        """Hold the index-wide lock, unless some Corpus is being synced."""
+        prefix = f"{self._settings.collection}.sync-lock."
+        with self._exclusive.hold(what) as lease:
+            for collection in self._client.get_collections().collections:
+                if collection.name.startswith(prefix) and self._lock(collection.name).is_held():
+                    raise SyncInProgress(
+                        f"cannot start {what}: a Sync of "
+                        f"{collection.name.removeprefix(prefix)} is running")
+            yield lease
 
     def sync(self, corpus: Corpus) -> SyncReport:
         """Bring the index into agreement with the Corpus.
@@ -131,10 +158,10 @@ class KnowledgeIndex:
         Corpus's Documents are left alone. Document ids in the report are the ids the index
         stores (the Corpus's name, a colon, then the Corpus's own id).
 
-        Raises SyncInProgress at once if another Sync or Rebuild is running.
+        Raises SyncInProgress at once if a Sync of the same Corpus or a Rebuild is running.
         """
         check_corpus_name(corpus.name)
-        with self._exclusive.hold("Sync") as lease:
+        with self._syncing(corpus.name) as lease:
             return self._journaled(
                 "Sync", lambda: self._sync(corpus, lease), corpus=corpus.name)
 
@@ -155,14 +182,25 @@ class KnowledgeIndex:
                 unchanged += 1
                 continue
             try:
-                self._add(self._extract(corpus, corpus.fetch(ref.id)), target)
+                document = self._extract(corpus, corpus.fetch(ref.id))
+                if live is None:  # a Sync of another Corpus may have made an index live meanwhile
+                    live = self._generations.live()
+                    if live is not None:
+                        self._discard(target)
+                        self._require_writable(live)
+                        target = live
+                self._add(document, target)
             except Exception as error:
                 failures[stored] = _describe(error)
             else:
                 if live is None:  # the first Document makes a new index live
                     lease.check()
-                    self._generations.promote(target)
-                    live = target
+                    live = self._promote_first(target)
+                    if live != target:  # another Corpus's Sync was first: join its index
+                        self._discard(target)
+                        self._require_writable(live)
+                        target = live
+                        self._add(document, target)
                 if versions is None:
                     added += 1
                 else:
@@ -180,6 +218,24 @@ class KnowledgeIndex:
         return SyncReport(added=added, replaced=replaced, removed=removed,
                           unchanged=unchanged, failed=len(failures), failures=failures)
 
+    def _promote_first(self, generation: str) -> str:
+        """Make the generation live unless another Sync's first generation already is.
+
+        Returns the Live index. The check and the promotion are one short critical section,
+        so two first Syncs of different Corpora cannot both promote.
+        """
+        guard = self._lock(f"{self._settings.collection}.promote-lock")
+        while True:
+            try:
+                with guard.hold("promotion"):
+                    live = self._generations.live()
+                    if live is None:
+                        self._generations.promote(generation)
+                        return generation
+                    return live
+            except SyncInProgress:
+                time.sleep(0.01)
+
     def rebuild(self, corpora: Sequence[Corpus]) -> RebuildReport:
         """Re-embed every Document of every Corpus into a fresh index and make it live if
         complete enough. Pass all the declared Corpora: the fresh index holds only these.
@@ -187,7 +243,7 @@ class KnowledgeIndex:
         Searches keep reading the Live index until then. Raises SyncInProgress at once if
         another Sync or Rebuild is running.
         """
-        with self._exclusive.hold("Rebuild") as lease:
+        with self._whole_index("Rebuild") as lease:
             return self._journaled("Rebuild", lambda: self._rebuild(corpora, lease))
 
     def _rebuild(self, corpora: Sequence[Corpus], lease: Lease) -> RebuildReport:
@@ -246,7 +302,7 @@ class KnowledgeIndex:
         Raises NoPreviousIndex if there is none, and SyncInProgress at once if a Sync or
         Rebuild is running.
         """
-        with self._exclusive.hold("switch-back"):
+        with self._whole_index("switch-back"):
             previous = self._generations.previous()
             if previous is not None and self._assessment(previous).access is Access.REFUSED:
                 raise IndexRefused(_explain(
