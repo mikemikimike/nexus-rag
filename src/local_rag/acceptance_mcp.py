@@ -14,7 +14,7 @@ import httpx2
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
-from local_rag.acceptance_report import Context, Failure
+from local_rag.acceptance_report import QDRANT_DOWN, Context, Failure
 from local_rag.mcp_server import DEFAULT_HOST, DEFAULT_PORT
 
 TIMEOUT = 20.0
@@ -83,7 +83,7 @@ def _healthz(url: str) -> str:
     if status != 200:
         raise Failure(f"/healthz answered {status}: {' / '.join(body.split())[:200]}",
                       cause="Qdrant or the Knowledge index is not reachable from the server",
-                      see='section 10 (row "/healthz 503, Qdrant is unreachable")')
+                      see=QDRANT_DOWN)
     return "/healthz answers 200 without a token"
 
 
@@ -127,7 +127,7 @@ def _call(ctx: Context, url: str, tool: str, arguments: dict) -> str:
         return anyio.run(call)
     except Failure:
         raise
-    except BaseException as error:  # an exception group from the client's task group, too
+    except Exception as error:  # includes the exception group of the client's task group
         text = " ".join(f"{type(e).__name__}: {e}" for e in _leaves(error))
         raise Failure(f"{tool} failed: {text[:300]}",
                       cause="the server answered something that is not MCP at /mcp",

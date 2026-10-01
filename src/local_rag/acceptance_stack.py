@@ -5,11 +5,11 @@ import secrets
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from local_rag import acceptance_corpus
-from local_rag.acceptance_report import Context, Failure, Skipped
+from local_rag.acceptance_report import QDRANT_DOWN, Context, Failure, Skipped
 from local_rag.chunker import Chunker
 from local_rag.gateway_litellm import GatewayError
 
-PROBE_TITLE = "long-note"  # what the folder Corpus makes of lib/long-note.md
+PROBE_TITLE = "long-note"  # what the folder Corpus makes of lab/long-note.md
 _LIMIT_WORDS = re.compile(r"context length|too long|too many tokens|maximum|exceed|token limit",
                           re.IGNORECASE)
 
@@ -87,8 +87,10 @@ def _dimension(ctx: Context) -> str:
 
 def _input_limit(ctx: Context) -> str:
     gateway, settings = ctx.gateway, ctx.settings
-    text = acceptance_corpus.long_text(ctx.run_id, settings.chunk_tokens, gateway.count_tokens)
-    passages = Chunker.from_settings(settings, gateway).split(text)
+    chunker = Chunker.from_settings(settings, gateway)
+    text = acceptance_corpus.long_text(ctx.run_id, chunk_tokens=settings.chunk_tokens,
+                                       count_tokens=gateway.count_tokens, split=chunker.split)
+    passages = chunker.split(text)
     if len(passages) < 2:
         raise Failure(f"a text of {gateway.count_tokens(text)} counted tokens was not split "
                       f"into Passages of {settings.chunk_tokens}",
@@ -148,22 +150,21 @@ def _reachable(ctx: Context) -> str:
                     .get_collections().collections)
     except UnexpectedResponse as error:
         if error.status_code in (401, 403):
-            raise Failure(f"Qdrant at {_where(settings)} refused the configured key "
+            raise Failure(f"Qdrant at {settings.qdrant_location} refused the configured key "
                           f"(HTTP {error.status_code})",
                           cause="QDRANT_API_KEY here differs from the one Qdrant runs with "
-                                "(QDRANT__SERVICE__API_KEY)", see="section 10 (row \"/healthz 503, "
-                                "Qdrant is unreachable\")") from None
-        raise Failure(f"Qdrant at {_where(settings)} answered HTTP {error.status_code}",
+                                "(QDRANT__SERVICE__API_KEY)", see=QDRANT_DOWN) from None
+        raise Failure(f"Qdrant at {settings.qdrant_location} answered HTTP {error.status_code}",
                       cause="something other than Qdrant answers on QDRANT_URL",
                       see="section 10") from None
     except Exception as error:
-        raise Failure(f"Qdrant at {_where(settings)} is unreachable: "
+        raise Failure(f"Qdrant at {settings.qdrant_location} is unreachable: "
                       f"{type(error).__name__}: {error}",
                       cause="Qdrant is down, QDRANT_URL is wrong, or an HTTP proxy sits in the "
                             "way (put the host in NO_PROXY)",
-                      see='section 10 (row "/healthz 503, Qdrant is unreachable")') from None
+                      see=QDRANT_DOWN) from None
     keyed = "with its key" if settings.qdrant_api_key else "without a key"
-    return f"Qdrant at {_where(settings)} answers {keyed}, {count} collections"
+    return f"Qdrant at {settings.qdrant_location} answers {keyed}, {count} collections"
 
 
 def _wrong_key(ctx: Context) -> str:
@@ -182,12 +183,8 @@ def _wrong_key(ctx: Context) -> str:
     except Exception as error:
         raise Failure(f"could not tell whether a wrong key is refused: {type(error).__name__}",
                       cause="Qdrant became unreachable during the check",
-                      see='section 10 (row "/healthz 503, Qdrant is unreachable")') from None
+                      see=QDRANT_DOWN) from None
     raise Failure("Qdrant accepted a wrong API key",
                   cause="Qdrant runs without an API key (QDRANT__SERVICE__API_KEY unset), so "
                         "anyone on the network can read and change the Knowledge index",
-                  see='section 10 (row "/healthz 503, Qdrant is unreachable")')
-
-
-def _where(settings) -> str:
-    return settings.qdrant_location
+                  see=QDRANT_DOWN)

@@ -89,11 +89,11 @@ def run_index(ctx: Context) -> None:
     def need_trip() -> _RoundTrip:
         return trip[0]
 
-    def first() -> str:
+    def sync_first() -> str:
         trip.append(_RoundTrip(ctx))
         return _sync(trip[0])
 
-    check("index.sync", first, needs=NEEDS)
+    check("index.sync", sync_first, needs=NEEDS)
     after = ["index.sync"]
     check("index.keyword", lambda: _keyword(need_trip()), needs=after)
     check("index.dense", lambda: _dense(need_trip()), needs=after)
@@ -108,7 +108,8 @@ def run_index(ctx: Context) -> None:
 
 def _sync(trip: _RoundTrip) -> str:
     trip.texts = corpus_files.write_corpus(
-        trip.folder, trip.run_id, trip.settings.chunk_tokens, trip.ctx.gateway.count_tokens)
+        trip.folder, trip.run_id, chunk_tokens=trip.settings.chunk_tokens,
+        count_tokens=trip.ctx.gateway.count_tokens, split=trip.chunker.split)
     report = trip.sync()
     if report.failed or report.added != len(trip.texts):
         failures = "; ".join(f"{name}: {why}" for name, why in report.failures.items())

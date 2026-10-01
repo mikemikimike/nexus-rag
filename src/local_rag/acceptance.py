@@ -116,7 +116,7 @@ def _describe(report: Report, live, environ: Mapping[str, str], run_id: Run,
                f", embeddings {environ.get('RAG_EMBED_MODEL') or 'not set'}"
                f", rerank {live.rerank_model or 'not set'}, key {secret('LITELLM_API_KEY')}")
     report.say(f"  qdrant:           {_safe_url(live.qdrant_location)}, key {secret('QDRANT_API_KEY')}")
-    report.say(f"  chunks:           {live.chunk_tokens} tokens, overlap {live.chunk_overlap}")
+    report.say(f"  passages:         {live.chunk_tokens} tokens, overlap {live.chunk_overlap}")
     report.say(f"  mcp tokens:       {len(tokens)}")
     report.say(f"  confluence:       {environ.get('CONFLUENCE_DOMAIN') or 'not set'}")
     report.say(f"  live collection:  {live.collection} (not touched)")
@@ -139,7 +139,8 @@ def _secrets(environ: Mapping[str, str], args: argparse.Namespace) -> list[str]:
               if any(name.endswith(word) for word in SECRET_NAMES)]
     values += [t.strip() for value in [environ.get("MCP_TOKENS", ""), args.token or ""]
                for t in value.split(",")]
-    values += [urlsplit(environ.get("QDRANT_URL", "")).password or ""]
+    values += [urlsplit(value).password or "" for value in environ.values()
+               if value.startswith(("http://", "https://"))]  # credentials inside a URL
     return [v for v in values if v]
 
 

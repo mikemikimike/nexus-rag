@@ -16,6 +16,7 @@ from typing import Any, TextIO
 
 GUIDE = "docs/agents/closed-network-setup.md"
 COMMAND_TIMEOUT = 30.0
+QDRANT_DOWN = 'section 10 (row "/healthz 503, Qdrant is unreachable")'  # the row for any Qdrant trouble
 
 
 class Failure(Exception):

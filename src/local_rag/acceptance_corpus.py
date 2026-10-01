@@ -31,6 +31,8 @@ MEANINGS = (SEMANTIC_MEANING, TAIL_MEANING)
 # How many times longer than one Passage the long Document is: far longer, so that a
 # Document is split into many Passages.
 LONG_FACTOR = 10
+# How full the last Passage of the long Document is made, as a share of the Passage size.
+FULL_PASSAGE = 0.9
 
 _ADJECTIVES = ("quarterly", "annual", "draft", "internal", "weekly", "revised", "pending",
                "regional", "summary", "provisional")
@@ -60,30 +62,44 @@ def keyword_text(identifier: str) -> str:
             "It is a generated Document of the acceptance suite.")
 
 
-def long_text(run: Run, chunk_tokens: int, count_tokens: Callable[[str], int]) -> str:
-    """Many Passages of invented sentences, and the tail's marker in the very last sentence."""
+def long_text(run: Run, *, chunk_tokens: int, count_tokens: Callable[[str], int],
+              split: Callable[[str], list[str]]) -> str:
+    """Many Passages of invented sentences, and the tail's marker in the very last sentence.
+
+    Sentences are added before the marker until the last Passage is nearly full-sized, so the
+    marker sits at the far end of a Passage of the size the index really embeds: an embedding
+    model that reads less than that misses it.
+    """
     rng = random.Random(run.tail)
-    paragraphs, sentences, number = [], [], 0
-    while count_tokens("\n\n".join(paragraphs)) < LONG_FACTOR * chunk_tokens:
+    number = 0
+
+    def sentence() -> str:
+        nonlocal number
         number += 1
-        sentences.append(
-            f"The {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)} {rng.choice(_VERBS)} "
-            f"the {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)} of item {number}.")
-        if len(sentences) == 5:
-            paragraphs.append(" ".join(sentences))
-            sentences = []
-    paragraphs += [" ".join(sentences)] if sentences else []
-    paragraphs.append(f"{TAIL_TEXT} The closing reference is {run.tail}.")
-    return "\n\n".join(paragraphs)
+        return (f"The {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)} {rng.choice(_VERBS)} "
+                f"the {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)} of item {number}.")
+
+    paragraphs = []
+    while count_tokens("\n\n".join(paragraphs)) < LONG_FACTOR * chunk_tokens:
+        paragraphs.append(" ".join(sentence() for _ in range(5)))
+    padding: list[str] = []
+    while True:
+        closing = " ".join([*padding, TAIL_TEXT, f"The closing reference is {run.tail}."])
+        text = "\n\n".join([*paragraphs, closing])
+        if (count_tokens(split(text)[-1]) >= FULL_PASSAGE * chunk_tokens
+                or len(padding) > chunk_tokens):  # (the bound only guards a splitter gone wrong)
+            return text
+        padding.append(sentence())
 
 
-def write_corpus(folder: Path, run: Run, chunk_tokens: int,
-                 count_tokens: Callable[[str], int]) -> dict[str, str]:
-    """Write the three Documents below ``folder``; returns each one's text by identity."""
+def write_corpus(folder: Path, run: Run, **sizes) -> dict[str, str]:
+    """Write the three Documents below ``folder``; returns each one's text by identity.
+
+    ``sizes`` are the arguments of ``long_text``."""
     texts = {
         KEYWORD_DOCUMENT: keyword_text(run.keyword),
         SEMANTIC_DOCUMENT: SEMANTIC_TEXT,
-        LONG_DOCUMENT: long_text(run, chunk_tokens, count_tokens),
+        LONG_DOCUMENT: long_text(run, **sizes),
     }
     for document_id, text in texts.items():
         write_document(folder, document_id, text)

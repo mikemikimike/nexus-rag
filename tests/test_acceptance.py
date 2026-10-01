@@ -744,3 +744,73 @@ sys.exit(0 if code in (0, 1) else 9)
 
     assert done.returncode == 0, done.stderr
     assert "install.units" in done.stdout
+
+
+# --- what the review asked to be pinned down ------------------------------------------
+
+def test_the_marker_sits_at_the_end_of_a_nearly_full_passage():
+    from local_rag import acceptance_corpus as corpus_files
+    from local_rag.chunker import Chunker
+
+    gateway = good_gateway()
+    chunker = Chunker(gateway.count_tokens, size=400, overlap=60)
+    for _ in range(5):  # the random mark changes the text
+        run = corpus_files.Run.new()
+        text = corpus_files.long_text(run, chunk_tokens=400, count_tokens=gateway.count_tokens,
+                                      split=chunker.split)
+        last = chunker.split(text)[-1]
+
+        assert gateway.count_tokens(last) >= 0.9 * 400
+        assert run.tail in last and text.rstrip().endswith(f"{run.tail}.")
+        assert len(chunker.split(text)) >= 10
+
+
+def test_a_secret_inside_the_gateway_url_is_never_printed():
+    environ = {"LITELLM_BASE_URL": "http://svc:url-secret-pw@gateway.example.test:4000/v1"}
+
+    code, out, err = run_suite("--only", "gateway", environ=environ, gateway=DownGateway(
+        "gateway http://svc:url-secret-pw@gateway.example.test:4000/v1/embeddings unreachable"))
+
+    assert code == 1 and "gateway.example.test" in out
+    assert "url-secret-pw" not in out + err
+
+
+def test_a_server_that_rejects_a_missing_token_but_accepts_a_wrong_one_fails_that_check():
+    inner = build_server(served_index(PAGE)).streamable_http_app(stateless_http=True)
+
+    async def app(scope, receive, send):
+        headers = dict(scope.get("headers", []))
+        if scope["type"] == "http" and scope["path"] != "/healthz" and b"authorization" not in headers:
+            await send({"type": "http.response.start", "status": 401, "headers": []})
+            return await send({"type": "http.response.body", "body": b""})
+        return await inner(scope, receive, send)
+
+    with serving_app(app) as url:
+        code, out, _ = mcp_only(url)
+
+    assert code == 1
+    assert line(out, "mcp.no-token").startswith("[ OK ]")
+    assert "not 401" in line(out, "mcp.wrong-token")
+
+
+def test_a_switch_back_that_does_nothing_fails():
+    qdrant = Wrapped(update_collection_aliases=do_nothing_after(2))
+
+    code, out, _ = index_only(qdrant=qdrant)
+
+    assert code == 1
+    assert line(out, "index.rebuild").startswith("[ OK ]")
+    assert "after switch-back" in line(out, "index.switch-back")
+    assert qdrant.names() == set()
+
+
+def do_nothing_after(allowed):
+    """A client method that works ``allowed`` times, then silently does nothing."""
+    def broken(real):
+        calls = []
+
+        def method(*args, **kwargs):
+            calls.append(1)
+            return real(*args, **kwargs) if len(calls) <= allowed else None
+        return method
+    return broken

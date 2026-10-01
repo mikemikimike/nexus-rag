@@ -160,7 +160,7 @@ It runs these groups, each check on its own line with a stable name (`--only GRO
 
 | Group | Proves |
 |---|---|
-| `gateway` | `/embeddings` answers and reports its dimension; a text far longer than one chunk is split into Passages the model accepts; rerank, only if `RAG_RERANK_MODEL` is set |
+| `gateway` | `/embeddings` answers and reports its dimension; a text far longer than one Passage is split into Passages the model accepts; rerank, only if `RAG_RERANK_MODEL` is set |
 | `qdrant` | Qdrant answers with the configured key and refuses a wrong one |
 | `index` | on a throwaway collection and a temp folder of generated Documents: Sync; a distinctive term (keyword) and a paraphrase sharing no word (meaning) find their Documents; text from the tail of a long Document is found by term and by meaning, which shows the real embedding model reads whole Passages; `status` counts; a changed Document is replaced and a removed one disappears; Rebuild and `switch-back` |
 | `mcp` | the running MCP server, over HTTP with a token from `MCP_TOKENS` (or `--token`): `search_docs`, `list_spaces`, `get_page` answer; no token and a wrong token get 401; `/healthz` answers 200 without a token. It listens where `MCP_HOST` and `MCP_PORT` say, or `--mcp-url` (inside the container stack the server is another container: `--mcp-url http://mcp:8765`, as above) |

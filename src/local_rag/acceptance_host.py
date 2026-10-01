@@ -4,7 +4,7 @@ Python packages: with ``PYTHONPATH=<unpacked code archive>/src``, as the Install
 import json
 from pathlib import Path
 
-from local_rag.acceptance_report import Context, Failure, Skipped
+from local_rag.acceptance_report import QDRANT_DOWN, Context, Failure, Skipped
 
 SYSTEMD_ENV_FILE = "/etc/local-rag/local-rag.env"
 CONTAINER_ENV_FILE = "/etc/local-rag/container.env"
@@ -41,7 +41,7 @@ def _skip(why: str) -> str:
     raise Skipped(why)
 
 
-def _each(ctx: Context, units, command: list[str]) -> list[str]:
+def _failing_units(ctx: Context, units, command: list[str]) -> list[str]:
     """The units for which ``systemctl <command> <unit>`` fails."""
     bad = []
     for unit in units:
@@ -53,7 +53,7 @@ def _each(ctx: Context, units, command: list[str]) -> list[str]:
 
 
 def _units_exist(ctx: Context, units) -> str:
-    missing = _each(ctx, units, ["cat", "--no-pager"])
+    missing = _failing_units(ctx, units, ["cat", "--no-pager"])
     if missing:
         raise Failure(f"no unit file: {', '.join(missing)}",
                       cause="the Installer (or `container start`) did not run on this host, or "
@@ -63,7 +63,7 @@ def _units_exist(ctx: Context, units) -> str:
 
 
 def _units_active(ctx: Context, units) -> str:
-    inactive = _each(ctx, units, ["is-active", "--quiet"])
+    inactive = _failing_units(ctx, units, ["is-active", "--quiet"])
     if inactive:
         raise Failure(f"not active: {', '.join(inactive)}",
                       cause="the unit failed or was stopped; `systemctl status` and `journalctl "
@@ -73,7 +73,7 @@ def _units_active(ctx: Context, units) -> str:
 
 
 def _units_enabled(ctx: Context, units) -> str:
-    disabled = _each(ctx, units, ["is-enabled", "--quiet"])
+    disabled = _failing_units(ctx, units, ["is-enabled", "--quiet"])
     if disabled:
         raise Failure(f"not enabled: {', '.join(disabled)}",
                       cause="they would not come back after a reboot: `systemctl enable --now` "
@@ -97,7 +97,7 @@ def _stack_up(ctx: Context) -> str:
     if down:
         raise Failure(f"not running: {', '.join(down)}",
                       cause="the stack is down: `compose ps`, then `docker logs` of the service",
-                      see='section 10 (row "/healthz 503, Qdrant is unreachable")')
+                      see=QDRANT_DOWN)
     if "unhealthy" in status["mcp"] or "starting" in status["mcp"]:
         raise Failure(f"mcp is {status['mcp']}",
                       cause="the MCP server cannot reach Qdrant", see="section 10")
