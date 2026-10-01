@@ -12,8 +12,9 @@ server and this system's own code come from the Binary drop in DIR:
 The Installer refuses a drop that does not match (see ``binary_drop``) before it changes
 anything, and checks, but does not carry, the operating system packages it needs. It is
 idempotent: a second run changes nothing, an upgrade replaces the Qdrant binary, the
-code and the unit files, and the env file (settings, secrets), the documents and Qdrant's
-data are never touched. The command to start with is the one in the code archive:
+code and the unit files (keep local changes to a unit in a drop-in, ``systemctl edit``), and
+the env file (settings, secrets), the roots file, the documents and Qdrant's data are never
+touched. The command to start with is the one in the code archive:
 unpack it anywhere and run it with ``PYTHONPATH=<unpacked>/src``.
 
 Standard library only: it runs before anything else is installed. ``--root`` installs below
@@ -32,7 +33,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TextIO
 
@@ -173,16 +174,26 @@ class _Install:
 
     def _directories(self) -> None:
         for directory in self.layout.service_directories:
-            if not directory.exists():
-                directory.mkdir(parents=True)
-                self.host.run(["chown", f"{SERVICE_USER}:{SERVICE_USER}", str(directory)])
-                self.done("created", directory)
+            if directory.exists():
+                continue
+            # Built under another name and renamed once it is the service's: an interrupted
+            # run leaves nothing a later run would take for finished.
+            staged = directory.with_name(f"{directory.name}.new")
+            shutil.rmtree(staged, ignore_errors=True)
+            staged.mkdir(parents=True)
+            try:
+                self.host.run(["chown", f"{SERVICE_USER}:{SERVICE_USER}", str(staged)])
+                staged.rename(directory)
+            except BaseException:
+                shutil.rmtree(staged, ignore_errors=True)
+                raise
+            self.done("created", directory)
 
     def _env_file(self) -> None:
         layout = self.layout
         layout.env_file.parent.mkdir(parents=True, exist_ok=True)
-        if _create_env_file(layout.env_file):
-            self.host.run(["chown", f"root:{SERVICE_USER}", str(layout.env_file)])
+        if _create_env_file(layout.env_file, lambda staged: self.host.run(
+                ["chown", f"root:{SERVICE_USER}", str(staged)])):
             self.done("created", f"{layout.env_file} (new secrets)")
         else:
             self.done("kept", layout.env_file)
@@ -201,7 +212,8 @@ class _Install:
             self.host.run([self.host.python_executable(), "-m", "venv", str(layout.venv)])
         if recorded.get("lock") != wanted["lock"] or not python.exists():
             mirror = ["--index-url", self.index_url] if self.index_url else []
-            self.host.run([*pip, *mirror, "-r", str(source / LOCKFILE)])
+            self.host.run([*pip, *mirror, "--only-binary", ":all:", "-r",
+                           str(source / LOCKFILE)])
         self.host.run([*pip, "--no-deps", "--force-reinstall", "--no-build-isolation",
                        str(source)])
         self._remember(**wanted)
@@ -229,8 +241,8 @@ class _Install:
             self.host.run(["systemctl", "try-restart", service])  # does nothing if not running
         if register:
             self.host.run(["systemctl", "enable", "--now", "qdrant.service"])
-            self.host.run(["systemctl", "enable", "local-rag-mcp.service", "local-rag-sync.timer",
-                           "local-rag-full.timer"])
+            self.host.run(["systemctl", "enable", "--now", "local-rag-mcp.service",
+                           "local-rag-sync.timer", "local-rag-full.timer"])
             self._remember(units=registered)
 
     def _state(self) -> dict[str, str]:
@@ -337,22 +349,37 @@ ROOTS_FILE = """\
 """
 
 
-def _create_env_file(path: Path) -> bool:
+def _create_env_file(path: Path, prepare: Callable[[Path], None] = lambda staged: None) -> bool:
     """Write the env file with fresh secrets unless one exists; True if it was written."""
     return _create_text(path, ENV_FILE.format(
-        qdrant_key=secrets.token_hex(24), mcp_token=secrets.token_hex(24)), mode=0o640)
+        qdrant_key=secrets.token_hex(24), mcp_token=secrets.token_hex(24)),
+        mode=0o640, prepare=prepare)
 
 
-def _create_text(path: Path, text: str, mode: int = 0o644) -> bool:
-    """Write ``path`` unless something is there already; True if it was written."""
+def _create_text(path: Path, text: str, mode: int = 0o644,
+                 prepare: Callable[[Path], None] = lambda staged: None) -> bool:
+    """Write ``path`` unless something is there already; True if it was written.
+
+    The file is complete (and ``prepare`` has run on it, to set its owner) before it appears
+    under its name, and an existing file is never replaced, even by a concurrent run.
+    """
+    if path.exists():
+        return False  # without staging anything, so that the directory is not touched either
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.tmp-")
+    staged = Path(name)
     try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
-    except FileExistsError:
-        return False
-    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-        os.fchmod(stream.fileno(), mode)  # not the umask's idea of it
-        stream.write(text)
-    return True
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            os.fchmod(stream.fileno(), mode)  # not the umask's idea of it
+            stream.write(text)
+        prepare(staged)
+        try:
+            os.link(staged, path)  # fails if the name is taken, unlike a rename
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 def _parser() -> argparse.ArgumentParser:

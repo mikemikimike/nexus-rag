@@ -1,5 +1,5 @@
 [Unit]
-Description=local-rag weekly full-refresh Sync
+Description=local-rag weekly Sync
 
 [Timer]
 OnCalendar=Sun 03:00

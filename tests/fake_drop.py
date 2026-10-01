@@ -1,17 +1,15 @@
 """Builds Binary drops for tests: a fake Qdrant tarball and a code archive."""
-import hashlib
 import io
 import tarfile
 from pathlib import Path
 
-from local_rag.binary_drop import Artifact
+from local_rag.binary_drop import Artifact, sha256_of
 
 REPO = Path(__file__).resolve().parent.parent
 QDRANT_TARBALL = "qdrant-x86_64-unknown-linux-gnu.tar.gz"
 
 
-def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+sha256 = sha256_of
 
 
 def qdrant_tarball(path: Path, version: str = "1.19.1") -> Artifact:

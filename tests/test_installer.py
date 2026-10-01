@@ -1,6 +1,7 @@
 import io
 import subprocess
 import tarfile
+from pathlib import Path
 import sys
 
 import pytest
@@ -197,14 +198,21 @@ def test_the_service_account_is_created_once(machine):
     assert len(machine.host.ran_matching("useradd")) == 1
 
 
+def chowned(machine, owner, absolute):
+    """Whether ``owner`` was set on the item, or on the staging copy that was then renamed to it."""
+    target = machine.path(absolute)
+    return any(c[:2] == ["chown", owner] and Path(c[2]).parent == target.parent
+               and target.name in Path(c[2]).name for c in machine.host.ran)
+
+
 def test_data_directories_and_the_env_file_are_given_to_the_service(machine):
     machine.install()
 
     for directory in ("/var/lib/qdrant/storage", "/var/lib/qdrant/snapshots"):
         assert machine.path(directory).is_dir()
-        assert ["chown", "ragsvc:ragsvc", str(machine.path(directory))] in machine.host.ran
+        assert chowned(machine, "ragsvc:ragsvc", directory)
     # root owns the file (systemd reads it as root); the service group may read it
-    assert ["chown", "root:ragsvc", str(machine.path("/etc/local-rag/local-rag.env"))] in machine.host.ran
+    assert chowned(machine, "root:ragsvc", "/etc/local-rag/local-rag.env")
     assert not any("-R" in c for c in machine.host.ran)  # never a sweep over existing data
 
 
@@ -339,13 +347,13 @@ def test_every_service_loads_the_one_env_file_the_installer_creates(machine):
     assert directives(unit(machine, "qdrant.service"), "WorkingDirectory") == ["/var/lib/qdrant"]
 
 
-def test_the_units_are_registered_and_qdrant_started(machine):
+def test_the_units_are_registered_and_started(machine):
     machine.install()
 
     ran = machine.host.ran
     assert ["systemctl", "daemon-reload"] in ran
     assert ["systemctl", "enable", "--now", "qdrant.service"] in ran
-    assert ["systemctl", "enable", "local-rag-mcp.service", "local-rag-sync.timer",
+    assert ["systemctl", "enable", "--now", "local-rag-mcp.service", "local-rag-sync.timer",
             "local-rag-full.timer"] in ran
     assert ran.index(["systemctl", "daemon-reload"]) < ran.index(
         ["systemctl", "enable", "--now", "qdrant.service"])
@@ -415,3 +423,26 @@ def test_a_code_archive_without_the_units_or_the_lockfile_is_refused_before_anyt
 
     assert code == 1 and "deploy/systemd" in err
     assert not machine.root.exists() and machine.host.ran == []
+
+
+def test_an_interrupted_chown_cannot_leave_an_env_file_or_directory_the_next_run_would_skip(machine):
+    machine.host.fail_on = "chown"
+    assert machine.install()[0] == 1
+    # whatever the failed run left, it is not the real env file nor the real data directory
+    assert not machine.path("/etc/local-rag/local-rag.env").exists()
+    assert not machine.path("/var/lib/qdrant").exists()
+
+    machine.host.fail_on = None
+    assert machine.install()[0] == 0
+    assert len(machine.env()["QDRANT_API_KEY"]) >= 32
+    assert chowned(machine, "root:ragsvc", "/etc/local-rag/local-rag.env")
+    assert chowned(machine, "ragsvc:ragsvc", "/var/lib/qdrant/storage")
+    leftovers = [p for p in machine.root.rglob("*") if p.name.endswith(".new") or ".tmp" in p.name]
+    assert leftovers == []
+
+
+def test_packages_are_requested_as_wheels_only_so_nothing_is_built_as_root(machine):
+    machine.install()
+
+    (requested,) = lock_installs(machine.host)
+    assert "--only-binary" in requested and requested[requested.index("--only-binary") + 1] == ":all:"

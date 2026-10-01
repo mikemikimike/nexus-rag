@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,20 +75,18 @@ def verify_against_sums(path: Path, sums: Path) -> None:
 
 
 @contextmanager
-def verified_qdrant_binary(tarball: Path, record: Artifact = QDRANT, *,
-                           version_of: Callable[[Path], str] | None = None) -> Iterator[Path]:
+def verified_qdrant_binary(tarball: Path, record: Artifact = QDRANT) -> Iterator[Path]:
     """The Qdrant binary in ``tarball``, once the drop is known to match ``record``.
 
     The checksum is checked before anything is unpacked, and the unpacked binary is asked its
-    version (``version_of``, by default ``qdrant --version``). Anything that does not match
+    version (``qdrant --version``). Anything that does not match
     raises DropRefused. The binary exists only inside the ``with`` block.
     """
     verify_checksum(tarball, record.sha256, what=f"{tarball.name} (Qdrant {record.version})")
-    version_of = version_of or _reported_version
     with tempfile.TemporaryDirectory(prefix="qdrant-drop-") as scratch:
         unpacked = Path(scratch) / "qdrant"
         _unpack_binary(tarball, unpacked)
-        reported = version_of(unpacked)
+        reported = _reported_version(unpacked)
         if reported != record.version:
             raise DropRefused(
                 f"Qdrant version does not match: the repository expects {record.version}, "
@@ -109,13 +107,12 @@ def place_binary(binary: Path, destination: Path) -> bool:
     return True
 
 
-def install_qdrant_binary(tarball: Path, destination: Path, record: Artifact = QDRANT,
-                          *, version_of: Callable[[Path], str] | None = None) -> bool:
+def install_qdrant_binary(tarball: Path, destination: Path, record: Artifact = QDRANT) -> bool:
     """Verify the Qdrant tarball against ``record`` and put its binary in ``destination/qdrant``.
 
     A refused drop leaves nothing behind. Returns whether anything was written.
     """
-    with verified_qdrant_binary(tarball, record, version_of=version_of) as binary:
+    with verified_qdrant_binary(tarball, record) as binary:
         return place_binary(binary, destination / "qdrant")
 
 
