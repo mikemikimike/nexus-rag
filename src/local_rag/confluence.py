@@ -39,6 +39,7 @@ class _Entry:
     version: str
     page_id: str
     attachment: str | None = None  # the file name, for an Attachment
+    parts: tuple[str, ...] = ()  # the keys of the listing parts it came from
 
 
 class ConfluenceCorpus:
@@ -75,7 +76,7 @@ class ConfluenceCorpus:
                 failures[f"root {root}"] = _describe(error)
             else:
                 self._entries.update((e.id, e) for e in entries)
-        return Listing([DocumentRef(e.id, e.version) for e in self._entries.values()],
+        return Listing([DocumentRef(e.id, e.version, e.parts) for e in self._entries.values()],
                        failures)
 
     def fetch(self, document_id: str) -> RawDocument:
@@ -112,18 +113,19 @@ class ConfluenceCorpus:
         found += [c for c in self._json(*children).get("children", [])
                   if c.get("type", "page") == "page"]
         entries = []
+        part = f"root {root}"
         for page in found:
             entry = _Entry(
                 id=str(page["id"]), title=page["title"], url=page.get("url", ""),
                 space=page.get("spaceKey", ""),
                 version=_version(page.get("version"), default=_UNVERSIONED),
-                page_id=str(page["id"]))
+                page_id=str(page["id"]), parts=(part,))
             entries.append(entry)
             if self._attachments:
                 try:
                     entries += self._list_attachments(entry)
                 except Exception as error:
-                    failures[f"attachments of page {entry.id}"] = _describe(error)
+                    failures[_attachments_part(entry.id)] = _describe(error)
         return entries
 
     def _list_attachments(self, page: _Entry) -> Sequence[_Entry]:
@@ -132,7 +134,8 @@ class ConfluenceCorpus:
             id=f"{page.id}/attachments/{f['title']}", title=f"{page.title} / {f['title']}",
             url=page.url, space=page.space,
             version=_version(f.get("version"), default=page.version),
-            page_id=page.id, attachment=f["title"])
+            page_id=page.id, attachment=f["title"],
+            parts=(*page.parts, _attachments_part(page.id)))
             for f in files if self._wanted(f["title"])]
 
     def _wanted(self, name: str) -> bool:
@@ -157,6 +160,10 @@ class ConfluenceCorpus:
                 f"confluence {args[0]} failed ({result.returncode}): "
                 f"{(result.stderr or result.stdout).strip()[:_MAX_ERROR_LENGTH]}")
         return result.stdout
+
+
+def _attachments_part(page_id: str) -> str:
+    return f"attachments of page {page_id}"
 
 
 def _media_type(name: str) -> str:

@@ -1,7 +1,7 @@
 import logging
 import time
 import uuid
-from collections.abc import Callable, Collection, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 
@@ -9,7 +9,7 @@ from qdrant_client import QdrantClient, models
 
 from local_rag.chunker import Chunker
 from local_rag.corpus import (
-    Corpus, Document, RawDocument, check_corpus_name, listing_failures, qualified_id)
+    Corpus, Document, DocumentRef, RawDocument, check_corpus_name, listing_failures, qualified_id)
 from local_rag.exclusive import ExclusiveRun, Lease, SyncInProgress
 from local_rag.extraction import Extractor
 from local_rag.gateway import ModelGateway
@@ -170,19 +170,19 @@ class KnowledgeIndex:
         if live is not None:
             self._require_writable(live)
         target = live or self._generations.fresh_name()
-        indexed = self._indexed_versions(live, corpus.name)
+        indexed = self._indexed(live, corpus.name)
         added = replaced = removed = unchanged = 0
         refs = corpus.list()
         unlisted = listing_failures(refs)
         failures = dict(unlisted)
         for ref in refs:
             stored = qualified_id(corpus.name, ref.id)
-            versions = indexed.get(stored)
-            if versions == {ref.version}:
+            stored_as = indexed.get(stored)
+            if stored_as is not None and stored_as.is_current(ref):
                 unchanged += 1
                 continue
             try:
-                document = self._extract(corpus, corpus.fetch(ref.id))
+                document = self._extract(corpus, corpus.fetch(ref.id), ref.parts)
                 if live is None:  # a Sync of another Corpus may have made an index live meanwhile
                     live = self._generations.live()
                     if live is not None:
@@ -201,13 +201,15 @@ class KnowledgeIndex:
                         self._require_writable(live)
                         target = live
                         self._add(document, target)
-                if versions is None:
+                if stored_as is None:
                     added += 1
                 else:
                     replaced += 1
         current = {qualified_id(corpus.name, ref.id) for ref in refs}
-        # A Document missing from an incomplete listing may still exist.
-        stale = set() if unlisted else indexed.keys() - current
+        # A Document missing from an incomplete listing may still exist if it sat in a part
+        # that failed to list; one with no recorded part may have sat in any of them.
+        stale = {document_id for document_id in indexed.keys() - current
+                 if not indexed[document_id].held_back_by(unlisted)}
         for document_id in stale:
             try:
                 self._remove(document_id, target)
@@ -268,7 +270,8 @@ class KnowledgeIndex:
                 total += len(refs)
                 for ref in refs:
                     try:
-                        self._add(self._extract(corpus, corpus.fetch(ref.id)), generation)
+                        self._add(self._extract(corpus, corpus.fetch(ref.id), ref.parts),
+                                  generation)
                     except Exception as error:
                         failures[qualified_id(corpus.name, ref.id)] = _describe(error)
             failed = len(failures)
@@ -585,12 +588,12 @@ class KnowledgeIndex:
                     f"index {generation} is {assessment.access}", assessment))
         return assessment
 
-    def _indexed_versions(self, collection: str | None, corpus: str) -> dict[str, set[str]]:
-        """Versions found in the index per Document id, among the Documents ``corpus`` owns.
+    def _indexed(self, collection: str | None, corpus: str) -> dict[str, "_Stored"]:
+        """What the index holds per Document id, among the Documents ``corpus`` owns.
 
         More than one version means an interrupted replace, so the Document is re-synced.
         """
-        found: dict[str, set[str]] = {}
+        found: dict[str, _Stored] = {}
         if collection is None:
             return found
         offset = None
@@ -598,10 +601,9 @@ class KnowledgeIndex:
             points, offset = self._client.scroll(
                 collection, limit=1000, offset=offset, with_vectors=False,
                 scroll_filter=models.Filter(must=[_match("corpus", corpus)]),
-                with_payload=["document_id", "version"])
+                with_payload=["document_id", "version", "parts"])
             for point in points:
-                found.setdefault(point.payload["document_id"], set()).add(
-                    point.payload.get("version"))
+                found.setdefault(point.payload["document_id"], _Stored()).add(point.payload)
             if offset is None:
                 return found
 
@@ -618,13 +620,14 @@ class KnowledgeIndex:
             if offset is None:
                 return found
 
-    def _extract(self, corpus: Corpus, raw: RawDocument) -> Document:
+    def _extract(self, corpus: Corpus, raw: RawDocument,
+                 parts: tuple[str, ...] = ()) -> Document:
         """The Document as the index stores it: owned by the Corpus, its ids namespaced."""
         return Document(
             id=qualified_id(corpus.name, raw.id), title=raw.title, url=raw.url,
             space=raw.space, version=raw.version, text=self._extractor.extract(raw),
             parent_id=None if raw.parent_id is None else qualified_id(corpus.name, raw.parent_id),
-            media_type=raw.media_type, corpus=corpus.name)
+            media_type=raw.media_type, corpus=corpus.name, parts=parts)
 
     def _add(self, document: Document, collection: str) -> None:
         # A Document with no text is still found by its title: it gets one empty Passage.
@@ -651,7 +654,8 @@ class KnowledgeIndex:
                 payload={"document_id": document.id, "version": document.version,
                          "title": document.title, "url": document.url,
                          "space": document.space, "text": chunk,
-                         "parent_id": document.parent_id, "corpus": document.corpus}))
+                         "parent_id": document.parent_id, "corpus": document.corpus,
+                         "parts": list(document.parts)}))
         # Write the new Passages first, then delete this Document's leftover old ones (those
         # of an earlier, longer version included), so a failure in between never leaves the
         # Document missing from search.
@@ -743,13 +747,45 @@ def _passage_id(document_id: str, number: int) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document_id}#{number}"))
 
 
+class _Stored:
+    """What the index holds for one Document: its versions and the parts it was listed under."""
+
+    def __init__(self) -> None:
+        self.versions: set[str | None] = set()
+        self.parts: set[str] = set()
+        self.recorded = True  # False if any point predates recorded parts
+
+    def add(self, payload: dict) -> None:
+        self.versions.add(payload.get("version"))
+        if payload.get("parts") is None:
+            self.recorded = False
+        else:
+            self.parts.update(payload["parts"])
+
+    def is_current(self, ref: DocumentRef) -> bool:
+        """Unchanged: one stored version, the listed one, and the part it was listed under
+        (a Document that moved to another part is re-added so its part stays true)."""
+        return self.versions == {ref.version} and (
+            not self.recorded or self.parts == set(ref.parts))
+
+    def held_back_by(self, failures: Mapping[str, str]) -> bool:
+        """True if a part this Document sat in could not be listed. With no part recorded,
+        any failure might be its part."""
+        if not failures:
+            return False
+        if not self.recorded or not self.parts:
+            return True
+        return not self.parts.isdisjoint(failures)
+
+
 def _document_point(document: Document) -> models.PointStruct:
     return models.PointStruct(
         id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document.id}#document")), vector={},
         payload={"kind": _DOCUMENT_KIND, "document_id": document.id,
                  "version": document.version, "title": document.title, "url": document.url,
                  "space": document.space, "full_text": document.text,
-                 "parent_id": document.parent_id, "corpus": document.corpus})
+                 "parent_id": document.parent_id, "corpus": document.corpus,
+                 "parts": list(document.parts)})
 
 
 def _connect(settings: Settings) -> QdrantClient:

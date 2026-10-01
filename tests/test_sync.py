@@ -3,7 +3,7 @@ import time
 import pytest
 
 from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import Document, InMemoryCorpus
+from local_rag.corpus import Document, DocumentRef, InMemoryCorpus, Listing
 from local_rag.fakes import FakeModelGateway
 from conftest import DOCUMENTS
 
@@ -269,6 +269,67 @@ def test_a_holder_that_was_taken_over_neither_frees_nor_stamps_over_the_new_lock
         with pytest.raises(SyncInProgress):
             with ExclusiveRun(client, "lock", stale_after=0.05).hold():
                 pytest.fail("the new holder's lock must still stand")
+
+
+class PartedCorpus(InMemoryCorpus):
+    """Lists each Document under its parts; the parts in ``failing`` could not be listed,
+    so Documents under any of them are missing from the listing."""
+
+    def __init__(self, documents, parts, failing=()):
+        super().__init__(documents)
+        self.parts = parts
+        self.failing = set(failing)
+
+    def list(self):
+        refs = [DocumentRef(r.id, r.version, self.parts.get(r.id, ()))
+                for r in super().list()]
+        listed = [r for r in refs if self.failing.isdisjoint(r.parts)]
+        return Listing(listed, {part: "no answer" for part in self.failing})
+
+
+ORA, ORA_2, BATTERY = DOCUMENTS
+PARTS = {ORA.id: ("dba",), ORA_2.id: ("dba",), BATTERY.id: ("garage",)}
+
+
+def test_an_incomplete_listing_holds_back_removals_only_in_the_failed_part(index):
+    index.sync(PartedCorpus(DOCUMENTS, PARTS))
+
+    report = index.sync(PartedCorpus([ORA, BATTERY], PARTS, failing={"garage"}))
+
+    assert (report.removed, report.failed) == (1, 1)
+    assert list(report.failures) == ["garage"]
+    assert index.get_document("default:dba/ora-12154") is None
+    assert index.get_document("default:garage/battery") is not None
+
+
+def test_a_document_that_moved_to_another_part_is_held_back_by_its_new_part(index):
+    index.sync(PartedCorpus(DOCUMENTS, PARTS))
+    moved = {**PARTS, ORA.id: ("garage",)}
+    assert index.sync(PartedCorpus(DOCUMENTS, moved)).replaced == 1  # its part is re-recorded
+
+    index.sync(PartedCorpus([ORA_2, BATTERY], moved, failing={"garage"}))
+
+    assert index.get_document("default:dba/ora-00942") is not None
+
+
+def test_a_document_in_several_parts_is_held_back_when_any_of_them_failed(index):
+    parts = {ORA.id: ("root", "attachments"), ORA_2.id: ("root",)}
+    index.sync(PartedCorpus([ORA, ORA_2], parts))
+
+    report = index.sync(PartedCorpus([], parts, failing={"attachments"}))
+
+    assert (report.removed, report.failed) == (1, 1)
+    assert index.get_document("default:dba/ora-00942") is not None
+    assert index.get_document("default:dba/ora-12154") is None
+
+
+def test_documents_listed_under_no_part_are_held_back_by_any_failure(index):
+    index.sync(PartedCorpus(DOCUMENTS, {}))
+
+    report = index.sync(PartedCorpus([], {}, failing={"anywhere"}))
+
+    assert (report.removed, report.failed) == (0, 1)
+    assert index.get_document("default:garage/battery") is not None
 
 
 def named(name, documents):

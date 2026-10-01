@@ -362,3 +362,14 @@ def test_a_rebuild_that_lost_the_lock_does_not_promote(index):
 
     assert index.get_document("default:dba/ora-00942") == DOCUMENTS[0].text
     assert len({n for n in collections(index) if ".gen-" in n}) == 1
+
+
+def test_a_rebuild_is_refused_while_any_part_of_a_listing_is_incomplete():
+    from test_sync import PARTS, PartedCorpus
+    index = KnowledgeIndex(Settings(rebuild_failure_threshold=1.0), FakeModelGateway())
+    index.sync(PartedCorpus(DOCUMENTS, PARTS))
+
+    report = index.rebuild([PartedCorpus(DOCUMENTS, PARTS, failing={"garage"})])
+
+    assert not report.promoted and "garage" in report.reason
+    assert list(report.failures) == ["default: garage"]

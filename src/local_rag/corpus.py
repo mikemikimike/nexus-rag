@@ -33,6 +33,7 @@ class Document:
     parent_id: str | None = None  # the page an Attachment belongs to
     corpus: str | None = None  # the Corpus that owns it; set by the Knowledge index
     media_type: str = "text/plain"  # the Media type its Corpus gave it, kept past extraction
+    parts: tuple[str, ...] = ()  # the parts of its Corpus it was listed under; set by the index
 
 
 @dataclass(frozen=True)
@@ -53,13 +54,20 @@ class RawDocument:
 class DocumentRef:
     id: str
     version: str
+    # The parts of the Corpus this Document was listed under (a Root, a page's Attachments, a
+    # Tracked ref), each named by the key a Listing's failures use for that part. If any of
+    # them could not be listed, the Document is not removed. A Document may sit in several
+    # parts at once (an Attachment is in its page's Root and in its page's Attachments).
+    parts: tuple[str, ...] = ()
 
 
 class Listing(list[DocumentRef]):
     """The Documents a Corpus could list, and the parts of it that it could not (name -> why).
 
     While any part is missing the listing is incomplete: Documents absent from it may still
-    exist, so a Sync removes none, and a Rebuild, which would leave them out, is refused.
+    exist, so a Sync removes none of those under a failed part (a ref's ``parts`` holds the
+    failure's key) and a Rebuild, which would leave them out, is refused. Documents stored
+    without a recorded part are held back while any part failed.
     """
 
     def __init__(self, refs: Iterable[DocumentRef] = (),
