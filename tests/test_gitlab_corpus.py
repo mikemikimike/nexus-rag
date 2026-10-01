@@ -365,3 +365,32 @@ def test_the_declaration_rejects_unusable_refs(tmp_path, refs):
     with pytest.raises(DeclarationError):
         declared_code(tmp_path, tmp_path / "c", refs).corpus(
             "code", {"GITLAB_URL": "x", "GITLAB_TOKEN": "y"})
+
+
+def test_a_file_that_is_not_utf_8_or_has_a_nul_anywhere_is_left_out(gitlab, cache):
+    gitlab.commit(REPOSITORY, {
+        "legacy.py": "# café\n".encode("latin-1") + b"x = 1\n",
+        "late_nul.py": b"x = 1\n" * 3000 + b"\x00 tail\n",
+        "utf8.py": "# café\nx = 1\n",
+    })
+
+    found = document_ids(corpus(gitlab, cache))
+
+    assert f"{REPOSITORY}@main:utf8.py" in found
+    assert not found & {f"{REPOSITORY}@main:legacy.py", f"{REPOSITORY}@main:late_nul.py"}
+
+
+def test_a_listing_of_unchanged_files_reads_no_blob_again_even_in_a_new_process(
+        gitlab, cache, tmp_path):
+    log = tmp_path / "tool.log"
+    wrapper = tmp_path / "tool-logged"
+    wrapper.write_text(f'#!/bin/sh\necho "$@" >> {log}\nexec git "$@"\n')
+    wrapper.chmod(0o755)
+
+    first = document_ids(corpus(gitlab, cache, git_bin=str(wrapper)))
+    assert "cat-file --batch" in log.read_text()
+    log.unlink()
+    second = document_ids(corpus(gitlab, cache, git_bin=str(wrapper)))  # a new Corpus object
+
+    assert second == first
+    assert "cat-file" not in log.read_text()
