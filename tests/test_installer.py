@@ -310,7 +310,8 @@ def test_an_install_that_failed_part_way_is_retried_by_the_next_run(machine):
 
 
 UNITS = ["local-rag-full.service", "local-rag-full.timer", "local-rag-mcp.service",
-         "local-rag-sync.service", "local-rag-sync.timer", "qdrant.service"]
+         "local-rag-sync.service", "local-rag-sync.timer", "local-rag-sync@.service",
+         "local-rag-sync@.timer", "qdrant.service"]
 
 
 def unit(machine, name):
@@ -337,10 +338,22 @@ def test_plain_services_and_timers_call_the_command_line(machine):
     assert directives(unit(machine, "local-rag-full.timer"), "OnCalendar") == ["Sun 03:00"]
 
 
+def test_a_templated_unit_pair_syncs_any_corpus_by_name_on_its_own_timer(machine):
+    machine.install()
+
+    assert directives(unit(machine, "local-rag-sync@.service"), "ExecStart") == [
+        "/opt/local-rag/venv/bin/local-rag sync %i"]
+    assert directives(unit(machine, "local-rag-sync@.service"), "EnvironmentFile") == [
+        "/etc/local-rag/local-rag.env"]
+    assert directives(unit(machine, "local-rag-sync@.timer"), "OnCalendar") == ["*:0/15"]
+    enabled = [command for command in machine.host.ran if command[:2] == ["systemctl", "enable"]]
+    assert not [name for command in enabled for name in command if "@" in name]  # opt in per Corpus
+
+
 def test_every_service_loads_the_one_env_file_the_installer_creates(machine):
     machine.install()
 
-    for name in ("qdrant", "local-rag-mcp", "local-rag-sync", "local-rag-full"):
+    for name in ("qdrant", "local-rag-mcp", "local-rag-sync", "local-rag-sync@", "local-rag-full"):
         assert directives(unit(machine, f"{name}.service"), "EnvironmentFile") == [
             "/etc/local-rag/local-rag.env"], name
     assert machine.env()["QDRANT__STORAGE__STORAGE_PATH"] == "/var/lib/qdrant/storage"

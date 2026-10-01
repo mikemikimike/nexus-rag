@@ -36,21 +36,23 @@ type Serve = Callable[..., None]  # (app, *, host, port, certfile, keyfile), blo
 
 
 _SEARCH_DESCRIPTION = {
-    RetrievalMode.HYBRID: """Hybrid (semantic + keyword) search over indexed pages and attachments.
+    RetrievalMode.HYBRID: """Hybrid (semantic + keyword) search over indexed pages, attachments and code files from GitLab repositories.
 Returns the best passages with title, link, page_id and space.
 Exact identifiers (error codes, hostnames, ticket ids) work well in the query.
-Optional `space` restricts the search to one space (see list_spaces).
-Code results show their `ref`. Searches see each repository's primary ref only: pass `ref` to
-search another tracked ref (a branch or tag), and `repository` (its path) to search one repository.
-For the whole page use get_page with the returned page_id.""",
-    RetrievalMode.KEYWORD: """Keyword search over indexed pages and attachments. It matches the
+Optional `space` restricts the search to one space (see list_spaces); spaces include GitLab groups.
+Code results show the file, its line range, the enclosing symbol and their `ref`. Searches see each
+repository's primary ref only: pass `ref` to search another tracked ref (a branch or tag), and
+`repository` (its path) to search one repository.
+For the whole page or file use get_page with the returned page_id.""",
+    RetrievalMode.KEYWORD: """Keyword search over indexed pages, attachments and code files from GitLab repositories. It matches the
 words you give, not their meaning: use the terms the page itself would use.
 Returns the best passages with title, link, page_id and space.
 Exact identifiers (error codes, hostnames, ticket ids) work well in the query.
-Optional `space` restricts the search to one space (see list_spaces).
-Code results show their `ref`. Searches see each repository's primary ref only: pass `ref` to
-search another tracked ref (a branch or tag), and `repository` (its path) to search one repository.
-For the whole page use get_page with the returned page_id.""",
+Optional `space` restricts the search to one space (see list_spaces); spaces include GitLab groups.
+Code results show the file, its line range, the enclosing symbol and their `ref`. Searches see each
+repository's primary ref only: pass `ref` to search another tracked ref (a branch or tag), and
+`repository` (its path) to search one repository.
+For the whole page or file use get_page with the returned page_id.""",
 }
 
 
@@ -69,13 +71,13 @@ def build_server(index: KnowledgeIndex) -> MCPServer:
 
     @server.tool()
     async def list_spaces() -> str:
-        """List the spaces that are indexed (usable as the `space` filter of search_docs)."""
+        """List the spaces that are indexed, GitLab groups included (usable as the `space` filter of search_docs)."""
         spaces = await anyio.to_thread.run_sync(index.list_spaces)
         return ", ".join(spaces) or "none"
 
     @server.tool()
     async def get_page(page_id: str, max_chars: int = 20000) -> str:
-        """Return the full indexed text of a page by the page_id search_docs gave
+        """Return the full indexed text of a page or a file by the page_id search_docs gave
         (or of an attachment by its attachment id). It is a snapshot as of the last sync."""
         text = await anyio.to_thread.run_sync(index.get_document, page_id)
         if text is None:

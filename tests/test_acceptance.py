@@ -858,6 +858,60 @@ def do_nothing_after(allowed):
     return broken
 
 
+# --- GitLab ---------------------------------------------------------------------------
+
+def gitlab_declaration(tmp_path, *repositories):
+    from fake_gitlab import FakeGitLab
+    remote = FakeGitLab(tmp_path / "remote")
+    remote.commit("platform/payments", {"ledger.py": "def post():\n    return 1\n"})
+    path = tmp_path / "corpora.toml"
+    listed = "\n".join(f'[[corpus.code.repositories]]\npath = "{r}"\nrefs = ["main"]\n'
+                       for r in repositories or ("platform/payments",))
+    path.write_text(f'[corpus.code]\nkind = "gitlab"\ncache = "{tmp_path / "mirrors"}"\n{listed}')
+    return str(path), {"GITLAB_URL": remote.url, "GITLAB_TOKEN": "glpat-secret"}
+
+
+def gitlab_only(tmp_path, *repositories, host=None):
+    path, environ = gitlab_declaration(tmp_path, *repositories)
+    return run_suite("--only", "gitlab", "--corpora", path, environ=environ, host=host)
+
+
+def test_a_declared_gitlab_corpus_is_checked_for_its_tool_and_every_repository(tmp_path):
+    host = Host({"--version": "git version 2.43.0"})
+    code, out, err = gitlab_only(tmp_path, host=host)
+
+    assert code == 0, out
+    assert "git version 2.43.0" in line(out, "gitlab.git")
+    assert "1 files" in line(out, "gitlab.repositories")
+    assert "glpat-secret" not in out + err
+
+
+def test_gitlab_is_skipped_when_no_gitlab_corpus_is_declared(tmp_path):
+    path = tmp_path / "corpora.toml"
+    path.write_text('[corpus.docs]\nkind = "folder"\npath = "."\n')
+    code, out, _ = run_suite("--only", "gitlab", "--corpora", str(path))
+
+    assert code == 0
+    assert line(out, "gitlab.git").startswith("[SKIP]")
+    assert line(out, "gitlab.repositories").startswith("[SKIP]")
+
+
+def test_a_host_without_the_tool_fails_naming_the_prerequisite(tmp_path):
+    code, out, _ = gitlab_only(tmp_path, host=Host(failing=["--version"]))
+
+    assert code == 1
+    assert "section 2" in line(out, "gitlab.git")
+    assert line(out, "gitlab.repositories").startswith("[SKIP]")
+
+
+def test_a_repository_the_token_cannot_read_fails_naming_it(tmp_path):
+    code, out, _ = gitlab_only(tmp_path, "platform/payments", "platform/missing")
+
+    failed = line(out, "gitlab.repositories")
+    assert code == 1 and failed.startswith("[FAIL]") and "platform/missing@main" in failed
+    assert "read_repository" in failed
+
+
 # --- the Retrieval mode ----------------------------------------------------------------
 
 KEYWORD_ONLY = {"RAG_RETRIEVAL": "keyword", "RAG_EMBED_MODEL": "", "LITELLM_BASE_URL": ""}

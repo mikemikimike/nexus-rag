@@ -146,6 +146,48 @@ def run_confluence(ctx: Context) -> None:
     check("confluence.roots", lambda: _roots(ctx), needs=["confluence.read"])
 
 
+def run_gitlab(ctx: Context) -> None:
+    check = ctx.report.check
+    declared: list = []
+    check("gitlab.git", lambda: _tool_runs(ctx, declared))
+    check("gitlab.repositories", lambda: _repositories(declared), needs=["gitlab.git"])
+
+
+def _tool_runs(ctx: Context, declared: list) -> str:
+    from local_rag.declaration import DEFAULT_PATH, Declaration, DeclarationError  # not at import: the install group runs without it
+    path = Path(ctx.args.corpora or ctx.environ.get("RAG_CORPORA_FILE") or DEFAULT_PATH)
+    try:
+        declaration = Declaration.read(path)
+        declared += [declaration.corpus(name, ctx.environ)
+                     for name in declaration.names_of("gitlab")]
+    except DeclarationError as error:
+        raise Skipped(f"no usable GitLab Corpus at {path} (use --corpora): {error}") from None
+    if not declared:
+        raise Skipped(f"{path} declares no GitLab Corpus")
+    try:
+        return ctx.run(["git", "--version"]).strip() or "git runs"
+    except Exception as error:
+        raise Failure(f"git --version failed: {error}",
+                      cause="git is not installed where the Sync runs (a host prerequisite on "
+                            "the systemd route; the container image carries it)",
+                      see="section 2 (pre-flight)") from None
+
+
+def _repositories(declared: list) -> str:
+    unread, files = {}, 0
+    for corpus in declared:
+        listing = corpus.list()  # fetches each mirror; read-only
+        files += len(listing)
+        unread.update({f"{corpus.name}: {part}": why for part, why in listing.failures.items()})
+    if unread:
+        shown = "; ".join(f"{part}: {why}" for part, why in unread.items())
+        raise Failure(f"{len(unread)} Tracked refs cannot be read ({shown})",
+                      cause="the token lacks `read_repository` or cannot see the Repository, the "
+                            "path or ref is wrong, or GITLAB_URL is not reachable from this host",
+                      see='section 10 (row "Sync: `failed <repository>@<ref>`")')
+    return f"{files} files readable in {len(declared)} GitLab Corpus"
+
+
 def _command(ctx: Context) -> str:
     return ctx.environ.get("CONFLUENCE_BIN") or "confluence"
 

@@ -127,8 +127,8 @@ def test_every_flag_of_the_installer_container_and_smoke_commands_exists():
 
 
 def test_the_acceptance_groups_and_check_names_the_guide_gives_exist():
-    groups = set(re.findall(r"`(gateway|qdrant|index|mcp|install|confluence)`", GUIDE))
-    names = set(re.findall(r"`((?:gateway|qdrant|index|mcp|install|confluence)\.[\w-]+)`", GUIDE))
+    groups = set(re.findall(r"`(gateway|qdrant|index|mcp|install|confluence|gitlab)`", GUIDE))
+    names = set(re.findall(r"`((?:gateway|qdrant|index|mcp|install|confluence|gitlab)\.[\w-]+)`", GUIDE))
     source = "\n".join((REPO / "src/local_rag" / f"acceptance_{m}.py").read_text()
                        for m in ("stack", "index", "mcp", "host"))
 

@@ -74,7 +74,7 @@ sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.installer --drop drop
   [--index-url https://mirror.example.test/simple]
 ```
 
-It checks the prerequisites and the drop, then creates (only what is missing): the `ragsvc` user, `/opt/qdrant/qdrant`, `/var/lib/qdrant`, the env file `/etc/local-rag/local-rag.env` with a **generated** Qdrant key and MCP token (mode 0640, `root:ragsvc`), an empty `/etc/local-rag/confluence_roots.txt`, the venv `/opt/local-rag/venv` (packages from the Mirror, then the code), and the units from `deploy/systemd/`. It enables `qdrant.service`, `local-rag-mcp.service` and the two timers. A second run changes nothing; an upgrade replaces the Qdrant binary, the code and the unit files (keep local changes to a unit in a drop-in, `systemctl edit`) and restarts what changed.
+It checks the prerequisites and the drop, then creates (only what is missing): the `ragsvc` user, `/opt/qdrant/qdrant`, `/var/lib/qdrant`, the env file `/etc/local-rag/local-rag.env` with a **generated** Qdrant key and MCP token (mode 0640, `root:ragsvc`), a commented `/etc/local-rag/corpora.toml`, the venv `/opt/local-rag/venv` (packages from the Mirror, then the code), and the units from `deploy/systemd/`. It enables `qdrant.service`, `local-rag-mcp.service` and the two timers. A second run changes nothing; an upgrade replaces the Qdrant binary, the code and the unit files (keep local changes to a unit in a drop-in, `systemctl edit`) and restarts what changed.
 
 Then configure and start working:
 
@@ -84,7 +84,7 @@ Then configure and start working:
 4. Health: `curl http://HOST:8765/healthz` answers `ok`. Your first token: `sudo grep '^MCP_TOKENS=' /etc/local-rag/local-rag.env`.
 5. When the first Sync is done, run the acceptance suite (section 6, "Acceptance suite"): `run_rag /opt/local-rag/venv/bin/python -m local_rag.acceptance --systemd` (the helper is defined below). The installation is accepted when it ends `ACCEPTANCE PASSED`.
 
-The hourly timer runs an incremental Sync; the weekly timer runs the same Sync as a safety net. Both run `local-rag sync confluence`. Until step 1 and 2 are done they fail harmlessly.
+The hourly timer runs an incremental Sync; the weekly timer runs the same Sync as a safety net. Both run `local-rag sync confluence`. Until step 1 and 2 are done they fail harmlessly. Any other Corpus syncs on its own timer from the templated units `local-rag-sync@.timer` (every 15 minutes; container route `local-rag-container-sync@.timer`), which the Installer installs but does not enable: after declaring a Corpus named `gitlab`, `sudo systemctl enable --now local-rag-sync@gitlab.timer`.
 
 Commands below use this helper, which runs a program as the service user with the services' own settings:
 
@@ -140,7 +140,7 @@ claude mcp add --transport http local-rag https://rag.example.test/mcp \
 
 Or commit `examples/mcp.json.example` as `.mcp.json` to a repository, and each user only sets `LOCAL_RAG_TOKEN`. If TLS uses an internal CA: `export NODE_EXTRA_CA_CERTS=/path/ca.pem`. Add `examples/CLAUDE.md.snippet` to the project's `CLAUDE.md`. To point Claude Code itself at your LiteLLM chat model, see `examples/claude_settings.example.json`.
 
-Tools: `search_docs(query, top_k, space)` returns the best Passages with title, link, page id and Space; `list_spaces()` lists exactly the Spaces in the Knowledge index; `get_page(page_id)` returns a Document's full indexed text as of the last Sync. For the live page Claude uses the Confluence CLI plugin (`confluence read <page_id>`).
+Tools: `search_docs(query, top_k, space, repository, ref)` returns the best Passages with title, link, page id and Space (for code also file, line range, enclosing symbol and ref; it sees each Repository's Primary ref unless `ref` is given); `list_spaces()` lists exactly the Spaces in the Knowledge index, GitLab groups included; `get_page(page_id)` returns a page or a file, a Document's full indexed text as of the last Sync. For the live page Claude uses the Confluence CLI plugin (`confluence read <page_id>`).
 
 ## 6. Smoke check and operations
 
@@ -171,6 +171,7 @@ It runs these groups, each check on its own line with a stable name (`--only GRO
 | `mcp` | the running MCP server, over HTTP with a token from `MCP_TOKENS` (or `--token`): `search_docs`, `list_spaces`, `get_page` answer; no token and a wrong token get 401; `/healthz` answers 200 without a token. It listens where `MCP_HOST` and `MCP_PORT` say, or `--mcp-url` (inside the container stack the server is another container: `--mcp-url http://mcp:8765`, as above) |
 | `install` | needs `--systemd` or `--container`. Units exist, are active and enabled, the env file is not world-readable, the sync timers are scheduled; container route: the stack's `qdrant` and `mcp` containers are up and healthy. The container route's checks need `docker` and `systemctl`, so run them on the host (third command above, where only the standard library is needed), not inside the stack |
 | `confluence` | only when `CONFLUENCE_DOMAIN` is set: the read-only `confluence spaces` call works and every Root of the Confluence Corpora in the declaration file (`--corpora`, default `RAG_CORPORA_FILE`, else `/etc/local-rag/corpora.toml`) resolves |
+| `gitlab` | only when the declaration file holds a GitLab Corpus: `git --version` runs and every Tracked ref of every GitLab Corpus can be read with `GITLAB_TOKEN` (it fetches the mirrors) |
 
 Reading the output: `[ OK ]`, `[FAIL]` or `[SKIP]` per check, with a reason. A `[FAIL]` line says what was seen, the likely cause and the section of `docs/agents/closed-network-setup.md` to read. A `[SKIP]` is never a pass: it says why (an optional component that is not configured, or an earlier check that failed, so one broken gateway shows as one failure and not a dozen). It starts by printing the settings it uses (never a secret; keys and tokens are only said to be set) and ends with a summary. Exit code `0`: nothing failed; `1`: a check failed; `2`: the command line or the settings cannot be used.
 
@@ -202,11 +203,30 @@ exclude_attachments = ["*.png"]     # optional file name globs; the default leav
 [corpus.docs]
 kind = "folder"
 path = "/srv/docs"                  # relative paths are relative to the file; the Space is the top-level folder
+
+[corpus.gitlab]                     # GITLAB_URL and GITLAB_TOKEN (env file): a read-only service account, scope read_repository
+kind = "gitlab"
+cache = "/var/cache/local-rag/gitlab"   # optional: bare git mirrors, safe to delete (default: $HOME/.cache/local-rag/gitlab)
+
+[[corpus.gitlab.repositories]]
+path = "platform/payments"          # the project's full path; the Space is its group, platform
+refs = ["main", {name = "release/1.2", exclude = ["docs/**"]}]   # Tracked refs; the first is the Primary ref
 ```
+
+**Code search and its visibility risk.** A GitLab Corpus indexes the files of each listed Repository at each Tracked ref, split along functions and classes for Python and C, by lines for other code. **GitLab permissions are not enforced: every MCP token can read every listed Repository**, whoever the GitLab token belongs to. List only Repositories suitable for everyone who holds a token; per-token Space allow-lists and discovering a group's Repositories with the `glab` CLI are later work. Name the Corpus `gitlab` to use the 15-minute templated timer shown above.
 
 `local-rag sync NAME` syncs one Corpus and touches only its Documents, so Corpora share one Knowledge index. `local-rag rebuild` re-embeds every declared Corpus. A Document's id is its Corpus's name and its own id (`confluence:12345`), and Status shows the last Sync of each Corpus. Removing a Corpus from the declaration does not remove its Documents: they stay searchable and Status warns about them until `local-rag forget NAME` removes them (a Rebuild leaves them out too). A Corpus named that is not declared is a usage error (exit 2). An index built before named Corpora is a Read-only index until a Rebuild.
 
 **Index format.** The index records how it was built (schema version, Retrieval mode, sparse encoder parameters, chunk size and overlap, and for a hybrid index the embedding model name and dimension). After an upgrade, a model change, a change of `RAG_RETRIEVAL` or a change of `RAG_CHUNK_TOKENS` or `RAG_CHUNK_OVERLAP`, `local-rag status` tells whether it still matches. A mismatching index that can still be searched is served as a **Read-only index** with a warning and refuses Sync until you run a Rebuild; an unusable one is refused. Nothing is ever rebuilt automatically. After changing the embedding model, the Retrieval mode or the chunk settings, run a Rebuild. An index built before Documents were split into Passages did not record its chunk settings, so it shows up as a Read-only index until you run one.
+
+**Upgrade runbook: code search.** This release changes the Index format and replaces `/etc/local-rag/confluence_roots.txt` (no longer read) with `corpora.toml`. The old index is served read-only until one Rebuild. The full procedure, with the checks and the way back, is "Upgrade runbook" in `docs/agents/closed-network-setup.md` (section 9). In short:
+
+1. Request the wheels `tree-sitter`, `tree-sitter-python` and `tree-sitter-c` from the Mirror (all pins of `requirements.lock`), and have `git` on the host.
+2. Write the Roots of `confluence_roots.txt` into `[corpus.confluence]` of `corpora.toml`; the Corpus must be named `confluence`, as the timers sync it by that name.
+3. Run the Installer (or `container start`) with the new drop.
+4. `local-rag rebuild`, detached (it re-embeds every declared Corpus). It goes live only within `RAG_REBUILD_FAILURE_THRESHOLD`.
+5. `local-rag status` shows `access: read-write`, one line per Corpus, no warnings; restart the MCP server; run the smoke check and the acceptance suite.
+6. If the Rebuild is bad: `local-rag switch-back` (the Previous index becomes the Live index again, read-only under the new code).
 
 **Upgrade note: the Model gateway must be named.** An unnamed Model gateway is now a settings error, as an unnamed embedding model is. A `hybrid` install, or one with `RAG_RERANK_MODEL` set, that has no `LITELLM_BASE_URL` (or an empty one) no longer falls back to `http://localhost:4000/v1`: the services, the CLI, the smoke check and the acceptance suite refuse to start and say what to set. Set `LITELLM_BASE_URL` in the env file (a LiteLLM on the same host is `LITELLM_BASE_URL=http://localhost:4000/v1`, written out), or run `RAG_RETRIEVAL=keyword` without a reranker, which needs no gateway. Then restart the MCP server.
 
