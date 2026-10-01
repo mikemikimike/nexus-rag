@@ -274,8 +274,6 @@ run_rag /opt/local-rag/venv/bin/local-rag sync --folder "$FOLDER"               
 
 Read the result: `Sync: N added, ...` and exit 0 is complete. Exit 1 lists `failed <id>: <why>` per Document, and the rest is indexed: show the list to the operator (a scanned PDF without OCR is a typical cause; see the troubleshooting table). Exit 2 is a command line that cannot be used (an empty roots file gives `give a Corpus`). `sync` on an empty Knowledge index makes the index live with the first Document that succeeds. A **Rebuild** is not part of a first install; the operator asks for one when the embedding model or chunking changes.
 
-The Knowledge index currently embeds one Passage per Document (issue #29), so a Document longer than the embedding model's input limit is truncated or refused by the Model gateway, and a refusal counts as a failed Document. Say this to the operator when long Documents fail.
-
 **Gate:** exit 0, or exit 1 with a failure list the operator has seen and accepted.
 
 ## 7. Verify

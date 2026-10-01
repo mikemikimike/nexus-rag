@@ -192,6 +192,12 @@ def _print_passage(number: int, passage: Passage, out: TextIO) -> None:
     print(file=out)
 
 
+def _chunks(f) -> str:
+    if f.chunk_tokens is None or f.chunk_overlap is None:
+        return "chunk size not recorded"
+    return f"chunks of {f.chunk_tokens} tokens overlapping by {f.chunk_overlap}"
+
+
 def _print_status(status: IndexStatus, out: TextIO) -> None:
     def show(name: str, value) -> None:
         print(f"{name + ':':<13}{'unknown' if value is None else value}", file=out)
@@ -206,7 +212,8 @@ def _print_status(status: IndexStatus, out: TextIO) -> None:
         f = status.format
         show("format", f"schema {f.schema_version}, embedding model {f.embed_model!r} "
                        f"({f.dimension} dimensions), sparse k1={f.sparse.k1:g} "
-                       f"b={f.sparse.b:g} avg_doc_length={f.sparse.avg_doc_length:g}")
+                       f"b={f.sparse.b:g} avg_doc_length={f.sparse.avg_doc_length:g}, "
+                       f"{_chunks(f)}")
     if status.last_sync is None:
         show("last sync", "never")
     else:

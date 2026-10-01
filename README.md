@@ -16,7 +16,7 @@ An agent can install, configure, verify and operate it from [`docs/agents/closed
  Claude Code (each user): search_docs, list_spaces, get_page
 ```
 
-**Hybrid retrieval.** Every Passage gets a dense vector (your embedding model) and a BM25-style sparse vector. A query runs both, Qdrant fuses the rankings with Reciprocal Rank Fusion, and optionally the Model gateway's reranker reorders the best candidates. Exact identifiers such as `ORA-00942`, `OPS-4711` or hostnames match reliably. No more than a few Passages of one Document are returned per search.
+**Hybrid retrieval.** A Document is split into Passages of about `RAG_CHUNK_TOKENS` tokens, each prefixed with the Document's title when it is embedded, so a long page is searchable by any part of it; results still point at the Document. Every Passage gets a dense vector (your embedding model) and a BM25-style sparse vector. A query runs both, Qdrant fuses the rankings with Reciprocal Rank Fusion, and optionally the Model gateway's reranker reorders the best candidates. Exact identifiers such as `ORA-00942`, `OPS-4711` or hostnames match reliably. No more than a few Passages of one Document are returned per search.
 
 **Safe Rebuilds.** A **Rebuild** re-embeds every Document into a fresh index and makes it the **Live index** only if its failure rate is within `RAG_REBUILD_FAILURE_THRESHOLD` (default `0`); otherwise the current Live index stays and the refusal says why. The **Previous index** is kept for one generation and `local-rag switch-back` returns to it. Searches keep working during a Sync or Rebuild.
 
@@ -160,11 +160,9 @@ Exit codes of `local-rag`: `0` success; `1` failure or refusal (a Sync with fail
 
 A folder Corpus works the same way (`local-rag sync --folder DIR`; the Space is the top-level folder), but one Knowledge index follows one Corpus: a Sync of another Corpus removes every Document it does not list. Try a folder with its own `RAG_COLLECTION`.
 
-**Index format.** The index records how it was built (schema version, sparse encoder parameters, embedding model name and dimension). After an upgrade or a model change `local-rag status` tells whether it still matches. A mismatching index that can still be searched is served as a **Read-only index** with a warning and refuses Sync until you run a Rebuild; an unusable one is refused. Nothing is ever rebuilt automatically. After changing the embedding model, run a Rebuild.
+**Index format.** The index records how it was built (schema version, sparse encoder parameters, chunk size and overlap, embedding model name and dimension). After an upgrade, a model change or a change of `RAG_CHUNK_TOKENS` or `RAG_CHUNK_OVERLAP`, `local-rag status` tells whether it still matches. A mismatching index that can still be searched is served as a **Read-only index** with a warning and refuses Sync until you run a Rebuild; an unusable one is refused. Nothing is ever rebuilt automatically. After changing the embedding model or the chunk settings, run a Rebuild. An index built before Documents were split into Passages did not record its chunk settings, so it shows up as a Read-only index until you run one.
 
-**Settings** (the env file; unset means the default): `RAG_TOP_K` (6), `RAG_HYBRID_CANDIDATES` per retriever (40), `RAG_MAX_PER_DOC` (2), `RAG_EMBED_BATCH` (16), `RAG_GATEWAY_TIMEOUT` (60 s), `RAG_RERANK_MODEL` (off), `RAG_REBUILD_FAILURE_THRESHOLD` (0, a share between 0 and 1), `RAG_COLLECTION`, `RAG_BM25_*`, `RAG_OCR`, `LIT_BIN`, `CONFLUENCE_BIN`. The authoritative list is `src/local_rag/environment.py`.
-
-**Known limit: one Passage per Document.** The Knowledge index currently embeds each Document whole, as a single Passage. The splitter in `src/local_rag/chunker.py` (and the `RAG_CHUNK_TOKENS` and `RAG_CHUNK_OVERLAP` settings that configure it) is not yet used by the index, so a Document longer than the embedding model's input limit is truncated or refused by the Model gateway, depending on the gateway (a refusal counts as a failed Document).
+**Settings** (the env file; unset means the default): `RAG_TOP_K` (6), `RAG_HYBRID_CANDIDATES` per retriever (40), `RAG_MAX_PER_DOC` (2), `RAG_CHUNK_TOKENS` (400, the target Passage size in tokens), `RAG_CHUNK_OVERLAP` (60, tokens shared by neighbouring Passages; must be smaller than the size), `RAG_EMBED_BATCH` (16), `RAG_GATEWAY_TIMEOUT` (60 s), `RAG_RERANK_MODEL` (off), `RAG_REBUILD_FAILURE_THRESHOLD` (0, a share between 0 and 1), `RAG_COLLECTION`, `RAG_BM25_*`, `RAG_OCR`, `LIT_BIN`, `CONFLUENCE_BIN`. The authoritative list is `src/local_rag/environment.py`.
 
 **Backup.** The Knowledge index can be rebuilt from the Corpus and the Model gateway; back up the env file (the settings and secrets), and optionally Qdrant snapshots.
 
@@ -175,7 +173,7 @@ A folder Corpus works the same way (`local-rag sync --folder DIR`; the Space is 
 | `/healthz` answers 503 | Qdrant is down or `QDRANT_API_KEY` differs from `QDRANT__SERVICE__API_KEY` (the systemd env file keeps them equal), or the Live index is unusable: `local-rag status` |
 | `search_docs` says "No results" | Nothing indexed yet: run a Sync and read its output or the journal |
 | Embedding errors, 401 or 404 | `LITELLM_BASE_URL` must end with `/v1`; `RAG_EMBED_MODEL` is the LiteLLM `model_name`; the gateway is always contacted directly, ignoring proxy variables. The smoke check shows the gateway's answer |
-| `status` warns about the embedding dimension or Index format | The model or code changed since the index was built: run a Rebuild |
+| `status` warns about the embedding dimension or Index format | The model, the chunk settings or the code changed since the index was built: run a Rebuild |
 | A Rebuild is refused | The failure rate exceeded the threshold, or a listing was incomplete (a Root or an Attachment listing failed): read the reason, fix it, retry; the Live index is untouched |
 | 401 from clients | The header must be `Authorization: Bearer <token>`, and the token one of `MCP_TOKENS` at the last restart |
 | Streaming timeouts through nginx | Use `examples/nginx.conf.example` (`proxy_buffering off`) |

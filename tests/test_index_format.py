@@ -2,7 +2,7 @@ import dataclasses
 
 import pytest
 
-from local_rag import Access, IndexReadOnly, IndexRefused, KnowledgeIndex, Settings, index_format
+from local_rag import Access, IndexFormat, IndexReadOnly, IndexRefused, KnowledgeIndex, Settings, index_format
 from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from local_rag.sparse import SparseParams
@@ -29,6 +29,8 @@ def test_an_index_written_with_the_same_format_is_served_and_synced_as_usual(ind
 @pytest.mark.parametrize("changed, difference", [
     ({"embed_model": "embed-v2"}, "embedding model"),
     ({"sparse": SparseParams(k1=1.5)}, "sparse encoder"),
+    ({"chunk_tokens": 200}, "chunk size"),
+    ({"chunk_overlap": 20}, "chunk overlap"),
 ])
 def test_a_differing_but_searchable_index_is_served_read_only_with_a_warning(
         index, changed, difference):
@@ -169,3 +171,61 @@ def test_an_unreachable_gateway_does_not_hide_a_differing_index_from_status(inde
 
     assert status.access == Access.READ_ONLY
     assert any("could not be checked" in warning for warning in status.warnings)
+
+
+def test_an_index_built_before_chunks_were_recorded_is_served_read_only_until_a_rebuild(
+        index, monkeypatch):
+    real = IndexFormat.to_payload
+
+    def without_chunks(self):  # what an earlier version wrote
+        return {k: v for k, v in real(self).items() if not k.startswith("chunk")}
+
+    monkeypatch.setattr(IndexFormat, "to_payload", without_chunks)
+    index.sync(InMemoryCorpus(DOCUMENTS))
+    monkeypatch.setattr(IndexFormat, "to_payload", real)
+    upgraded = after_an_upgrade(index)
+
+    status = upgraded.status()
+
+    assert status.access == Access.READ_ONLY
+    assert any("chunk" in warning and "not recorded" in warning for warning in status.warnings)
+    assert upgraded.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    with pytest.raises(IndexReadOnly, match="Rebuild"):
+        upgraded.sync(InMemoryCorpus(DOCUMENTS))
+    assert upgraded.rebuild(InMemoryCorpus(DOCUMENTS)).promoted
+    assert upgraded.status().access == Access.READ_WRITE
+
+
+def test_changed_chunk_settings_never_trigger_a_rebuild_on_their_own():
+    gateway = CountingGateway()
+    index = KnowledgeIndex(Settings(), gateway)
+    index.sync(InMemoryCorpus(DOCUMENTS))
+    embedded, before = len(gateway.embedded), collections(index)
+    upgraded = after_an_upgrade(index, chunk_tokens=200)
+
+    with pytest.raises(IndexReadOnly, match="chunk size"):
+        upgraded.sync(InMemoryCorpus(DOCUMENTS))
+    upgraded.search("ORA-00942")
+    upgraded.status()
+
+    assert len(gateway.embedded) == embedded
+    assert collections(index) == before
+
+
+def test_a_rebuild_records_the_chunk_settings_it_used(index):
+    index.sync(InMemoryCorpus(DOCUMENTS))
+    upgraded = after_an_upgrade(index, chunk_tokens=200, chunk_overlap=20)
+
+    assert upgraded.rebuild(InMemoryCorpus(DOCUMENTS)).promoted
+
+    status = upgraded.status()
+    assert (status.format.chunk_tokens, status.format.chunk_overlap) == (200, 20)
+    assert status.access == Access.READ_WRITE
+
+
+def test_an_unreadable_recorded_chunk_size_is_reported_as_an_unreadable_format():
+    with pytest.raises(ValueError, match="unreadable index format"):
+        IndexFormat.from_payload({
+            "schema_version": 1, "embed_model": "embed", "dimension": 64,
+            "sparse": {"k1": 1.2, "b": 0.75, "avg_doc_length": 250.0},
+            "chunk_tokens": "lots", "chunk_overlap": 60})

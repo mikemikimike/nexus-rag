@@ -30,6 +30,12 @@ class Settings:
     rebuild_failure_threshold: float = 0.0  # share of Documents (0 to 1) that may fail for a Rebuild to go live
 
     def __post_init__(self):
+        if self.chunk_tokens < 1:
+            raise ValueError(f"chunk_tokens must be at least 1, got {self.chunk_tokens!r}")
+        if not 0 <= self.chunk_overlap < self.chunk_tokens:
+            raise ValueError(
+                f"chunk_overlap must be at least 0 and smaller than chunk_tokens "
+                f"({self.chunk_tokens}), got {self.chunk_overlap!r}")
         if not 0.0 <= self.rebuild_failure_threshold <= 1.0:  # also false for NaN
             raise ValueError(
                 "rebuild_failure_threshold must be between 0 and 1, "

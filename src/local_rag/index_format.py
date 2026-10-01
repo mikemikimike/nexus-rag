@@ -40,15 +40,20 @@ class IndexFormat:
     sparse: SparseParams
     embed_model: str
     dimension: int
+    # Not recorded (None) by an index built before Documents were split into Passages.
+    chunk_tokens: int | None = None
+    chunk_overlap: int | None = None
 
     @classmethod
     def written_by(cls, settings: Settings, dimension: int) -> "IndexFormat":
         """The format of an index the running code creates."""
-        return cls(SCHEMA_VERSION, settings.sparse, settings.embed_model, dimension)
+        return cls(SCHEMA_VERSION, settings.sparse, settings.embed_model, dimension,
+                   settings.chunk_tokens, settings.chunk_overlap)
 
     def to_payload(self) -> dict:
         return {"schema_version": self.schema_version, "embed_model": self.embed_model,
-                "dimension": self.dimension, "sparse": {
+                "dimension": self.dimension, "chunk_tokens": self.chunk_tokens,
+                "chunk_overlap": self.chunk_overlap, "sparse": {
                     "k1": self.sparse.k1, "b": self.sparse.b,
                     "avg_doc_length": self.sparse.avg_doc_length}}
 
@@ -61,9 +66,15 @@ class IndexFormat:
                 schema_version=int(payload["schema_version"]),
                 sparse=SparseParams(k1=float(sparse["k1"]), b=float(sparse["b"]),
                                     avg_doc_length=float(sparse["avg_doc_length"])),
-                embed_model=str(payload["embed_model"]), dimension=int(payload["dimension"]))
+                embed_model=str(payload["embed_model"]), dimension=int(payload["dimension"]),
+                chunk_tokens=_optional_int(payload.get("chunk_tokens")),
+                chunk_overlap=_optional_int(payload.get("chunk_overlap")))
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ValueError(f"unreadable index format {payload!r}") from error
+
+
+def _optional_int(value) -> int | None:
+    return None if value is None else int(value)
 
 
 @dataclass(frozen=True)
@@ -101,6 +112,19 @@ def assess(recorded: IndexFormat | None, stored_dimension: int, settings: Settin
             differences.append(
                 f"embedding model differs: index built with {recorded.embed_model!r}, "
                 f"running with {settings.embed_model!r}")
+        if recorded.chunk_tokens is None or recorded.chunk_overlap is None:
+            differences.append(
+                "its chunk size and overlap were not recorded (built before Documents "
+                "were split into Passages)")
+        else:
+            if recorded.chunk_tokens != settings.chunk_tokens:
+                differences.append(
+                    f"chunk size differs: index built with {recorded.chunk_tokens} tokens, "
+                    f"running with {settings.chunk_tokens}")
+            if recorded.chunk_overlap != settings.chunk_overlap:
+                differences.append(
+                    f"chunk overlap differs: index built with {recorded.chunk_overlap} "
+                    f"tokens, running with {settings.chunk_overlap}")
     unchecked = []
     if running_dimension is not None:
         # Whatever the model's name, vectors of another size cannot be compared with these.

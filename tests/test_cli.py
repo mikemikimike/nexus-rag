@@ -127,6 +127,7 @@ def test_status_prints_generation_counts_format_and_last_sync(cli, folder):
     assert "access:      read-write" in out
     assert "documents:   3" in out and "passages:    3" in out
     assert "schema 1, embedding model 'embed' (64 dimensions)" in out
+    assert "chunks of 400 tokens overlapping by 60" in out
     assert "last sync:   Sync completed at " in out
     assert "3 added, 0 replaced, 0 removed, 0 unchanged, 0 failed" in out
 

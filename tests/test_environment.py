@@ -52,3 +52,14 @@ def test_a_value_that_is_not_a_number_names_its_variable(name):
 def test_a_value_the_settings_refuse_is_a_settings_error():
     with pytest.raises(SettingsError, match="rebuild_failure_threshold"):
         settings_from_environment({"RAG_REBUILD_FAILURE_THRESHOLD": "1.5"})
+
+
+@pytest.mark.parametrize("given, complaint", [
+    ({"RAG_CHUNK_OVERLAP": "400"}, "chunk_overlap"),
+    ({"RAG_CHUNK_TOKENS": "50"}, "chunk_overlap"),  # the default overlap no longer fits
+    ({"RAG_CHUNK_TOKENS": "0", "RAG_CHUNK_OVERLAP": "0"}, "chunk_tokens"),
+    ({"RAG_CHUNK_OVERLAP": "-1"}, "chunk_overlap"),
+])
+def test_chunk_settings_that_cannot_split_text_are_a_settings_error(given, complaint):
+    with pytest.raises(SettingsError, match=complaint):
+        settings_from_environment(given)
