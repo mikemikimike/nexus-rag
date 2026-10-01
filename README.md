@@ -80,6 +80,7 @@ Then configure and start working:
 2. List the Confluence Roots, one page id or URL per line, in `/etc/local-rag/confluence_roots.txt`. A Space's home page as a Root covers the whole Space.
 3. Run the smoke check (section 6), then the first Sync: `sudo systemctl start local-rag-sync.service` (it runs until done; follow it with `journalctl -fu local-rag-sync`).
 4. Health: `curl http://HOST:8765/healthz` answers `ok`. Your first token: `sudo grep '^MCP_TOKENS=' /etc/local-rag/local-rag.env`.
+5. When the first Sync is done, run the acceptance suite (section 6, "Acceptance suite"): `run_rag /opt/local-rag/venv/bin/python -m local_rag.acceptance --systemd` (the helper is defined below). The installation is accepted when it ends `ACCEPTANCE PASSED`.
 
 The hourly timer runs an incremental Sync; the weekly timer runs the same Sync as a safety net. Both read the roots file. Until step 1 and 2 are done they fail harmlessly.
 
@@ -123,6 +124,8 @@ compose run --rm -T sync local-rag status  # run any local-rag command
 compose run --rm -T sync                   # one Sync (what the timers do)
 ```
 
+After the first Sync, run the acceptance suite (section 6, "Acceptance suite"): `compose run --rm -T sync python -m local_rag.acceptance --skip install --mcp-url http://mcp:8765` inside the stack, then its `install` group on the host, which needs `docker` and `systemctl` (the command is in section 6). The installation is accepted when both end `ACCEPTANCE PASSED`.
+
 Mind the missing TLS (section 1).
 
 ## 5. Connect Claude Code (each user)
@@ -145,6 +148,31 @@ The smoke check is the manual test against the real Model gateway, Qdrant, LiteP
 run_rag /opt/local-rag/venv/bin/python -m local_rag.smoke --systemd   # systemd route
 compose run --rm -T sync python -m local_rag.smoke                    # container route
 ```
+
+### Acceptance suite
+
+The smoke check looks at each component; the acceptance suite proves the whole stack works end to end, with assertions, a clear pass or fail and an exit code. Run it once the infrastructure is finished and after any change to it. It is part of the package (no extra dependency, nothing to download), so it runs from the installed environment like the smoke check:
+
+```bash
+run_rag /opt/local-rag/venv/bin/python -m local_rag.acceptance --systemd   # systemd route
+compose run --rm -T sync python -m local_rag.acceptance --skip install --mcp-url http://mcp:8765   # container route, inside the stack (MCP_PORT if changed)
+sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.acceptance --container --only install   # container route, on the host
+```
+
+It runs these groups, each check on its own line with a stable name (`--only GROUP`, repeatable, runs just some):
+
+| Group | Proves |
+|---|---|
+| `gateway` | `/embeddings` answers and reports its dimension; a text far longer than one Passage is split into Passages the model accepts; rerank, only if `RAG_RERANK_MODEL` is set |
+| `qdrant` | Qdrant answers with the configured key and refuses a wrong one |
+| `index` | on a throwaway collection and a temp folder of generated Documents: Sync; a distinctive term (keyword) and a paraphrase sharing no word (meaning) find their Documents; text from the tail of a long Document is found by term and by meaning, which shows the real embedding model reads whole Passages; `status` counts; a changed Document is replaced and a removed one disappears; Rebuild and `switch-back` |
+| `mcp` | the running MCP server, over HTTP with a token from `MCP_TOKENS` (or `--token`): `search_docs`, `list_spaces`, `get_page` answer; no token and a wrong token get 401; `/healthz` answers 200 without a token. It listens where `MCP_HOST` and `MCP_PORT` say, or `--mcp-url` (inside the container stack the server is another container: `--mcp-url http://mcp:8765`, as above) |
+| `install` | needs `--systemd` or `--container`. Units exist, are active and enabled, the env file is not world-readable, the sync timers are scheduled; container route: the stack's `qdrant` and `mcp` containers are up and healthy. The container route's checks need `docker` and `systemctl`, so run them on the host (third command above, where only the standard library is needed), not inside the stack |
+| `confluence` | only when `CONFLUENCE_DOMAIN` is set: the read-only `confluence spaces` call works and every Root of the roots file (`--roots-file`, default `/etc/local-rag/confluence_roots.txt`) resolves |
+
+Reading the output: `[ OK ]`, `[FAIL]` or `[SKIP]` per check, with a reason. A `[FAIL]` line says what was seen, the likely cause and the section of `docs/agents/closed-network-setup.md` to read. A `[SKIP]` is never a pass: it says why (an optional component that is not configured, or an earlier check that failed, so one broken gateway shows as one failure and not a dozen). It starts by printing the settings it uses (never a secret; keys and tokens are only said to be set) and ends with a summary. Exit code `0`: nothing failed; `1`: a check failed; `2`: the command line or the settings cannot be used.
+
+It never touches the live index: the `index` group works in its own collection `acceptance-<random>` and a temp folder, and removes both at the end, also after a failed check (the `cleanup.*` lines say so). If the process is killed, collections with that prefix stay behind and are safe to delete; they hold no live data. The `mcp` and `confluence` groups only read. It reads the same settings as the services, so run it with `run_rag` / `compose` as shown.
 
 | Task | Command (prefix with `run_rag` / `compose run --rm -T sync`) |
 |---|---|
@@ -192,7 +220,7 @@ pip install -e . --group dev   # or: uv pip install -e . --group dev
 pytest
 ```
 
-Tests use an in-memory Corpus, a fake Model gateway and in-process Qdrant, plus fake `lit`, `confluence`, `docker` and host commands, so they need no external service. `local_rag.smoke` is the manual check against the real ones.
+Tests use an in-memory Corpus, a fake Model gateway and in-process Qdrant, plus fake `lit`, `confluence`, `docker` and host commands, so they need no external service. `local_rag.smoke` and `local_rag.acceptance` check the real ones (the acceptance suite's own logic is tested against the fakes, with a deliberately broken fake for each failure path).
 
 | Module | Role |
 |---|---|
@@ -202,5 +230,6 @@ Tests use an in-memory Corpus, a fake Model gateway and in-process Qdrant, plus 
 | `cli`, `mcp_server`, `environment` | adapters: `local-rag`, `local-rag-mcp`, and settings from environment variables |
 | `installer`, `container`, `binary_drop` | delivery: the Installer, the container route and Binary drop verification |
 | `smoke` | the manual smoke check |
+| `acceptance`, `acceptance_report`, `acceptance_corpus`, `acceptance_stack`, `acceptance_index`, `acceptance_mcp`, `acceptance_host` | the live acceptance suite: its entry point, how it reports, its generated Documents, and one module per check group |
 
 `deploy/systemd/` and `deploy/container/` hold the unit files, the compose file and the Dockerfile; `examples/` holds the client and proxy examples. To regenerate `requirements.lock` after a dependency change, follow the comment at its top.

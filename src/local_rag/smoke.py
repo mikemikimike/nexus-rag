@@ -11,7 +11,6 @@ commands. The README says how to run it on each route.
 """
 import argparse
 import os
-import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -19,15 +18,14 @@ from typing import TextIO
 
 from qdrant_client import QdrantClient
 
+from local_rag.acceptance_host import SYSTEMD_UNITS
+from local_rag.acceptance_report import run_command
 from local_rag.environment import SettingsError, settings_from_environment
 from local_rag.gateway import ModelGateway
 from local_rag.gateway_litellm import LiteLLMGateway
 from local_rag.index import KnowledgeIndex
 from local_rag.index_format import Access
 
-SYSTEMD_UNITS = ("qdrant.service", "local-rag-mcp.service",
-                 "local-rag-sync.timer", "local-rag-full.timer")
-COMMAND_TIMEOUT = 30.0
 PLACEHOLDER_PREFIX = "CHANGE_ME"
 
 type Run = Callable[[Sequence[str]], str]  # runs a command, returns its output, raises if it fails
@@ -55,7 +53,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
         args = _parser().parse_args(argv)
     except SystemExit as stop:
         return int(stop.code or 0)
-    run = run or _run_command
+    run = run or run_command
     failed = False
 
     def check(name: str, what: Callable[[], str]) -> None:
@@ -153,20 +151,6 @@ def _version(run: Run, command: str) -> str:
 def _unit_active(run: Run, unit: str) -> str:
     run(["systemctl", "is-active", "--quiet", unit])
     return "active"
-
-
-def _run_command(command: Sequence[str]) -> str:
-    try:
-        return subprocess.run(command, check=True, capture_output=True, text=True,
-                              timeout=COMMAND_TIMEOUT).stdout
-    except subprocess.CalledProcessError as error:
-        detail = (error.stderr or "").strip().splitlines()
-        raise RuntimeError(f"{command[0]} exited {error.returncode}"
-                           + (f": {detail[-1]}" if detail else "")) from None
-    except FileNotFoundError:
-        raise RuntimeError(f"{command[0]} not found") from None
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise RuntimeError(f"{command[0]}: {error}") from None
 
 
 def _raise(error: Exception) -> str:
