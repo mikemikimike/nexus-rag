@@ -1,4 +1,4 @@
-"""Command line adapter over the Knowledge index: Sync, Rebuild, switch-back, search, status.
+"""Command line adapter over the Knowledge index: Sync, Rebuild, forget, switch-back, search, status.
 
 Settings come from the environment (see ``environment``). The Corpora come from the
 declaration file (see ``declaration``): ``--corpora FILE``, else ``RAG_CORPORA_FILE``, else
@@ -82,6 +82,10 @@ def _parser() -> argparse.ArgumentParser:
         help="re-embed every declared Corpus into a fresh index and make it live if complete "
              "enough")
     rebuild.set_defaults(run=_rebuild)
+    forget = commands.add_parser(
+        "forget", help="remove every Document of a Corpus from the index")
+    forget.add_argument("corpus", help="the name of a Corpus that has Documents in the index")
+    forget.set_defaults(run=_forget)
     commands.add_parser(
         "switch-back", help="make the previous index the Live index again"
     ).set_defaults(run=_switch_back)
@@ -123,6 +127,14 @@ def _declared[R](build: Callable[[Declaration], R], declaration: Callable[[], De
         raise UsageError(str(error)) from None
 
 
+def _forget(args, index: KnowledgeIndex, declaration, out: TextIO) -> int:
+    # Any name that has Documents may be forgotten: the point is to remove a Corpus that is
+    # no longer declared, so the declaration is not consulted.
+    removed = index.forget(args.corpus)
+    print(f"Forget: removed {removed} Documents of Corpus {args.corpus!r}", file=out)
+    return 0
+
+
 def _switch_back(args, index: KnowledgeIndex, corpora, out: TextIO) -> int:
     index.switch_back()
     print("Switched back to the previous index.", file=out)
@@ -140,8 +152,12 @@ def _search(args, index: KnowledgeIndex, corpora, out: TextIO) -> int:
     return 0
 
 
-def _status(args, index: KnowledgeIndex, corpora, out: TextIO) -> int:
-    status = index.status()
+def _status(args, index: KnowledgeIndex, declaration, out: TextIO) -> int:
+    try:
+        declared = declaration().names
+    except DeclarationError:
+        declared = None  # status works without a usable declaration; it just cannot compare
+    status = index.status(declared)
     _print_status(status, out)
     return 1 if status.access is Access.REFUSED else 0
 

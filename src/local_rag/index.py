@@ -1,8 +1,8 @@
 import logging
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 
 from qdrant_client import QdrantClient, models
 
@@ -230,6 +230,27 @@ class KnowledgeIndex:
         return RebuildReport(indexed=total - failed, failed=failed, reason=reason,
                              failures=failures, warnings=warnings)
 
+    def forget(self, corpus: str) -> int:
+        """Remove every Document the named Corpus owns; returns how many there were.
+
+        This is the only way a Corpus's Documents leave the index apart from a Rebuild that
+        is not given the Corpus: dropping a Corpus from the declaration removes nothing.
+        Raises SyncInProgress at once if another Sync or Rebuild is running.
+        """
+        check_corpus_name(corpus)
+        with self._exclusive.hold("Forget"):
+            live = self._generations.live()
+            if live is None:
+                return 0
+            self._require_writable(live)
+            owned = models.Filter(must=[_match("corpus", corpus)])
+            documents = self._client.count(
+                live, exact=True, count_filter=models.Filter(
+                    must=[_match("corpus", corpus), _match("kind", _DOCUMENT_KIND)])).count
+            self._client.delete(
+                live, wait=True, points_selector=models.FilterSelector(filter=owned))
+            return documents
+
     def _sweep(self) -> tuple[str, ...]:
         """Clean up after earlier runs, and say if the records it relies on had to be replaced."""
         try:
@@ -387,12 +408,20 @@ class KnowledgeIndex:
         self._embedding_failure = None
         return vector
 
-    def status(self) -> IndexStatus:
+    def status(self, declared: Collection[str] | None = None) -> IndexStatus:
         """The Live index generation, its size and format, and whether it can be written to.
 
-        Corrupt records are reported here rather than raised.
+        Corrupt records are reported here rather than raised. Given the names of the declared
+        Corpora, the warnings also name any Corpus that has Documents but is not among them.
         """
-        return self._status(verify_dimension=True)
+        status = self._status(verify_dimension=True)
+        if declared is None or status.generation is None:
+            return status
+        undeclared = sorted(self._indexed_corpora(status.generation) - set(declared))
+        return replace(status, warnings=(*status.warnings, *(
+            f"Corpus {name!r} has Documents in the index but is undeclared; they stay "
+            f"searchable until `forget {name}` removes them, or a Rebuild leaves them out"
+            for name in undeclared)))
 
     def health(self) -> Health:
         """Whether Qdrant and the Knowledge index can be reached. Never raises.
@@ -517,6 +546,19 @@ class KnowledgeIndex:
                 with_payload=["document_id", "version", "parts"])
             for point in points:
                 found.setdefault(point.payload["document_id"], _Stored()).add(point.payload)
+            if offset is None:
+                return found
+
+    def _indexed_corpora(self, collection: str) -> set[str]:
+        """The names of the Corpora that own at least one Document in ``collection``."""
+        found: set[str] = set()
+        offset = None
+        while True:
+            points, offset = self._client.scroll(
+                collection, limit=1000, offset=offset, with_vectors=False,
+                scroll_filter=models.Filter(must=[_match("kind", _DOCUMENT_KIND)]),
+                with_payload=["corpus"])
+            found.update(p.payload["corpus"] for p in points if p.payload.get("corpus"))
             if offset is None:
                 return found
 
