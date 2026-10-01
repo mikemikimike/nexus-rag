@@ -32,6 +32,7 @@ class Document:
     text: str
     parent_id: str | None = None  # the page an Attachment belongs to
     corpus: str | None = None  # the Corpus that owns it; set by the Knowledge index
+    media_type: str = "text/plain"  # the Media type its Corpus gave it, kept past extraction
 
 
 @dataclass(frozen=True)

@@ -252,3 +252,10 @@ def test_an_index_built_before_corpus_ownership_was_recorded_is_served_read_only
         upgraded.sync(InMemoryCorpus(DOCUMENTS))
     assert upgraded.rebuild([InMemoryCorpus(DOCUMENTS)]).promoted
     assert upgraded.status().access == Access.READ_WRITE
+
+
+def test_a_changed_query_instruction_leaves_the_index_current_and_needs_no_rebuild(index):
+    upgraded = after_an_upgrade(index, query_instruction="Find the passage that answers the question")
+
+    assert upgraded.status().access == Access.READ_WRITE
+    upgraded.sync(InMemoryCorpus(DOCUMENTS))

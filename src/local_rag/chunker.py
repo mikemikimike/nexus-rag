@@ -20,7 +20,7 @@ class Chunker:
         if overlap >= size:
             raise ValueError(f"chunk overlap ({overlap}) must be smaller than size ({size})")
         punkt = PunktSentenceTokenizer()  # rule-based: needs no downloaded model
-        self._splitter = SentenceSplitter(
+        self._prose = SentenceSplitter(
             chunk_size=size, chunk_overlap=overlap,
             # The splitter only takes len() of what its tokenizer returns.
             tokenizer=lambda text: range(count_tokens(text)),
@@ -32,5 +32,9 @@ class Chunker:
         return cls(count_tokens if gateway is None else gateway.count_tokens,
                    size=settings.chunk_tokens, overlap=settings.chunk_overlap)
 
-    def split(self, text: str) -> list[str]:
-        return self._splitter.split_text(text)
+    def split(self, text: str, media_type: str = "text/plain") -> list[str]:
+        """The Passages of a Document's text, split the way its Media type calls for."""
+        return self._splitter_for(media_type).split_text(text)
+
+    def _splitter_for(self, media_type: str) -> SentenceSplitter:
+        return self._prose  # every Media type is prose until a code splitter exists

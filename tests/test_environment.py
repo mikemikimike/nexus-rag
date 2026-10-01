@@ -112,3 +112,17 @@ def test_a_value_the_settings_refuse_is_a_settings_error():
 def test_chunk_settings_that_cannot_split_text_are_a_settings_error(given, complaint):
     with pytest.raises(SettingsError, match=complaint):
         settings_from_environment({**EMBEDDING, **given})
+
+
+def test_the_query_instruction_is_empty_by_default():
+    assert settings_from_environment(EMBEDDING).query_instruction == ""
+
+
+def test_the_query_instruction_comes_from_the_environment():
+    settings = settings_from_environment({**BGE, "RAG_QUERY_INSTRUCTION": "Find the answer"})
+
+    assert settings.query_instruction == "Find the answer"
+
+
+def test_a_blank_query_instruction_leaves_queries_unchanged():
+    assert settings_from_environment({**BGE, "RAG_QUERY_INSTRUCTION": "  "}).query_instruction == ""

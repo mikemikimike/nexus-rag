@@ -8,7 +8,9 @@ import zlib
 from collections import Counter
 from dataclasses import dataclass
 
-_WORD = re.compile(r"\w+", re.UNICODE)
+# A run of word characters, joined by dots or hyphens: ``ledger.api.Client``, ``payments-v2``.
+_IDENTIFIER = re.compile(r"\w+(?:[.\-]\w+)*", re.UNICODE)
+_CAMEL_PART = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+")
 
 
 @dataclass(frozen=True)
@@ -25,13 +27,21 @@ class SparseVector:
 
 
 def tokenize(text: str) -> list[str]:
+    """Words, plus the parts of identifiers: the whole identifier is kept as well."""
     tokens = []
-    for word in _WORD.findall(text.lower()):
-        if len(word) < 2:
-            continue
-        tokens.append(word)
-        if "_" in word:  # snake_case identifiers also match their parts
-            tokens.extend(part for part in word.split("_") if len(part) > 1)
+    for identifier in _IDENTIFIER.findall(text):
+        pieces = re.split(r"[.\-]", identifier)
+        if len(pieces) > 1:  # dotted or kebab-case
+            tokens.append(identifier.lower())
+        for piece in pieces:
+            if len(piece) < 2:
+                continue
+            tokens.append(piece.lower())
+            for segment in piece.split("_"):  # snake_case
+                parts = _CAMEL_PART.findall(segment)  # camelCase and PascalCase
+                if len(parts) > 1 or segment != piece:
+                    tokens.extend(part.lower() for part in (parts or [segment])
+                                  if len(part) > 1)
     return tokens
 
 
