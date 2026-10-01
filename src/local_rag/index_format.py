@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from local_rag.languages import syntax_languages
 from local_rag.settings import RetrievalMode, Settings
 from local_rag.sparse import SparseParams
 
@@ -61,6 +62,8 @@ class IndexFormat:
     # The size limit of a code Passage and the method that splits code; None when not recorded.
     code_chunk_tokens: int | None = None
     code_splitting: str | None = None
+    # The languages whose code is split along its syntax; None when not recorded.
+    syntax_languages: tuple[str, ...] | None = None
 
     @classmethod
     def written_by(cls, settings: Settings, dimension: int | None) -> "IndexFormat":
@@ -68,10 +71,10 @@ class IndexFormat:
         if settings.retrieval is RetrievalMode.KEYWORD:
             return cls(SCHEMA_VERSION, settings.sparse, None, None, settings.chunk_tokens,
                        settings.chunk_overlap, RetrievalMode.KEYWORD, True, IDENTIFIER_SPLITTING,
-                       settings.code_chunk_tokens, CODE_SPLITTING)
+                       settings.code_chunk_tokens, CODE_SPLITTING, syntax_languages())
         return cls(SCHEMA_VERSION, settings.sparse, settings.embed_model, dimension,
                    settings.chunk_tokens, settings.chunk_overlap, RetrievalMode.HYBRID,
-                   True, IDENTIFIER_SPLITTING, settings.code_chunk_tokens, CODE_SPLITTING)
+                   True, IDENTIFIER_SPLITTING, settings.code_chunk_tokens, CODE_SPLITTING, syntax_languages())
 
     def to_payload(self) -> dict:
         return {"schema_version": self.schema_version, "retrieval": self.retrieval.value,
@@ -81,6 +84,8 @@ class IndexFormat:
                 "identifier_splitting": self.identifier_splitting,
                 "code_chunk_tokens": self.code_chunk_tokens,
                 "code_splitting": self.code_splitting,
+                "syntax_languages": None if self.syntax_languages is None
+                else list(self.syntax_languages),
                 "corpus_ownership": self.corpus_ownership, "sparse": {
                     "k1": self.sparse.k1, "b": self.sparse.b,
                     "avg_doc_length": self.sparse.avg_doc_length}}
@@ -107,6 +112,8 @@ class IndexFormat:
                 code_chunk_tokens=_optional_int(payload.get("code_chunk_tokens")),
                 code_splitting=None if payload.get("code_splitting") is None
                 else str(payload["code_splitting"]),
+                syntax_languages=None if payload.get("syntax_languages") is None
+                else tuple(str(name) for name in payload["syntax_languages"]),
                 corpus_ownership=bool(payload.get("corpus_ownership", False)))
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             raise ValueError(f"unreadable index format {payload!r}") from error
@@ -193,6 +200,15 @@ def assess(recorded: IndexFormat | None, stored_dimension: int | None, settings:
                 differences.append(
                     f"code splitting differs: index built by {recorded.code_splitting!r}, "
                     f"running {CODE_SPLITTING!r}")
+    if recorded is not None:
+        if recorded.syntax_languages is None:
+            differences.append(
+                "the languages split along their syntax were not recorded (built before "
+                "code was split by syntax)")
+        elif recorded.syntax_languages != syntax_languages():
+            differences.append(
+                f"syntax-split languages differ: index built with "
+                f"{list(recorded.syntax_languages)}, running {list(syntax_languages())}")
     if recorded is not None and recorded.identifier_splitting != IDENTIFIER_SPLITTING:
         differences.append(
             "keyword search does not split identifiers into their parts in this index "
