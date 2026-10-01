@@ -97,7 +97,7 @@ For hosts that run Docker. The system and Qdrant run as a compose stack (also us
 **On a connected machine** (Docker, git, Python 3.12), from a **clean checkout of the commit to ship**: `save` builds the system image from the working tree but archives `HEAD`, so uncommitted changes would end up in the image and not in the archive.
 
 ```bash
-python3.12 -m local_rag.container save --out drop
+PYTHONPATH=src python3.12 -m local_rag.container save --out drop
 ```
 
 `drop/` then holds `qdrant-image-<version>.tar`, `local-rag-image-<version>.tar`, `local-rag-<version>.tar.gz` (the compose file and timers) and `SHA256SUMS`. Carry it into the network.
