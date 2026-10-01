@@ -3,7 +3,7 @@
 Only variables that are set and non-empty override a default, so the defaults live in
 Settings alone, except Qdrant's location: a command line that kept nothing because it
 defaulted to in-process memory would be worse than useless, so the default is the local
-Qdrant server. The variable names are the ones the earlier scripts read.
+Qdrant server. The variable names are the ones operators already know from earlier installations.
 """
 import sys
 from collections.abc import Callable, Mapping

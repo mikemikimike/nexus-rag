@@ -1,9 +1,0 @@
-llama-index-core
-llama-index-embeddings-openai-like
-qdrant-client
-beautifulsoup4
-markdownify
-requests
-mcp
-uvicorn
-liteparse

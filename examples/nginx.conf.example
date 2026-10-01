@@ -1,0 +1,19 @@
+# Optional TLS front for the MCP server, on either delivery route. On the systemd route set
+# MCP_HOST=127.0.0.1 in the env file so only this proxy can reach it; on the container route
+# the published port stays open, so also restrict it to this host (see the README).
+server {
+    listen 443 ssl;
+    server_name rag.example.test;
+    ssl_certificate     /etc/ssl/certs/rag.example.test.crt;
+    ssl_certificate_key /etc/ssl/private/rag.example.test.key;
+
+    location /mcp {
+        proxy_pass http://127.0.0.1:8765;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Authorization $http_authorization;
+        proxy_buffering off;          # streaming responses
+        proxy_read_timeout 300s;
+    }
+    location /healthz { proxy_pass http://127.0.0.1:8765; }
+}
