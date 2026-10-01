@@ -9,7 +9,7 @@ The searchable body of indexed Documents, and the single thing that accepts a Co
 _Avoid_: RAG, vector store, database, Qdrant collection
 
 **Corpus**:
-A source of Documents, described independently of where they come from (a Confluence export, a folder of files).
+A named source of Documents, described independently of where they come from (Confluence Roots, a folder of files, Tracked refs of GitLab Repositories), declared by the operator. Every Document in the Knowledge index belongs to exactly one Corpus.
 _Avoid_: export, data dir, dataset
 
 **Document**:
@@ -24,8 +24,20 @@ _Avoid_: file, child document
 A Confluence page, given by id or URL, whose whole subtree of pages a Confluence Corpus contributes; a Space's home page as a Root covers the Space.
 _Avoid_: seed, entry point, start page
 
+**Repository**:
+A GitLab project's git repository, with all its branches and tags.
+_Avoid_: repo, project
+
+**Tracked ref**:
+A Repository at one branch or tag that the operator listed, whose files a GitLab Corpus contributes as Documents; a Repository may have several.
+_Avoid_: checkout, snapshot, Root
+
+**Primary ref**:
+The one Tracked ref of a Repository that a search sees unless the caller asks for a ref; the others are found only by naming their ref.
+_Avoid_: default branch (GitLab's setting, which may differ), main
+
 **Incomplete listing**:
-A Corpus's list of Documents that is missing a part the Corpus could not list (a Root, a page's Attachments); since a missing Document may still exist, a Sync removes nothing and a Rebuild is refused while a listing is incomplete.
+A Corpus's list of Documents that is missing a part the Corpus could not list (a Root, a page's Attachments, a Tracked ref that no longer exists); since a missing Document may still exist, a Sync removes nothing from that part, though it still removes from the parts it listed, and a Rebuild is refused while a listing is incomplete.
 _Avoid_: partial export, listing error
 
 **Media type**:
@@ -33,7 +45,7 @@ The kind of content a Corpus supplies for a Document (PDF, HTML, plain text), wh
 _Avoid_: mime, file type, extension
 
 **Space**:
-A named grouping of Documents (a Confluence space, or a top-level folder) that a search can be narrowed to.
+A named grouping of Documents (a Confluence space, a top-level folder, or the full path of the GitLab group directly holding a Repository) that a search can be narrowed to.
 _Avoid_: project, namespace, category
 
 **Passage**:
@@ -41,11 +53,11 @@ A chunk of a Document that is indexed, and embedded too in a Hybrid index, and r
 _Avoid_: chunk, node, snippet
 
 **Sync**:
-Bringing the Knowledge index into agreement with a Corpus, adding, replacing and removing Documents as they changed.
+Bringing the Knowledge index into agreement with one Corpus, adding, replacing and removing that Corpus's Documents as they changed, and leaving every other Corpus's Documents alone.
 _Avoid_: ingest, refresh, update
 
 **Rebuild**:
-A Sync that adds every Document again into a fresh index (embedding it, in a Hybrid index), needed when the Retrieval mode, embedding model or chunking changes, and promoted to live only if it is complete enough. A Document whose embedding keeps failing counts as failed, and the Rebuild is promoted only if failures stay within the threshold.
+A Sync of every declared Corpus at once that adds every Document again into a fresh index (embedding it, in a Hybrid index), needed when the Retrieval mode, embedding model or chunking changes, and promoted to live only if it is complete enough. A Document whose embedding keeps failing counts as failed, and the Rebuild is promoted only if failures stay within the threshold.
 _Avoid_: reindex, full refresh
 
 **Live index**:
@@ -57,7 +69,7 @@ The one generation kept from before the last promotion, which an operator can sw
 _Avoid_: backup, snapshot, old collection
 
 **Index format**:
-What an index records about how it was built (schema version, Retrieval mode, sparse encoder parameters, chunk size and overlap, and for a Hybrid index the embedding model name and dimension), compared with the running code after an upgrade. An index whose format differs is served as a Read-only index if it can still be searched and refused if it cannot; it is never rebuilt automatically. An index whose records are corrupt or unreadable is reported, never treated as empty.
+What an index records about how it was built (schema version, Retrieval mode, sparse encoder parameters, chunk size and overlap for prose and for code, the languages whose code is split by its syntax, and for a Hybrid index the embedding model name and dimension), compared with the running code after an upgrade. An index whose format differs is served as a Read-only index if it can still be searched and refused if it cannot; it is never rebuilt automatically. An index whose records are corrupt or unreadable is reported, never treated as empty.
 _Avoid_: version, schema
 
 **Retrieval mode**:
