@@ -330,3 +330,61 @@ def test_documents_listed_under_no_part_are_held_back_by_any_failure(index):
 
     assert (report.removed, report.failed) == (0, 1)
     assert index.get_document("default:garage/battery") is not None
+
+
+def named(name, documents):
+    return InMemoryCorpus(documents, name=name)
+
+
+def test_a_sync_of_one_corpus_runs_to_completion_while_another_corpus_syncs(index):
+    outcome = []
+
+    class LongCorpus(InMemoryCorpus):
+        def fetch(self, document_id):
+            outcome.append(index.sync(named("code", DOCUMENTS[1:2])))
+            return super().fetch(document_id)
+
+    index.sync(LongCorpus(DOCUMENTS[:1], name="confluence"))
+
+    assert [r.added for r in outcome] == [1]
+    assert index.search("ORA-12154")[0].document_id == "code:dba/ora-12154"
+    assert index.search("ORA-00942")[0].document_id == "confluence:dba/ora-00942"
+
+
+def test_a_second_sync_of_the_same_corpus_is_refused_while_other_corpora_sync_freely(index):
+    from local_rag import SyncInProgress
+
+    outcome = []
+
+    class ReentrantCorpus(InMemoryCorpus):
+        def fetch(self, document_id):
+            with pytest.raises(SyncInProgress):
+                index.sync(named("confluence", DOCUMENTS))
+            outcome.append(index.sync(named("code", DOCUMENTS[1:2])).added)
+            return super().fetch(document_id)
+
+    index.sync(ReentrantCorpus(DOCUMENTS[:1], name="confluence"))
+
+    assert outcome == [1]
+
+
+def test_a_corpus_whose_sync_crashed_can_be_synced_once_its_lock_is_stale():
+    from qdrant_client import QdrantClient
+
+    from local_rag import SyncInProgress
+    from local_rag.exclusive import ExclusiveRun
+
+    client = QdrantClient(location=":memory:")
+    settings = Settings(sync_lock_stale_after=0.2)
+    index = KnowledgeIndex(settings, FakeModelGateway(), client=client)
+    crashed = ExclusiveRun(client, f"{settings.collection}.sync-lock.code",
+                           stale_after=0.2, heartbeat_every=3600)
+    holder = crashed.hold()
+    holder.__enter__()  # never exits: the process died, and no heartbeat is left
+
+    with pytest.raises(SyncInProgress):
+        index.sync(named("code", DOCUMENTS))
+    assert index.sync(named("confluence", DOCUMENTS)).added == 3  # another Corpus is unaffected
+    time.sleep(0.3)
+
+    assert index.sync(named("code", DOCUMENTS)).added == 3
