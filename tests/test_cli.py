@@ -5,10 +5,11 @@ import pytest
 import fake_confluence
 from qdrant_client import QdrantClient
 
-from local_rag import KnowledgeIndex, Settings
 from local_rag.cli import main
+from local_rag.exclusive import ExclusiveRun
 from local_rag.fakes import FakeModelGateway
 from conftest import SYNONYMS
+from index_states import NAMES
 from fake_litellm_server import FakeLiteLLM
 
 
@@ -337,9 +338,7 @@ def test_the_real_model_gateway_is_built_from_the_environment(folder):
 
 
 def test_a_second_run_while_one_is_running_is_refused(cli, folder):
-    index = KnowledgeIndex(Settings(), cli.gateway, client=cli.client)
-
-    with index._exclusive.hold("Sync"):
+    with ExclusiveRun(cli.client, NAMES.lock).hold("Sync"):
         code, _, err = cli("sync", "docs")
 
     assert code == 1 and "another run holds the lock" in err

@@ -7,20 +7,20 @@ from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from local_rag.sparse import SparseParams
 from conftest import DOCUMENTS
-from test_rebuild import collections, legacy_index
+from index_states import NAMES, collections, generations_in, legacy_index
 from test_sync import CountingGateway, revised
 
 
-def after_an_upgrade(index, gateway=None, **changed):
+def after_an_upgrade(index, client, gateway=None, **changed):
     """The same Qdrant, opened by code whose settings differ from what wrote the index."""
     settings = dataclasses.replace(index._settings, **changed)
-    return KnowledgeIndex(settings, gateway or index._gateway, client=index._client)
+    return KnowledgeIndex(settings, gateway or index._gateway, client=client)
 
 
-def test_an_index_written_with_the_same_format_is_served_and_synced_as_usual(index):
+def test_an_index_written_with_the_same_format_is_served_and_synced_as_usual(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
 
-    same = after_an_upgrade(index)
+    same = after_an_upgrade(index, client)
 
     assert same.status().access == Access.READ_WRITE
     assert same.sync(InMemoryCorpus(DOCUMENTS)).unchanged == 3
@@ -33,9 +33,9 @@ def test_an_index_written_with_the_same_format_is_served_and_synced_as_usual(ind
     ({"chunk_overlap": 20}, "chunk overlap"),
 ])
 def test_a_differing_but_searchable_index_is_served_read_only_with_a_warning(
-        index, changed, difference):
+        index, changed, difference, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
-    upgraded = after_an_upgrade(index, **changed)
+    upgraded = after_an_upgrade(index, client, **changed)
 
     status = upgraded.status()
 
@@ -47,9 +47,9 @@ def test_a_differing_but_searchable_index_is_served_read_only_with_a_warning(
     assert upgraded.get_document("default:garage/battery") == DOCUMENTS[2].text
 
 
-def test_a_read_only_index_is_logged_when_first_served(index, caplog):
+def test_a_read_only_index_is_logged_when_first_served(index, caplog, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
-    upgraded = after_an_upgrade(index, embed_model="embed-v2")
+    upgraded = after_an_upgrade(index, client, embed_model="embed-v2")
 
     upgraded.search("ORA-00942")
     upgraded.search("ORA-12154")
@@ -58,12 +58,12 @@ def test_a_read_only_index_is_logged_when_first_served(index, caplog):
     assert len(warnings) == 1 and "embedding model" in warnings[0].getMessage()
 
 
-def test_a_read_only_index_refuses_a_sync_and_never_rebuilds_on_its_own():
+def test_a_read_only_index_refuses_a_sync_and_never_rebuilds_on_its_own(client):
     gateway = CountingGateway()
-    index = KnowledgeIndex(Settings(), gateway)
+    index = KnowledgeIndex(Settings(), gateway, client=client)
     index.sync(InMemoryCorpus(DOCUMENTS))
-    embedded, before = len(gateway.embedded), collections(index)
-    upgraded = after_an_upgrade(index, embed_model="embed-v2")
+    embedded, before = len(gateway.embedded), collections(client)
+    upgraded = after_an_upgrade(index, client, embed_model="embed-v2")
 
     with pytest.raises(IndexReadOnly, match="Rebuild"):
         upgraded.sync(InMemoryCorpus([*DOCUMENTS[:2], revised(DOCUMENTS[2], "2")]))
@@ -71,14 +71,13 @@ def test_a_read_only_index_refuses_a_sync_and_never_rebuilds_on_its_own():
     upgraded.status()
 
     assert len(gateway.embedded) == embedded  # nothing re-embedded
-    assert {n for n in collections(index) if ".gen-" in n} == \
-        {n for n in before if ".gen-" in n}
+    assert generations_in(client) == {n for n in before if NAMES.is_generation(n)}
     assert upgraded.get_document("default:garage/battery") == DOCUMENTS[2].text
 
 
-def test_a_rebuild_makes_a_read_only_index_current_again(index):
+def test_a_rebuild_makes_a_read_only_index_current_again(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
-    upgraded = after_an_upgrade(index, embed_model="embed-v2")
+    upgraded = after_an_upgrade(index, client, embed_model="embed-v2")
 
     report = upgraded.rebuild([InMemoryCorpus(DOCUMENTS)])
 
@@ -91,10 +90,10 @@ def test_a_rebuild_makes_a_read_only_index_current_again(index):
     assert upgraded.status().access == Access.READ_ONLY
 
 
-def test_an_index_of_another_embedding_dimension_is_refused(index):
+def test_an_index_of_another_embedding_dimension_is_refused(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
     upgraded = after_an_upgrade(
-        index, FakeModelGateway(dimension=32), embed_model="embed-v2")
+        index, client, FakeModelGateway(dimension=32), embed_model="embed-v2")
 
     status = upgraded.status()
 
@@ -139,9 +138,9 @@ def test_switching_back_to_a_refused_index_is_itself_refused(index, monkeypatch)
     assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
 
 
-def test_an_index_of_another_dimension_is_refused_even_under_the_same_model_name(index):
+def test_an_index_of_another_dimension_is_refused_even_under_the_same_model_name(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
-    upgraded = after_an_upgrade(index, FakeModelGateway(dimension=32))  # same settings
+    upgraded = after_an_upgrade(index, client, FakeModelGateway(dimension=32))  # same settings
 
     status = upgraded.status()
 
@@ -151,21 +150,21 @@ def test_an_index_of_another_dimension_is_refused_even_under_the_same_model_name
         upgraded.search("ORA-00942")
 
 
-def test_an_index_without_a_recorded_format_is_refused_when_the_dimension_differs(index):
-    legacy_index(index, DOCUMENTS)
-    upgraded = after_an_upgrade(index, FakeModelGateway(dimension=32))
+def test_an_index_without_a_recorded_format_is_refused_when_the_dimension_differs(index, client):
+    legacy_index(client, index._gateway, DOCUMENTS)
+    upgraded = after_an_upgrade(index, client, FakeModelGateway(dimension=32))
 
     with pytest.raises(IndexRefused, match="dimension"):
         upgraded.search("ORA-00942")
 
 
-def test_an_unreachable_gateway_does_not_hide_a_differing_index_from_status(index):
+def test_an_unreachable_gateway_does_not_hide_a_differing_index_from_status(index, client):
     class Unreachable(FakeModelGateway):
         def embed_query(self, text):
             raise ConnectionError("gateway down")
 
     index.sync(InMemoryCorpus(DOCUMENTS))
-    upgraded = after_an_upgrade(index, Unreachable(), embed_model="embed-v2")
+    upgraded = after_an_upgrade(index, client, Unreachable(), embed_model="embed-v2")
 
     status = upgraded.status()
 
@@ -174,7 +173,7 @@ def test_an_unreachable_gateway_does_not_hide_a_differing_index_from_status(inde
 
 
 def test_an_index_built_before_chunks_were_recorded_is_served_read_only_until_a_rebuild(
-        index, monkeypatch):
+        index, monkeypatch, client):
     real = IndexFormat.to_payload
 
     def without_chunks(self):  # what an earlier version wrote
@@ -183,7 +182,7 @@ def test_an_index_built_before_chunks_were_recorded_is_served_read_only_until_a_
     monkeypatch.setattr(IndexFormat, "to_payload", without_chunks)
     index.sync(InMemoryCorpus(DOCUMENTS))
     monkeypatch.setattr(IndexFormat, "to_payload", real)
-    upgraded = after_an_upgrade(index)
+    upgraded = after_an_upgrade(index, client)
 
     status = upgraded.status()
 
@@ -196,12 +195,12 @@ def test_an_index_built_before_chunks_were_recorded_is_served_read_only_until_a_
     assert upgraded.status().access == Access.READ_WRITE
 
 
-def test_changed_chunk_settings_never_trigger_a_rebuild_on_their_own():
+def test_changed_chunk_settings_never_trigger_a_rebuild_on_their_own(client):
     gateway = CountingGateway()
-    index = KnowledgeIndex(Settings(), gateway)
+    index = KnowledgeIndex(Settings(), gateway, client=client)
     index.sync(InMemoryCorpus(DOCUMENTS))
-    embedded, before = len(gateway.embedded), collections(index)
-    upgraded = after_an_upgrade(index, chunk_tokens=200)
+    embedded, before = len(gateway.embedded), collections(client)
+    upgraded = after_an_upgrade(index, client, chunk_tokens=200)
 
     with pytest.raises(IndexReadOnly, match="chunk size"):
         upgraded.sync(InMemoryCorpus(DOCUMENTS))
@@ -209,12 +208,12 @@ def test_changed_chunk_settings_never_trigger_a_rebuild_on_their_own():
     upgraded.status()
 
     assert len(gateway.embedded) == embedded
-    assert collections(index) == before
+    assert collections(client) == before
 
 
-def test_a_rebuild_records_the_chunk_settings_it_used(index):
+def test_a_rebuild_records_the_chunk_settings_it_used(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
-    upgraded = after_an_upgrade(index, chunk_tokens=200, chunk_overlap=20)
+    upgraded = after_an_upgrade(index, client, chunk_tokens=200, chunk_overlap=20)
 
     assert upgraded.rebuild([InMemoryCorpus(DOCUMENTS)]).promoted
 
@@ -232,7 +231,7 @@ def test_an_unreadable_recorded_chunk_size_is_reported_as_an_unreadable_format()
 
 
 def test_an_index_built_before_corpus_ownership_was_recorded_is_served_read_only_until_a_rebuild(
-        index, monkeypatch):
+        index, monkeypatch, client):
     real = IndexFormat.to_payload
 
     def without_ownership(self):  # what an earlier version wrote
@@ -241,7 +240,7 @@ def test_an_index_built_before_corpus_ownership_was_recorded_is_served_read_only
     monkeypatch.setattr(IndexFormat, "to_payload", without_ownership)
     index.sync(InMemoryCorpus(DOCUMENTS))
     monkeypatch.setattr(IndexFormat, "to_payload", real)
-    upgraded = after_an_upgrade(index)
+    upgraded = after_an_upgrade(index, client)
 
     status = upgraded.status()
 
@@ -254,8 +253,8 @@ def test_an_index_built_before_corpus_ownership_was_recorded_is_served_read_only
     assert upgraded.status().access == Access.READ_WRITE
 
 
-def test_a_changed_query_instruction_leaves_the_index_current_and_needs_no_rebuild(index):
-    upgraded = after_an_upgrade(index, query_instruction="Find the passage that answers the question")
+def test_a_changed_query_instruction_leaves_the_index_current_and_needs_no_rebuild(index, client):
+    upgraded = after_an_upgrade(index, client, query_instruction="Find the passage that answers the question")
 
     assert upgraded.status().access == Access.READ_WRITE
     upgraded.sync(InMemoryCorpus(DOCUMENTS))

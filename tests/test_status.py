@@ -6,8 +6,8 @@ from local_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settin
 from local_rag.corpus import InMemoryCorpus
 from local_rag.sparse import SparseParams
 from conftest import DOCUMENTS
+from index_states import collections, overwrite_the_last_sync
 from test_index_format import after_an_upgrade
-from test_rebuild import collections
 from test_sync import FlakyCorpus
 
 
@@ -20,12 +20,12 @@ def test_status_of_an_index_nothing_was_synced_into_is_empty_and_writable(index)
     assert status.access == "read-write" and status.warnings == ()
 
 
-def test_status_reports_the_live_generation_counts_and_format(index):
+def test_status_reports_the_live_generation_counts_and_format(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
 
     status = index.status()
 
-    assert status.generation in collections(index)
+    assert status.generation in collections(client)
     assert status.generation.startswith("knowledge.gen-")
     assert (status.documents, status.passages) == (3, 3)
     assert status.format == IndexFormat(
@@ -92,17 +92,17 @@ def test_status_reports_the_last_rebuild_promoted_or_refused(index):
     assert "1 of 3 Documents failed" in refused.detail
 
 
-def test_the_last_sync_is_kept_with_the_index_not_with_the_process(index):
+def test_the_last_sync_is_kept_with_the_index_not_with_the_process(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
 
-    other_process = KnowledgeIndex(Settings(), index._gateway, client=index._client)
+    other_process = KnowledgeIndex(Settings(), index._gateway, client=client)
 
     assert other_process.status().last_sync.outcome == "completed"
 
 
-def test_a_sync_refused_because_the_index_is_read_only_shows_in_status(index):
+def test_a_sync_refused_because_the_index_is_read_only_shows_in_status(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
-    upgraded = after_an_upgrade(index, embed_model="embed-v2")
+    upgraded = after_an_upgrade(index, client, embed_model="embed-v2")
     with pytest.raises(IndexReadOnly):
         upgraded.sync(InMemoryCorpus(DOCUMENTS))
 
@@ -111,12 +111,9 @@ def test_a_sync_refused_because_the_index_is_read_only_shows_in_status(index):
     assert (last.outcome, "read-only" in last.detail) == ("failed", True)
 
 
-def test_an_unreadable_last_sync_record_is_reported_without_failing_status(index):
-    from qdrant_client import models
-
+def test_an_unreadable_last_sync_record_is_reported_without_failing_status(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
-    index._client.upsert("knowledge.last-sync", points=[
-        models.PointStruct(id=1, vector=[1.0], payload={"kind": "Sync"})], wait=True)
+    overwrite_the_last_sync(client, {"kind": "Sync"})
 
     status = index.status()
 

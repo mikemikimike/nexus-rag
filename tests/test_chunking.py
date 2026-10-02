@@ -1,9 +1,13 @@
 import dataclasses
 
+from qdrant_client import QdrantClient, models
+
 from local_rag import KnowledgeIndex, Settings
+from local_rag.chunker import Chunker
 from local_rag.corpus import Document, InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from conftest import DOCUMENTS
+from index_states import NAMES
 from test_sync import CountingGateway, revised
 
 SMALL = Settings(chunk_tokens=40, chunk_overlap=5)
@@ -21,12 +25,10 @@ def manual(text: str, *, id: str = "wiki/manual", version: str = "1") -> Documen
                     space="OPS", version=version, text=text)
 
 
-def passages_of(index: KnowledgeIndex, document_id: str) -> list:
-    """Every Passage of one Document, found through the query client directly."""
-    from qdrant_client import models
-    live = index.status().generation
-    records, _ = index._client.scroll(
-        live, scroll_filter=models.Filter(must=[
+def passages_of(client: QdrantClient, document_id: str) -> list:
+    """Every Passage of one Document in the Live index, read from Qdrant directly."""
+    records, _ = client.scroll(
+        NAMES.live, scroll_filter=models.Filter(must=[
             models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))],
             must_not=[models.FieldCondition(
                 key="kind", match=models.MatchValue(value="document"))]),
@@ -34,15 +36,15 @@ def passages_of(index: KnowledgeIndex, document_id: str) -> list:
     return records
 
 
-def test_a_document_longer_than_one_chunk_is_indexed_as_several_passages():
-    index = KnowledgeIndex(SMALL, FakeModelGateway())
+def test_a_document_longer_than_one_chunk_is_indexed_as_several_passages(client):
+    index = KnowledgeIndex(SMALL, FakeModelGateway(), client=client)
 
     index.sync(InMemoryCorpus([manual(long_text(30))]))
 
     status = index.status()
     assert status.documents == 1
     assert status.passages > 1
-    assert len(passages_of(index, "default:wiki/manual")) == status.passages
+    assert len(passages_of(client, "default:wiki/manual")) == status.passages
 
 
 def test_a_short_document_still_yields_one_passage(index, corpus):
@@ -95,8 +97,8 @@ def test_the_full_text_is_still_the_whole_document_however_many_passages():
     assert index.get_document("default:wiki/manual") == text
 
 
-def indexed(corpus_documents, settings=SMALL, gateway=None):
-    index = KnowledgeIndex(settings, gateway or FakeModelGateway())
+def indexed(corpus_documents, settings=SMALL, gateway=None, client=None):
+    index = KnowledgeIndex(settings, gateway or FakeModelGateway(), client=client)
     index.sync(InMemoryCorpus(corpus_documents))
     return index
 
@@ -134,8 +136,8 @@ def test_a_document_that_grows_gains_passages():
     assert index.status().passages > 1
 
 
-def test_removing_a_document_removes_all_its_passages():
-    index = indexed([manual(long_text(30)), *DOCUMENTS])
+def test_removing_a_document_removes_all_its_passages(client):
+    index = indexed([manual(long_text(30)), *DOCUMENTS], client=client)
     assert index.status().passages > 4
 
     report = index.sync(InMemoryCorpus(DOCUMENTS))
@@ -143,25 +145,26 @@ def test_removing_a_document_removes_all_its_passages():
     assert report.removed == 1
     status = index.status()
     assert (status.documents, status.passages) == (3, 3)
-    assert passages_of(index, "default:wiki/manual") == []
+    assert passages_of(client, "default:wiki/manual") == []
     assert index.get_document("default:wiki/manual") is None
 
 
 def test_passage_ids_are_the_same_every_time_a_document_is_indexed():
-    first = indexed([manual(long_text(30))])
-    second = indexed([manual(long_text(30))])
+    first, second = QdrantClient(location=":memory:"), QdrantClient(location=":memory:")
+    indexed([manual(long_text(30))], client=first)
+    indexed([manual(long_text(30))], client=second)
 
-    ids = lambda index: sorted(p.id for p in passages_of(index, "default:wiki/manual"))
+    ids = lambda client: sorted(p.id for p in passages_of(client, "default:wiki/manual"))
     assert ids(first) == ids(second) and len(ids(first)) > 1
 
 
-def test_resyncing_the_same_text_under_a_new_version_does_not_duplicate_passages():
-    index = indexed([manual(long_text(30))])
-    before = sorted(p.id for p in passages_of(index, "default:wiki/manual"))
+def test_resyncing_the_same_text_under_a_new_version_does_not_duplicate_passages(client):
+    index = indexed([manual(long_text(30))], client=client)
+    before = sorted(p.id for p in passages_of(client, "default:wiki/manual"))
 
     index.sync(InMemoryCorpus([manual(long_text(30), version="2")]))
 
-    assert sorted(p.id for p in passages_of(index, "default:wiki/manual")) == before
+    assert sorted(p.id for p in passages_of(client, "default:wiki/manual")) == before
 
 
 def test_a_failed_embed_of_a_changed_long_document_keeps_its_old_passages_searchable():
@@ -185,17 +188,16 @@ def test_a_failed_embed_of_a_changed_long_document_keeps_its_old_passages_search
     assert "QQ-1111" in index.search("QQ-1111")[0].text
 
 
-def test_a_crash_after_writing_the_new_passages_never_hides_the_document():
-    index = indexed([manual(long_text(40, {39: "Old tail marker QQ-1111."}))])
-    real_delete = index._client.delete
+def test_a_crash_after_writing_the_new_passages_never_hides_the_document(client, monkeypatch):
+    index = indexed([manual(long_text(40, {39: "Old tail marker QQ-1111."}))], client=client)
 
     def crash(*args, **kwargs):
         raise ConnectionError("Qdrant went away")
 
-    index._client.delete = crash
-    report = index.sync(InMemoryCorpus([manual(long_text(10, {9: "New marker QQ-2222."}),
-                                               version="2")]))
-    index._client.delete = real_delete
+    with monkeypatch.context() as crashing:
+        crashing.setattr(client, "delete", crash)
+        report = index.sync(InMemoryCorpus([manual(long_text(10, {9: "New marker QQ-2222."}),
+                                                   version="2")]))
 
     assert report.failed == 1
     assert index.search("QQ-2222")[0].document_id == "default:wiki/manual"  # new text already live
@@ -216,14 +218,14 @@ def test_the_per_document_cap_still_limits_passages_of_one_document():
     assert len(wider.search("ZX-9000", k=10)) == 4
 
 
-def test_a_document_that_chunks_to_nothing_is_still_found_by_its_title():
+def test_a_document_that_chunks_to_nothing_is_still_found_by_its_title(monkeypatch):
     # Extraction refuses empty text, so this is only a guard for the index's own contract.
-    index = KnowledgeIndex(SMALL, FakeModelGateway())
-    index._add(manual("", id="wiki/empty"), "knowledge")
-    index._client.delete_collection("knowledge.generations")
+    monkeypatch.setattr(Chunker, "pieces", lambda self, text, media_type="text/plain": [])
+    index = indexed([manual("Nothing a splitter keeps.", id="wiki/empty")])
 
-    assert index._client.count("knowledge", exact=True).count == 2  # a Passage and the text
-    assert index.search("Operations")[0].document_id == "wiki/empty"
+    status = index.status()
+    assert (status.documents, status.passages) == (1, 1)
+    assert index.search("Operations")[0].document_id == "default:wiki/empty"
 
 
 def test_a_rebuild_splits_every_document_and_counts_its_passages():

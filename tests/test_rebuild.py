@@ -7,6 +7,8 @@ from local_rag import (
 from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from conftest import DOCUMENTS
+from index_states import (
+    NAMES, collections, generations_in, legacy_index, take_over_the_lock)
 from test_sync import CountingGateway, FlakyCorpus, revised
 
 
@@ -223,39 +225,33 @@ def test_switching_back_during_a_sync_is_refused(index):
     assert refused
 
 
-def collections(index) -> set[str]:
-    return {c.name for c in index._client.get_collections().collections}
-
-
-def test_cleanup_only_removes_generations_the_system_created(index):
+def test_cleanup_only_removes_generations_the_system_created(index, client):
     from qdrant_client import models
 
     # Collections in the same Qdrant that merely look like ours by name.
     lookalikes = {"knowledge.gen-0123456789ab", "knowledge.previous-backup",
                   "knowledge_old", "knowledge-2024", "knowledge.generations-old"}
     for name in lookalikes:
-        index._client.create_collection(
+        client.create_collection(
             name, vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE))
 
     for text in ("first", "second", "third"):
         index.rebuild([corpus_saying(text)])
     index.rebuild([FlakyCorpus(DOCUMENTS, failing={"dba/ora-12154"})])
 
-    assert lookalikes <= collections(index)
+    assert lookalikes <= collections(client)
 
 
-def test_generations_left_behind_do_not_accumulate(index):
+def test_generations_left_behind_do_not_accumulate(index, client):
     for text in ("first", "second", "third", "fourth"):
         index.rebuild([corpus_saying(text)])
     index.rebuild([FlakyCorpus(DOCUMENTS, failing={"dba/ora-12154"})])
 
-    generations = {n for n in collections(index) if ".gen-" in n}
-
-    assert len(generations) == 2
+    assert len(generations_in(client)) == 2
 
 
 def test_a_failed_cleanup_does_not_mask_the_error_and_is_swept_by_the_next_rebuild(
-        index, monkeypatch):
+        index, client, monkeypatch):
     class Crash(BaseException):
         pass
 
@@ -265,38 +261,36 @@ def test_a_failed_cleanup_does_not_mask_the_error_and_is_swept_by_the_next_rebui
                 raise Crash()
             return super().fetch(document_id)
 
-    def broken_discard(generation):
-        raise OSError("qdrant went away")
+    real_delete = client.delete_collection
+
+    def broken_delete(collection):
+        if collection in generations_in(client):
+            raise OSError("qdrant went away")
+        return real_delete(collection)
 
     index.rebuild([InMemoryCorpus(DOCUMENTS)])
     with monkeypatch.context() as broken:
-        broken.setattr(index._generations, "discard", broken_discard)
+        broken.setattr(client, "delete_collection", broken_delete)
         with pytest.raises(Crash):
             index.rebuild([CrashingCorpus(DOCUMENTS)])
-    assert len({n for n in collections(index) if ".gen-" in n}) == 2  # live + the stray
+    assert len(generations_in(client)) == 2  # live + the stray
 
     index.rebuild([InMemoryCorpus(DOCUMENTS)])
 
-    assert len({n for n in collections(index) if ".gen-" in n}) == 2  # live + previous
+    assert len(generations_in(client)) == 2  # live + previous
 
 
-def test_a_sync_of_nothing_leaves_no_generation_behind(index):
+def test_a_sync_of_nothing_leaves_no_generation_behind(index, client):
     index.sync(InMemoryCorpus([]))
     index.sync(FlakyCorpus(DOCUMENTS, failing={d.id for d in DOCUMENTS}))
 
-    assert not {n for n in collections(index) if ".gen-" in n or n.endswith(".generations")}
+    assert not generations_in(client) and NAMES.registry not in collections(client)
     assert index.sync(InMemoryCorpus(DOCUMENTS)).added == 3
 
 
-def legacy_index(index, documents):
-    """Write the plain collection that earlier versions kept, with no generation records."""
-    for document in documents:
-        index._add(document, "knowledge")
-    index._client.delete_collection("knowledge.generations")
-
-
-def test_an_index_written_by_an_earlier_version_keeps_being_served_but_not_synced(index):
-    legacy_index(index, DOCUMENTS)
+def test_an_index_written_by_an_earlier_version_keeps_being_served_but_not_synced(
+        index, client, gateway):
+    legacy_index(client, gateway, DOCUMENTS)
 
     with pytest.raises(IndexReadOnly, match="not recorded"):
         index.sync(InMemoryCorpus([*DOCUMENTS[:2], revised(DOCUMENTS[2], "2", "New.")]))
@@ -306,8 +300,9 @@ def test_an_index_written_by_an_earlier_version_keeps_being_served_but_not_synce
     assert index.list_spaces() == ["DBA", "GARAGE"]
 
 
-def test_a_rebuild_replaces_an_index_written_by_an_earlier_version_and_cleans_it_up(index):
-    legacy_index(index, DOCUMENTS)
+def test_a_rebuild_replaces_an_index_written_by_an_earlier_version_and_cleans_it_up(
+        index, client, gateway):
+    legacy_index(client, gateway, DOCUMENTS)
 
     index.rebuild([corpus_saying("first")])
     index.switch_back()
@@ -316,7 +311,7 @@ def test_a_rebuild_replaces_an_index_written_by_an_earlier_version_and_cleans_it
     index.switch_back()
     index.rebuild([corpus_saying("second")])
 
-    assert "knowledge" not in collections(index)
+    assert NAMES.plain not in collections(client)
     assert index.get_document("default:dba/ora-00942") == "second"
 
 
@@ -347,21 +342,21 @@ def test_a_rebuild_threshold_outside_zero_to_one_is_rejected(threshold):
         Settings(rebuild_failure_threshold=threshold)
 
 
-def test_a_rebuild_that_lost_the_lock_does_not_promote(index):
+def test_a_rebuild_that_lost_the_lock_does_not_promote(index, client):
     from local_rag.exclusive import LockLost
 
     index.sync(InMemoryCorpus(DOCUMENTS))
 
     class StallingCorpus(InMemoryCorpus):
         def fetch(self, document_id):
-            index._client.delete_collection("knowledge.sync-lock")  # taken over meanwhile
+            take_over_the_lock(client)
             return super().fetch(document_id)
 
     with pytest.raises(LockLost):
         index.rebuild([StallingCorpus(DOCUMENTS)])
 
     assert index.get_document("default:dba/ora-00942") == DOCUMENTS[0].text
-    assert len({n for n in collections(index) if ".gen-" in n}) == 1
+    assert len(generations_in(client)) == 1
 
 
 def test_a_rebuild_is_refused_while_any_part_of_a_listing_is_incomplete():

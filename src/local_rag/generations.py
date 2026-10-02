@@ -15,12 +15,13 @@ alias points at. Other collections in the same Qdrant, however their names start
 never touched. The registry also notes which generation was last made live, so that a
 Live index lost from Qdrant is reported as corrupt rather than read as a new, empty one.
 """
-import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from qdrant_client import QdrantClient, models
 
 from local_rag.index_format import IndexFormat
+from local_rag.index_names import IndexNames
 
 _REGISTRY_POINT = 1
 
@@ -44,12 +45,13 @@ class _Registry:
 
 
 class Generations:
-    def __init__(self, client: QdrantClient, name: str):
+    def __init__(self, client: QdrantClient, names: IndexNames):
         self._client = client
-        self._name = name
-        self._live_alias = f"{name}.live"
-        self._previous_alias = f"{name}.previous"
-        self._registry = f"{name}.generations"
+        self._name = names.plain
+        self._live_alias = names.live
+        self._previous_alias = names.previous
+        self._registry = names.registry
+        self._names = names
 
     def live(self) -> str | None:
         """The collection the Live index is, or None before anything was indexed."""
@@ -70,7 +72,7 @@ class Generations:
 
     def fresh_name(self) -> str:
         """A name for a new generation. It is recorded when the collection is created."""
-        return f"{self._name}.gen-{uuid.uuid4().hex[:12]}"
+        return self._names.fresh_generation()
 
     def record(self, generation: str, index_format: IndexFormat | None = None) -> None:
         """Note that the system is about to create this generation, so cleanup may remove it.
@@ -83,6 +85,13 @@ class Generations:
         if index_format is not None:
             registry.formats[generation] = index_format.to_payload()
         self._save(registry)
+
+    def create(self, generation: str, index_format: IndexFormat,
+               make: Callable[[], None]) -> None:
+        """Record the generation with its format, then ``make`` its collection. Recorded first,
+        so a crash part way leaves nothing that cleanup does not know of."""
+        self.record(generation, index_format)
+        make()
 
     def format_of(self, generation: str) -> IndexFormat | None:
         """The format recorded for a generation; None if none was (an earlier version's).

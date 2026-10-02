@@ -1,68 +1,29 @@
 import logging
 import time
-import uuid
-from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 
-from qdrant_client import QdrantClient, models
+from qdrant_client import QdrantClient
 
 from local_rag.chunker import Chunker, Piece
 from local_rag.corpus import (
-    CodeFile, Corpus, Document, DocumentRef, RawDocument, TrackedRef, check_corpus_name,
-    listing_failures, qualified_id)
+    Corpus, Document, DocumentRef, RawDocument, check_corpus_name, listing_failures,
+    qualified_id)
 from local_rag.exclusive import ExclusiveRun, Lease, SyncInProgress
 from local_rag.extraction import Extractor
 from local_rag.gateway import ModelGateway
 from local_rag.generations import CorruptIndex, Generations
 from local_rag.index_format import (
     Access, Assessment, IndexFormat, IndexReadOnly, IndexRefused, assess)
+from local_rag.index_names import IndexNames
 from local_rag.journal import Journal, LastSync
+from local_rag.passage_store import Narrowing, Passage, PassageStore, Written
 from local_rag.ranking import cap_per_document, rerank
 from local_rag.settings import RetrievalMode, Settings
 from local_rag.sparse import SparseEncoder
 
 log = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class Passage:
-    document_id: str
-    title: str
-    url: str
-    space: str
-    text: str
-    score: float
-    parent_id: str | None = None  # the page an Attachment belongs to
-    corpus: str | None = None  # None for an index built before named Corpora
-    code: CodeFile | None = None  # where a Passage of code was read
-    start_line: int | None = None  # 1-based, inclusive
-    end_line: int | None = None
-    symbol: str | None = None  # the class or function it sits in, if the splitter knows
-
-    @property
-    def line_range(self) -> str | None:
-        """``10-20``, or ``10`` for one line; None for a Passage that is not code."""
-        if self.start_line is None:
-            return None
-        if self.end_line in (None, self.start_line):
-            return str(self.start_line)
-        return f"{self.start_line}-{self.end_line}"
-
-    @property
-    def code_location(self) -> list[tuple[str, str]]:
-        """What names where a code Passage is, as (label, value): its file, lines and enclosing
-        symbol when known; empty for a Passage that is not code."""
-        if self.start_line is None:
-            return []
-        found = [("file", self.code.path if self.code else self.title),
-                 ("lines", self.line_range), ("symbol", self.symbol)]
-        return [(name, value) for name, value in found if value]
-
-    @property
-    def link(self) -> str:
-        """Where to read it: the Document's URL, at its lines for code (GitLab's anchor)."""
-        return self.url if self.start_line is None else f"{self.url}#L{self.line_range}"
 
 
 class SearchResults(list[Passage]):
@@ -144,14 +105,17 @@ class KnowledgeIndex:
         self._extractor = Extractor.from_settings(settings)
         self._chunker = Chunker.from_settings(settings, gateway)
         self._client = client or _connect(settings)
+        self._store = PassageStore(
+            self._client, payload_indexes=settings.qdrant_location != ":memory:")
         # By generation: a generation's format, once written, does not change.
         self._assessments: dict[str, Assessment] = {}
         # Why the embedding model failed the last time it was used; None if it worked.
         self._embedding_failure: str | None = None
-        self._journal = Journal(self._client, f"{settings.collection}.last-sync")
-        self._generations = Generations(self._client, settings.collection)
+        self._names = IndexNames(settings.collection)
+        self._journal = Journal(self._client, self._names.last_sync)
+        self._generations = Generations(self._client, self._names)
         # Held by a Rebuild or switch-back; a Sync holds only its own Corpus's lock.
-        self._exclusive = self._lock(f"{settings.collection}.sync-lock")
+        self._exclusive = self._lock(self._names.lock)
 
     def _lock(self, name: str) -> ExclusiveRun:
         return ExclusiveRun(
@@ -160,8 +124,7 @@ class KnowledgeIndex:
     @contextmanager
     def _syncing(self, corpus: str) -> Iterator[Lease]:
         """Hold one Corpus's Sync lock, unless a Rebuild holds the whole index."""
-        prefix = f"{self._settings.collection}.sync-lock."
-        with self._lock(prefix + corpus).hold("Sync") as lease:
+        with self._lock(self._names.corpus_lock(corpus)).hold("Sync") as lease:
             # The lock is taken before this check, and a Rebuild takes its lock before
             # checking for Syncs, so at least one of two racing runs sees the other.
             if self._exclusive.is_held():
@@ -171,13 +134,11 @@ class KnowledgeIndex:
     @contextmanager
     def _whole_index(self, what: str) -> Iterator[Lease]:
         """Hold the index-wide lock, unless some Corpus is being synced."""
-        prefix = f"{self._settings.collection}.sync-lock."
         with self._exclusive.hold(what) as lease:
             for collection in self._client.get_collections().collections:
-                if collection.name.startswith(prefix) and self._lock(collection.name).is_held():
-                    raise SyncInProgress(
-                        f"cannot start {what}: a Sync of "
-                        f"{collection.name.removeprefix(prefix)} is running")
+                corpus = self._names.corpus_of_lock(collection.name)
+                if corpus is not None and self._lock(collection.name).is_held():
+                    raise SyncInProgress(f"cannot start {what}: a Sync of {corpus} is running")
             yield lease
 
     def sync(self, corpus: Corpus) -> SyncReport:
@@ -199,7 +160,7 @@ class KnowledgeIndex:
         if live is not None:
             self._require_writable(live)
         target = live or self._generations.fresh_name()
-        indexed = self._indexed(live, corpus.name)
+        indexed = {} if live is None else self._store.stored(live, corpus.name)
         added = replaced = removed = unchanged = 0
         refs = corpus.list()
         unlisted = listing_failures(refs)
@@ -247,7 +208,7 @@ class KnowledgeIndex:
                  if not indexed[document_id].held_back_by(unlisted)}
         for document_id in stale:
             try:
-                self._remove(document_id, target)
+                self._store.remove(target, document_id)
             except Exception as error:
                 failures[document_id] = _describe(error)
             else:
@@ -261,7 +222,7 @@ class KnowledgeIndex:
         Returns the Live index. The check and the promotion are one short critical section,
         so two first Syncs of different Corpora cannot both promote.
         """
-        guard = self._lock(f"{self._settings.collection}.promote-lock")
+        guard = self._lock(self._names.promote_lock)
         while True:
             try:
                 with guard.hold("promotion"):
@@ -330,19 +291,13 @@ class KnowledgeIndex:
         """
         check_corpus_name(corpus)
         with self._exclusive.hold("Forget"):
-            if self._lock(f"{self._settings.collection}.sync-lock.{corpus}").is_held():
+            if self._lock(self._names.corpus_lock(corpus)).is_held():
                 raise SyncInProgress(f"cannot start Forget: a Sync of {corpus} is running")
             live = self._generations.live()
             if live is None:
                 return 0
             self._require_writable(live)
-            owned = models.Filter(must=[_match("corpus", corpus)])
-            documents = self._client.count(
-                live, exact=True, count_filter=models.Filter(
-                    must=[_match("corpus", corpus), _match("kind", _DOCUMENT_KIND)])).count
-            self._client.delete(
-                live, wait=True, points_selector=models.FilterSelector(filter=owned))
-            return documents
+            return self._store.forget(live, corpus)
 
     def _sweep(self) -> tuple[str, ...]:
         """Clean up after earlier runs, and say if the records it relies on had to be replaced."""
@@ -439,42 +394,17 @@ class KnowledgeIndex:
         serving, assessment = found
         limit = settings.top_k if k is None else k
         candidates = settings.hybrid_candidates
-        must = [_match(key, value) for key, value in
-                (("space", space), ("repository", repository), ("ref", ref))
-                if value is not None]
-        # Only a Passage marked non-primary is left out: other Corpora's carry no mark.
-        not_primary = [] if ref is not None else [_match("primary", False)]
-        in_space = models.Filter(must=must, must_not=not_primary)
-        prefetch = []
-        notice = None
+        vector = notice = None
         if assessment.dense:
             vector = None if assessment.embedding_unreachable else self._embed_query(query)
             if vector is None:
                 notice = _FALLBACK_NOTICE
-            else:
-                prefetch.append(models.Prefetch(
-                    query=vector, using="dense", limit=candidates, filter=in_space))
         elif settings.retrieval is RetrievalMode.HYBRID:
             notice = _NO_EMBEDDINGS_NOTICE
-        sparse = self._sparse.encode_query(query)
-        if sparse.indices:
-            prefetch.append(models.Prefetch(
-                query=models.SparseVector(indices=sparse.indices, values=sparse.values),
-                using="bm25", limit=candidates, filter=in_space))
-        if not prefetch:
-            return SearchResults(notice=notice)
-        points = self._client.query_points(
-            serving, prefetch=prefetch,
-            query=models.FusionQuery(fusion=models.Fusion.RRF),
-            limit=max(limit, candidates), with_payload=True).points
-        passages = [Passage(
-            document_id=p.payload["document_id"], title=p.payload["title"],
-            url=p.payload["url"], space=p.payload["space"], text=p.payload["text"],
-            score=float(p.score), parent_id=p.payload.get("parent_id"),
-            corpus=p.payload.get("corpus"), code=_code_file(p.payload),
-            start_line=p.payload.get("start_line"), end_line=p.payload.get("end_line"),
-            symbol=p.payload.get("symbol"))
-            for p in points]
+        passages = self._store.search(
+            serving, dense=vector, sparse=self._sparse.encode_query(query),
+            narrowing=Narrowing(space, repository, ref), candidates=candidates,
+            limit=max(limit, candidates))
         passages = cap_per_document(passages, settings.max_passages_per_document)
         if settings.rerank:
             passages = rerank(self._gateway, query, passages)
@@ -521,7 +451,7 @@ class KnowledgeIndex:
         status = self._status(verify_dimension=True)
         if declared is None or status.generation is None:
             return status
-        undeclared = sorted(self._indexed_corpora(status.generation) - set(declared))
+        undeclared = sorted(self._store.corpora(status.generation) - set(declared))
         return replace(status, warnings=(*status.warnings, *(
             f"Corpus {name!r} has Documents in the index but is undeclared; they stay "
             f"searchable until `forget {name}` removes them, or a Rebuild leaves them out"
@@ -556,13 +486,10 @@ class KnowledgeIndex:
                 return IndexStatus(
                     None, Access.READ_WRITE, 0, 0, None, unreadable, last_sync, corpora)
             assessment = self._assessment(live, verify_dimension=verify_dimension)
-            documents = self._client.count(
-                live, count_filter=models.Filter(must=[_match("kind", _DOCUMENT_KIND)]),
-                exact=True).count
-            total = self._client.count(live, exact=True).count
+            documents, passages = self._store.counts(live)
             return IndexStatus(
                 generation=live, access=assessment.access, documents=documents,
-                passages=total - documents, format=self._generations.format_of(live),
+                passages=passages, format=self._generations.format_of(live),
                 warnings=(*assessment.warnings, *unreadable), last_sync=last_sync,
                 corpora=corpora)
         except CorruptIndex as error:
@@ -614,18 +541,15 @@ class KnowledgeIndex:
                 return None
             return len(vector)
 
-        params = self._client.get_collection(generation).config.params
-        if not (isinstance(params.vectors, dict)
-                and "bm25" in (params.sparse_vectors or {})):
-            raise CorruptIndex(f"{generation} is not a Knowledge index collection")
-        dense = params.vectors.get("dense")  # a Keyword-only index has none
+        dimension = self._store.dense_size(generation)  # a Keyword-only index has none
         recorded = self._generations.format_of(generation)
-        if recorded is not None and (recorded.retrieval is RetrievalMode.HYBRID) != bool(dense):
+        dense = dimension is not None
+        if recorded is not None and (recorded.retrieval is RetrievalMode.HYBRID) != dense:
             raise CorruptIndex(
                 f"{generation} records {recorded.retrieval.value} retrieval but its collection "
                 f"{'has' if dense else 'has no'} dense vectors")
         assessment = assess(
-            recorded, dense.size if dense else None,
+            recorded, dimension,
             self._settings, running_dimension if verify_dimension else None)
         if verify_dimension and reachable:  # an unverified answer is worth asking for again
             self._assessments[generation] = assessment
@@ -633,38 +557,6 @@ class KnowledgeIndex:
                 log.warning("%s", _explain(
                     f"index {generation} is {assessment.access}", assessment))
         return assessment
-
-    def _indexed(self, collection: str | None, corpus: str) -> dict[str, "_Stored"]:
-        """What the index holds per Document id, among the Documents ``corpus`` owns.
-
-        More than one version means an interrupted replace, so the Document is re-synced.
-        """
-        found: dict[str, _Stored] = {}
-        if collection is None:
-            return found
-        offset = None
-        while True:
-            points, offset = self._client.scroll(
-                collection, limit=1000, offset=offset, with_vectors=False,
-                scroll_filter=models.Filter(must=[_match("corpus", corpus)]),
-                with_payload=["document_id", "version", "parts", "placement"])
-            for point in points:
-                found.setdefault(point.payload["document_id"], _Stored()).add(point.payload)
-            if offset is None:
-                return found
-
-    def _indexed_corpora(self, collection: str) -> set[str]:
-        """The names of the Corpora that own at least one Document in ``collection``."""
-        found: set[str] = set()
-        offset = None
-        while True:
-            points, offset = self._client.scroll(
-                collection, limit=1000, offset=offset, with_vectors=False,
-                scroll_filter=models.Filter(must=[_match("kind", _DOCUMENT_KIND)]),
-                with_payload=["corpus"])
-            found.update(p.payload["corpus"] for p in points if p.payload.get("corpus"))
-            if offset is None:
-                return found
 
     def _extract(self, corpus: Corpus, raw: RawDocument, ref: DocumentRef) -> Document:
         """The Document as the index stores it: owned by the Corpus, its ids namespaced."""
@@ -687,85 +579,31 @@ class KnowledgeIndex:
         else:
             dense = [None] * len(contents)
         self._ensure_collection(collection, None if dense[0] is None else len(dense[0]))
-        document_point = _document_point(document)
-        passages = []
-        for number, (piece, content, vector) in enumerate(zip(pieces, contents, dense)):
-            sparse = self._sparse.encode_document(content)
-            vectors = {"bm25": models.SparseVector(indices=sparse.indices, values=sparse.values)}
-            if vector is not None:
-                vectors["dense"] = vector
-            passages.append(models.PointStruct(
-                id=_passage_id(document.id, number),
-                vector=vectors,
-                payload={"document_id": document.id, "version": document.version,
-                         "title": document.title, "url": document.url,
-                         "space": document.space, "text": piece.text,
-                         "parent_id": document.parent_id, "corpus": document.corpus,
-                         "parts": list(document.parts), "placement": document.placement,
-                 **_of_code(document),
-                         **_code_payload(document, piece)}))
-        # Write the new Passages first, then delete this Document's leftover old ones (those
-        # of an earlier, longer version included), so a failure in between never leaves the
-        # Document missing from search.
-        self._client.upsert(collection, points=[*passages, document_point], wait=True)
-        self._client.delete(
-            collection, wait=True,
-            points_selector=models.FilterSelector(filter=models.Filter(
-                must=_of_document(document.id),
-                must_not=[models.HasIdCondition(
-                    has_id=[*(p.id for p in passages), document_point.id])])))
-
-    def _remove(self, document_id: str, collection: str) -> None:
-        self._client.delete(
-            collection, wait=True,
-            points_selector=models.FilterSelector(
-                filter=models.Filter(must=_of_document(document_id))))
+        self._store.write(collection, document, [
+            Written(piece, self._sparse.encode_document(content), vector)
+            for piece, content, vector in zip(pieces, contents, dense)])
 
     def list_spaces(self) -> list[str]:
         """The named Spaces (Confluence Spaces, GitLab groups, folders) that have at least one indexed Document, sorted."""
         serving = self._readable()
         if serving is None:
             return []
-        spaces: set[str] = set()
-        offset = None
-        while True:
-            records, offset = self._client.scroll(
-                serving, limit=256, offset=offset, with_payload=["space"])
-            spaces.update(r.payload["space"] for r in records if r.payload["space"])  # a top-level project has none
-            if offset is None:
-                return sorted(spaces)
+        return self._store.spaces(serving)
 
     def get_document(self, document_id: str) -> str | None:
         """The full text of an indexed Document, or None if it is not indexed."""
         serving = self._readable()
         if serving is None:
             return None
-        records, _ = self._client.scroll(
-            serving,
-            scroll_filter=models.Filter(must=[
-                _match("kind", _DOCUMENT_KIND), _match("document_id", document_id)]),
-            limit=1, with_payload=["full_text"])
-        return records[0].payload["full_text"] if records else None
+        return self._store.document_text(serving, document_id)
 
     def _ensure_collection(self, collection: str, dimension: int | None) -> None:
         """``dimension`` is the size of the dense vectors, None for a Keyword-only index."""
-        if self._client.collection_exists(collection):
+        if self._store.exists(collection):
             return
-        # Before it exists, so a crash leaves no stray.
-        self._generations.record(
-            collection, IndexFormat.written_by(self._settings, dimension))
-        self._client.create_collection(
-            collection_name=collection,
-            vectors_config={} if dimension is None else {"dense": models.VectorParams(
-                size=dimension, distance=models.Distance.COSINE)},
-            sparse_vectors_config={"bm25": models.SparseVectorParams(
-                modifier=models.Modifier.IDF)},
-        )
-        if self._settings.qdrant_location != ":memory:":  # in-process Qdrant has no indexes
-            self._client.create_payload_index(
-                collection, "document_id", models.PayloadSchemaType.KEYWORD)
-            self._client.create_payload_index(
-                collection, "corpus", models.PayloadSchemaType.KEYWORD)
+        self._generations.create(
+            collection, IndexFormat.written_by(self._settings, dimension),
+            lambda: self._store.create(collection, dimension))
 
 
 def _explain(what: str, assessment: Assessment) -> str:
@@ -776,59 +614,6 @@ def _describe(error: Exception) -> str:
     return str(error) or type(error).__name__
 
 
-def _of_document(document_id: str) -> list[models.FieldCondition]:
-    return [models.FieldCondition(
-        key="document_id", match=models.MatchValue(value=document_id))]
-
-
-# The full text of a Document lives on its own vectorless point, so it is stored once
-# however many Passages the Document has and never appears in search results.
-_DOCUMENT_KIND = "document"
-
-
-def _match(key: str, value: str | bool) -> models.FieldCondition:
-    return models.FieldCondition(key=key, match=models.MatchValue(value=value))
-
-
-def _passage_id(document_id: str, number: int) -> str:
-    """The same Document always gets the same Passage ids, so a re-sync overwrites in place."""
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document_id}#{number}"))
-
-
-class _Stored:
-    """What the index holds for one Document: its versions and the parts it was listed under."""
-
-    def __init__(self) -> None:
-        self.versions: set[str | None] = set()
-        self.parts: set[str] = set()
-        self.placements: set[str] = set()
-        self.recorded = True  # False if any point predates recorded parts
-
-    def add(self, payload: dict) -> None:
-        self.versions.add(payload.get("version"))
-        self.placements.add(payload.get("placement") or "")
-        if payload.get("parts") is None:
-            self.recorded = False
-        else:
-            self.parts.update(payload["parts"])
-
-    def is_current(self, ref: DocumentRef, version: str | None = None) -> bool:
-        """Unchanged: one stored version, the listed one (or ``version``, the one fetched),
-        and the part and placement it was listed under (a Document that moved to another part,
-        or whose Primary ref mark or link changed, is re-added so what is stored stays true)."""
-        return self.versions == {version or ref.version} and self.placements == {ref.placement} and (
-            not self.recorded or self.parts == set(ref.parts))
-
-    def held_back_by(self, failures: Mapping[str, str]) -> bool:
-        """True if a part this Document sat in could not be listed. With no part recorded,
-        any failure might be its part."""
-        if not failures:
-            return False
-        if not self.recorded or not self.parts:
-            return True
-        return not self.parts.isdisjoint(failures)
-
-
 def _context(document: Document, piece: Piece) -> str:
     """What is put before a Passage's text when it is embedded and keyword-indexed: a
     Document's title, or for code its Repository, path and symbol."""
@@ -836,44 +621,6 @@ def _context(document: Document, piece: Piece) -> str:
         return document.title
     return "/".join(filter(None, (
         document.code.tracked_ref.repository, document.code.path, piece.symbol)))
-
-
-def _code_payload(document: Document, piece: Piece) -> dict:
-    """What a code Passage adds to the Document's ``_of_code`` payload: its file path and lines."""
-    if piece.start_line is None:
-        return {}
-    return {"path": document.code and document.code.path,
-            "start_line": piece.start_line, "end_line": piece.end_line, "symbol": piece.symbol}
-
-
-def _document_point(document: Document) -> models.PointStruct:
-    return models.PointStruct(
-        id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document.id}#document")), vector={},
-        payload={"kind": _DOCUMENT_KIND, "document_id": document.id,
-                 "version": document.version, "title": document.title, "url": document.url,
-                 "space": document.space, "full_text": document.text,
-                 "parent_id": document.parent_id, "corpus": document.corpus,
-                 "parts": list(document.parts), "placement": document.placement,
-                 **_of_code(document)})
-
-
-def _of_code(document: Document) -> dict:
-    """The payload of a Document from code: its Repository, Tracked ref and whether that is
-    the Primary ref. Other Documents carry none, so no filter on these keeps them out."""
-    if document.code is None:
-        return {}
-    tracked = document.code.tracked_ref
-    return {"repository": tracked.repository, "ref": tracked.ref, "primary": tracked.primary}
-
-
-def _code_file(payload: Mapping) -> CodeFile | None:
-    """Where a stored Passage of code was read, from its ``_of_code`` payload; its path is in
-    the Document's id when the Passage has no lines of its own."""
-    if payload.get("repository") is None:
-        return None
-    tracked = TrackedRef(payload["repository"], payload["ref"], payload.get("primary", True))
-    _, _, local_id = payload["document_id"].partition(":")
-    return CodeFile(tracked, payload.get("path") or CodeFile.split_id(local_id)[1])
 
 
 def _connect(settings: Settings) -> QdrantClient:

@@ -1,30 +1,22 @@
 """Corrupt or unreadable index state is reported, never treated as an empty index."""
 import pytest
-from qdrant_client import models
 
 from local_rag import Access, CorruptIndex, KnowledgeIndex, Settings
 from local_rag.corpus import InMemoryCorpus
 from conftest import DOCUMENTS
-from test_rebuild import collections
+from index_states import (
+    collections, lose_the_collection, lose_the_registry, overwrite_registry, registry_payload,
+    replace_with_a_non_index, strip_from_every_point)
 from test_sync import CountingGateway
 
 
-def registry_payload(index) -> dict:
-    return index._client.retrieve("knowledge.generations", ids=[1])[0].payload
-
-
-def overwrite_registry(index, payload):
-    index._client.upsert("knowledge.generations", points=[
-        models.PointStruct(id=1, vector=[1.0], payload=payload)], wait=True)
-
-
-def lose_the_live_collection(index):
+def lose_the_live_collection(index, client):
     """What losing the Live index's data in Qdrant leaves behind."""
-    index._client.delete_collection(index.status().generation)
+    lose_the_collection(client, index.status().generation)
 
 
-def assert_reported_not_empty(index, gateway):
-    embedded, before = len(gateway.embedded), collections(index)
+def assert_reported_not_empty(index, client, gateway):
+    embedded, before = len(gateway.embedded), collections(client)
     status = index.status()
     assert status.access == Access.REFUSED
     assert status.documents is None and status.passages is None
@@ -35,7 +27,7 @@ def assert_reported_not_empty(index, gateway):
         with pytest.raises(CorruptIndex, match="Rebuild"):
             use()
     assert len(gateway.embedded) == embedded  # no silent re-embed of everything
-    assert collections(index) == before
+    assert collections(client) == before
 
 
 @pytest.fixture
@@ -44,33 +36,33 @@ def gateway():
 
 
 @pytest.fixture
-def two_generations(gateway):
-    index = KnowledgeIndex(Settings(), gateway)
+def two_generations(gateway, client):
+    index = KnowledgeIndex(Settings(), gateway, client=client)
     index.rebuild([InMemoryCorpus(DOCUMENTS)])
     index.rebuild([InMemoryCorpus(DOCUMENTS)])
     return index
 
 
 def test_a_live_index_whose_data_is_gone_is_reported_not_treated_as_empty(
-        two_generations, gateway):
-    lose_the_live_collection(two_generations)
+        two_generations, client, gateway):
+    lose_the_live_collection(two_generations, client)
 
-    assert_reported_not_empty(two_generations, gateway)
+    assert_reported_not_empty(two_generations, client, gateway)
 
 
-def test_a_live_index_whose_data_is_gone_is_reported_even_with_no_previous_index(gateway):
-    index = KnowledgeIndex(Settings(), gateway)
+def test_a_live_index_whose_data_is_gone_is_reported_even_with_no_previous_index(
+        index, client, gateway):
     index.sync(InMemoryCorpus(DOCUMENTS))
-    lose_the_live_collection(index)
+    lose_the_live_collection(index, client)
 
-    assert_reported_not_empty(index, gateway)
+    assert_reported_not_empty(index, client, gateway)
 
 
 def test_a_lost_generation_registry_is_reported_not_read_as_an_earlier_version(
-        two_generations, gateway):
-    two_generations._client.delete_collection("knowledge.generations")
+        two_generations, client, gateway):
+    lose_the_registry(client)
 
-    assert_reported_not_empty(two_generations, gateway)
+    assert_reported_not_empty(two_generations, client, gateway)
 
 
 @pytest.mark.parametrize("damage", [
@@ -79,32 +71,40 @@ def test_a_lost_generation_registry_is_reported_not_read_as_an_earlier_version(
     lambda payload: {**payload, "generations": "not a list"},
     lambda payload: {**payload, "live": 42},
 ])
-def test_an_unreadable_generation_registry_is_reported(two_generations, gateway, damage):
-    overwrite_registry(two_generations, damage(registry_payload(two_generations)))
+def test_an_unreadable_generation_registry_is_reported(two_generations, client, gateway, damage):
+    overwrite_registry(client, damage(registry_payload(client)))
 
-    assert_reported_not_empty(two_generations, gateway)
+    assert_reported_not_empty(two_generations, client, gateway)
 
 
-def test_a_collection_that_is_not_an_index_is_reported(two_generations, gateway):
-    live = two_generations.status().generation
-    two_generations._client.delete_collection(live)
-    two_generations._client.create_collection(
-        live, vectors_config=models.VectorParams(size=4, distance=models.Distance.COSINE))
-    two_generations._client.update_collection_aliases(change_aliases_operations=[
-        models.CreateAliasOperation(create_alias=models.CreateAlias(
-            collection_name=live, alias_name="knowledge.live"))])
+@pytest.mark.parametrize("field, use", [
+    ("document_id", lambda index: index.search("ORA-00942")),
+    ("document_id", lambda index: index.sync(InMemoryCorpus(DOCUMENTS))),
+    ("space", lambda index: index.search("ORA-00942")),
+    ("space", lambda index: index.list_spaces()),
+], ids=["search without ids", "sync without ids", "search without spaces", "spaces"])
+def test_points_that_cannot_be_read_are_reported_not_skipped(index, client, field, use):
+    index.sync(InMemoryCorpus(DOCUMENTS))
+    strip_from_every_point(client, field)
 
-    reopened = KnowledgeIndex(Settings(), gateway, client=two_generations._client)
-    assert_reported_not_empty(reopened, gateway)
+    with pytest.raises(CorruptIndex, match="unreadable.*Rebuild"):
+        use(index)
+
+
+def test_a_collection_that_is_not_an_index_is_reported(two_generations, client, gateway):
+    replace_with_a_non_index(client, two_generations.status().generation)
+
+    reopened = KnowledgeIndex(Settings(), gateway, client=client)
+    assert_reported_not_empty(reopened, client, gateway)
 
 
 @pytest.mark.parametrize("damage", [
     lose_the_live_collection,
-    lambda index: overwrite_registry(index, {"unexpected": True}),
-    lambda index: index._client.delete_collection("knowledge.generations"),
+    lambda index, client: overwrite_registry(client, {"unexpected": True}),
+    lambda index, client: lose_the_registry(client),
 ])
-def test_a_rebuild_repairs_corrupt_state(two_generations, damage):
-    damage(two_generations)
+def test_a_rebuild_repairs_corrupt_state(two_generations, client, damage):
+    damage(two_generations, client)
 
     report = two_generations.rebuild([InMemoryCorpus(DOCUMENTS)])
 
@@ -114,8 +114,8 @@ def test_a_rebuild_repairs_corrupt_state(two_generations, damage):
     assert two_generations.sync(InMemoryCorpus(DOCUMENTS)).unchanged == 3
 
 
-def test_a_rebuild_over_an_unreadable_registry_says_so(two_generations):
-    overwrite_registry(two_generations, {"unexpected": True})
+def test_a_rebuild_over_an_unreadable_registry_says_so(two_generations, client):
+    overwrite_registry(client, {"unexpected": True})
 
     report = two_generations.rebuild([InMemoryCorpus(DOCUMENTS)])
 
