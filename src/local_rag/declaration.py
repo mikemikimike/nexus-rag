@@ -141,8 +141,8 @@ def _confluence(name: str, table: _Table, environ: Mapping[str, str]) -> Corpus:
         exclude_attachments=table.texts("exclude_attachments", DEFAULT_EXCLUDED_ATTACHMENTS))
 
 
-def _repositories(table: _Table) -> list[Repository]:
-    """One ``Repository`` per Tracked ref of the Repository the table declares."""
+def _repository(table: _Table) -> Repository:
+    """The Repository the table declares, with its Tracked refs."""
     table.only("path", "refs")
     path = table.text("path").strip("/")
     entries = table.items("refs")
@@ -158,19 +158,20 @@ def _repositories(table: _Table) -> list[Repository]:
         entry.only("name", "primary", "exclude")
         refs.append((entry.text("name").strip(), entry.optional_flag("primary"),
                      tuple(entry.texts("exclude", ()))))
-    names = [name for name, _, _ in refs]
-    if len(set(names)) != len(names):
-        raise DeclarationError(f"corpus {table.name!r}: {path} lists a ref twice")
     marked = [name for name, primary, _ in refs if primary]
     if len(marked) > 1:
         raise DeclarationError(
             f"corpus {table.name!r}: {path} marks more than one ref primary ({', '.join(marked)})")
-    primary_name = marked[0] if marked else names[0]
-    return [Repository(path, name, name == primary_name, exclude) for name, _, exclude in refs]
+    try:
+        return Repository(path, tuple(name for name, _, _ in refs),
+                          primary=marked[0] if marked else None,
+                          exclude={name: exclude for name, _, exclude in refs if exclude})
+    except ValueError as error:
+        raise DeclarationError(f"corpus {table.name!r}: {error}") from None
 
 
 def _gitlab(name: str, table: _Table, environ: Mapping[str, str]) -> Corpus:
-    repositories = [r for t in table.tables("repositories") for r in _repositories(t)]
+    repositories = [_repository(t) for t in table.tables("repositories")]
     missing = [v for v in ("GITLAB_URL", "GITLAB_TOKEN") if not environ.get(v, "").strip()]
     if missing:
         raise DeclarationError(

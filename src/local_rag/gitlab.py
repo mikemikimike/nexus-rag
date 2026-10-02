@@ -11,9 +11,9 @@ SHA, its Space the Repository's parent group (empty for a top-level project) and
 ``<repository name>/<file path>``. A Repository that cannot be read is a failure of its part
 of the listing, ``<repository path>@<ref>``, never an empty Repository.
 
-A Repository may have several Tracked refs, each a ``Repository`` here with the same path: the
-same file at two of them is two Documents. A Tracked ref that no longer exists (a merged and
-deleted branch) fails alone. Each ref may add exclude globs to the defaults.
+A Repository may have several Tracked refs, one of them its Primary ref: the same file at two
+of them is two Documents. A Tracked ref that no longer exists (a merged and deleted branch)
+fails alone. Each ref may add exclude globs to the defaults.
 """
 import base64
 import fnmatch
@@ -21,13 +21,13 @@ import os
 import re
 import shutil
 import subprocess
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
-from urllib.parse import quote
 
-from local_rag.corpus import DocumentRef, Listing, RawDocument, check_corpus_name
+from local_rag.corpus import (
+    CodeFile, DocumentRef, Listing, RawDocument, TrackedRef, check_corpus_name)
 
 DEFAULT_MAX_SIZE = 200_000  # bytes; a larger file is data or generated, not something to read
 _MAX_ERROR_LENGTH = 500
@@ -85,17 +85,38 @@ class GitLabError(Exception):
 
 @dataclass(frozen=True)
 class Repository:
-    """A GitLab project, at the ref whose files are indexed."""
+    """A GitLab project's git repository, and the Tracked refs whose files are indexed."""
 
     path: str  # the project's full path, ``platform/payments``
-    ref: str  # a branch or a tag
-    primary: bool = True  # whether this is the Repository's Primary ref
-    exclude: tuple[str, ...] = ()  # globs left out besides the defaults: a path or a file name
+    refs: tuple[str, ...]  # branches or tags
+    primary: str | None = None  # the Primary ref, one of ``refs``; the first if not named
+    # Per ref, globs left out besides the defaults: a path or a file name.
+    exclude: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def __post_init__(self):
+        refs = tuple(self.refs)
+        if not refs or not all(refs):
+            raise ValueError(f"{self.path} must name at least one ref, and no empty one")
+        if len(set(refs)) != len(refs):
+            raise ValueError(f"{self.path} lists a ref twice")
+        primary = refs[0] if self.primary is None else self.primary
+        if primary not in refs:
+            raise ValueError(f"{self.path}: the Primary ref {primary!r} is not one of its refs")
+        unknown = sorted(set(self.exclude) - set(refs))
+        if unknown:
+            raise ValueError(f"{self.path} excludes files of refs it does not list: "
+                             f"{', '.join(unknown)}")
+        object.__setattr__(self, "refs", refs)
+        object.__setattr__(self, "primary", primary)
+        object.__setattr__(self, "exclude", {r: tuple(g) for r, g in self.exclude.items()})
 
     @property
-    def part(self) -> str:
-        """What a failure to read it is called in a listing."""
-        return f"{self.path}@{self.ref}"
+    def tracked_refs(self) -> tuple[TrackedRef, ...]:
+        return tuple(TrackedRef(self.path, ref, ref == self.primary) for ref in self.refs)
+
+    def excluded(self, ref: str) -> tuple[str, ...]:
+        """The globs this ref leaves out besides the defaults."""
+        return self.exclude.get(ref, ())
 
 
 @dataclass(frozen=True)
@@ -110,7 +131,8 @@ class GitLabCorpus:
                  cache: Path | str, name: str = "gitlab", git_bin: str = "git",
                  max_size: int = DEFAULT_MAX_SIZE, timeout: float = 600.0):
         self.name = check_corpus_name(name)
-        self._repositories = {r.part: r for r in repositories}
+        self._repositories = list(repositories)
+        self._tracked = {t.part: t for r in self._repositories for t in r.tracked_refs}
         self._url = url.rstrip("/")
         self._token = token
         self._cache = Path(cache)
@@ -123,64 +145,55 @@ class GitLabCorpus:
     def list(self) -> Listing:
         refs, failures = [], {}
         fetched: dict[str, str | None] = {}  # repository path -> why it could not be fetched
-        for repository in self._repositories.values():
-            try:
-                if repository.path not in fetched:
-                    fetched[repository.path] = self._fetched(repository)
-                if fetched[repository.path]:
-                    raise GitLabError(fetched[repository.path])
-                refs += [DocumentRef(_document_id(repository, f.path), f.blob,
-                                     (repository.part,),
-                                     self._placement(repository, f.path))
-                         for f in self._files(repository)]
-            except GitLabError as error:
-                failures[repository.part] = str(error)
+        for repository in self._repositories:
+            if repository.path not in fetched:
+                fetched[repository.path] = self._fetched(repository)
+            for tracked in repository.tracked_refs:
+                try:
+                    if fetched[repository.path]:
+                        raise GitLabError(fetched[repository.path])
+                    files = [(CodeFile(tracked, path), blob)
+                             for path, blob in self._files(repository, tracked)]
+                except GitLabError as error:
+                    failures[tracked.part] = str(error)
+                    continue
+                refs += [DocumentRef(code.document_id, blob, (tracked.part,),
+                                     code.placement(self._url)) for code, blob in files]
         return Listing(refs, failures)
 
     def _fetched(self, repository: Repository) -> str | None:
         """Brings the Repository's mirror up to date once for all its refs; None, or why not."""
         try:
-            self._update(repository, self._mirror(repository))
+            self._update(repository.path)
         except GitLabError as error:
             return str(error)
         return None
 
     def fetch(self, document_id: str) -> RawDocument:
-        repository, path = self._locate(document_id)
-        mirror = self._mirror(repository)
-        commit = self._pinned.get(repository.part)
+        try:
+            part, path = CodeFile.split_id(document_id)
+            tracked = self._tracked[part]
+        except (ValueError, KeyError):
+            raise KeyError(document_id) from None
+        code = CodeFile(tracked, path)
+        mirror = self._mirror(tracked.repository)
+        commit = self._pinned.get(tracked.part)
         if commit is None:  # fetched without a listing: read the ref as the mirror has it
-            self._update(repository, mirror)
-            commit = self._commit(repository)
-            self._pinned[repository.part] = commit
+            self._update(tracked.repository)
+            commit = self._commit(tracked)
+            self._pinned[tracked.part] = commit
         blob = self._git("rev-parse", f"{commit}:{path}", cwd=mirror).strip()
         content = self._git("cat-file", "blob", blob, cwd=mirror, binary=True)
-        parent, _, name = repository.path.rpartition("/")
+        parent, _, name = tracked.repository.rpartition("/")
         return RawDocument(
             id=document_id, title=f"{name}/{path}", space=parent, version=blob,
-            url=self._link(repository, path),
-            content=content, media_type=_media_type(path), repository=repository.path,
-            ref=repository.ref, primary=repository.primary,
-            path=path)
+            url=code.link(self._url), content=content, media_type=_media_type(path), code=code)
 
-    def _link(self, repository: Repository, path: str) -> str:
-        return f"{self._url}/{repository.path}/-/blob/{quote(repository.ref)}/{quote(path)}"
-
-    def _placement(self, repository: Repository, path: str) -> str:
-        """The listing's own say on a file: whether its ref is primary, and its link."""
-        return f"{'primary' if repository.primary else 'tracked'} {self._link(repository, path)}"
-
-    def _locate(self, document_id: str) -> tuple[Repository, str]:
-        repository_and_ref, _, path = document_id.partition(":")
-        repository = self._repositories.get(repository_and_ref)
-        if repository is None or not path:
-            raise KeyError(document_id)
-        return repository, path
-
-    def _files(self, repository: Repository) -> Sequence[_File]:
-        mirror = self._mirror(repository)
-        commit = self._commit(repository)
-        self._pinned[repository.part] = commit
+    def _files(self, repository: Repository, tracked: TrackedRef) -> Sequence[tuple[str, str]]:
+        """The files worth indexing at a Tracked ref, as (path, blob)."""
+        mirror = self._mirror(repository.path)
+        commit = self._commit(tracked)
+        self._pinned[tracked.part] = commit
         listed = self._git("ls-tree", "-r", "-l", "-z", commit, cwd=mirror, binary=True)
         candidates = []
         for entry in listed.decode("utf-8", errors="replace").split("\0"):
@@ -191,10 +204,11 @@ class GitLabCorpus:
             if int(fields[3]) > self._max_size or int(fields[3]) == 0:
                 continue
             media_type = _wanted(path)
-            if media_type and not _excluded(path, repository.exclude):
+            if media_type and not _excluded(path, repository.excluded(tracked.ref)):
                 candidates.append(_File(fields[2], path, media_type))
         verdicts = self._sniff(candidates, mirror)
-        return [f for f in candidates if verdicts[f.blob, f.media_type not in _PROSE]]
+        return [(f.path, f.blob) for f in candidates
+                if verdicts[f.blob, f.media_type not in _PROSE]]
 
     def _sniff(self, files: Sequence[_File], mirror: Path) -> dict[tuple[str, bool], bool]:
         """Whether each blob is text worth indexing: not binary, not blank and, as code, not
@@ -236,29 +250,30 @@ class GitLabCorpus:
                     self._verdicts[fields[0], fields[1] == "1"] = fields[2] == "1"
         return self._verdicts
 
-    def _mirror(self, repository: Repository) -> Path:
-        return self._cache / f"{repository.path}.git"
+    def _mirror(self, repository: str) -> Path:
+        return self._cache / f"{repository}.git"
 
-    def _update(self, repository: Repository, mirror: Path) -> None:
+    def _update(self, repository: str) -> None:
+        mirror = self._mirror(repository)
         if not (mirror / "HEAD").is_file():
             shutil.rmtree(mirror, ignore_errors=True)  # a half-made mirror is made again
             mirror.parent.mkdir(parents=True, exist_ok=True)
             self._git("init", "--quiet", "--bare", str(mirror))
         # Fetched from the URL itself, with no remote recorded: the mirror holds no address.
         self._git("fetch", "--quiet", "--prune", "--force",
-                  f"{self._url}/{repository.path}.git",
+                  f"{self._url}/{repository}.git",
                   "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*",
                   cwd=mirror, authenticated=True)
 
-    def _commit(self, repository: Repository) -> str:
-        mirror = self._mirror(repository)
+    def _commit(self, tracked: TrackedRef) -> str:
+        mirror = self._mirror(tracked.repository)
         for prefix in ("refs/heads/", "refs/tags/"):
             try:
                 return self._git("rev-parse", "--verify", "--quiet",
-                                 f"{prefix}{repository.ref}^{{commit}}", cwd=mirror).strip()
+                                 f"{prefix}{tracked.ref}^{{commit}}", cwd=mirror).strip()
             except GitLabError:
                 continue
-        raise GitLabError(f"{repository.path} has no branch or tag {repository.ref!r}")
+        raise GitLabError(f"{tracked.repository} has no branch or tag {tracked.ref!r}")
 
     def _git(self, *args: str, cwd: Path | None = None, binary: bool = False,
              stdin: bytes | None = None, authenticated: bool = False):
@@ -287,10 +302,6 @@ class GitLabCorpus:
             for secret in (self._token, basic):
                 message = message.replace(secret, "***")
         return message
-
-
-def _document_id(repository: Repository, path: str) -> str:
-    return f"{repository.part}:{path}"
 
 
 def _media_type(path: str) -> str:

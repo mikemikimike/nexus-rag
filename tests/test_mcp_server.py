@@ -371,13 +371,13 @@ def test_a_hybrid_server_without_an_embedding_model_refuses_to_start_and_says_wh
 
 
 def test_search_docs_narrows_to_a_repository_or_a_tracked_ref_and_shows_the_ref(index):
-    from local_rag.corpus import RawDocument
+    from local_rag.corpus import CodeFile, RawDocument, TrackedRef
 
     def code(repository, ref, primary, text):
         return RawDocument(
             id=f"{repository}@{ref}:a.py", title=f"{repository}/a.py", url="https://src.example.test/a",
             space="platform", version=text, content=text.encode(), media_type="text/x-python",
-            repository=repository, ref=ref, primary=primary)
+            code=CodeFile(TrackedRef(repository, ref, primary), "a.py"))
     index.sync(InMemoryCorpus([
         code("platform/pay", "main", True, "def settle(): pass  # zebrafish"),
         code("platform/pay", "feature/x", False, "def settle(): pass  # zebrafish"),
@@ -431,7 +431,7 @@ def test_list_spaces_includes_the_gitlab_groups_and_not_an_empty_space(tmp_path,
     remote = FakeGitLab(tmp_path / "remote")
     remote.commit("platform/payments", {"a.py": "def a():\n    return 1\n"})
     remote.commit("toplevel", {"b.py": "def b():\n    return 2\n"})
-    code = GitLabCorpus([Repository("platform/payments", "main"), Repository("toplevel", "main")],
+    code = GitLabCorpus([Repository("platform/payments", ("main",)), Repository("toplevel", ("main",))],
                         url=remote.url, token="t", cache=tmp_path / "mirrors", name="code")
     index = KnowledgeIndex(Settings(), gateway)
     index.sync(code)

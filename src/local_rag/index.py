@@ -9,7 +9,8 @@ from qdrant_client import QdrantClient, models
 
 from local_rag.chunker import Chunker, Piece
 from local_rag.corpus import (
-    Corpus, Document, DocumentRef, RawDocument, check_corpus_name, listing_failures, qualified_id)
+    CodeFile, Corpus, Document, DocumentRef, RawDocument, TrackedRef, check_corpus_name,
+    listing_failures, qualified_id)
 from local_rag.exclusive import ExclusiveRun, Lease, SyncInProgress
 from local_rag.extraction import Extractor
 from local_rag.gateway import ModelGateway
@@ -34,9 +35,7 @@ class Passage:
     score: float
     parent_id: str | None = None  # the page an Attachment belongs to
     corpus: str | None = None  # None for an index built before named Corpora
-    repository: str | None = None  # code: the Repository's path
-    ref: str | None = None  # code: the Tracked ref the Passage was read at
-    path: str | None = None  # code: the file's path within the Repository
+    code: CodeFile | None = None  # where a Passage of code was read
     start_line: int | None = None  # 1-based, inclusive
     end_line: int | None = None
     symbol: str | None = None  # the class or function it sits in, if the splitter knows
@@ -56,8 +55,8 @@ class Passage:
         symbol when known; empty for a Passage that is not code."""
         if self.start_line is None:
             return []
-        found = [("file", self.path or self.title), ("lines", self.line_range),
-                 ("symbol", self.symbol)]
+        found = [("file", self.code.path if self.code else self.title),
+                 ("lines", self.line_range), ("symbol", self.symbol)]
         return [(name, value) for name, value in found if value]
 
     @property
@@ -466,8 +465,7 @@ class KnowledgeIndex:
             document_id=p.payload["document_id"], title=p.payload["title"],
             url=p.payload["url"], space=p.payload["space"], text=p.payload["text"],
             score=float(p.score), parent_id=p.payload.get("parent_id"),
-            corpus=p.payload.get("corpus"), repository=p.payload.get("repository"),
-            ref=p.payload.get("ref"), path=p.payload.get("path"),
+            corpus=p.payload.get("corpus"), code=_code_file(p.payload),
             start_line=p.payload.get("start_line"), end_line=p.payload.get("end_line"),
             symbol=p.payload.get("symbol"))
             for p in points]
@@ -669,9 +667,7 @@ class KnowledgeIndex:
             space=raw.space, version=raw.version, text=self._extractor.extract(raw),
             parent_id=None if raw.parent_id is None else qualified_id(corpus.name, raw.parent_id),
             media_type=raw.media_type, corpus=corpus.name, parts=ref.parts,
-            placement=ref.placement,
-            repository=raw.repository, ref=raw.ref, path=raw.path,
-            primary=raw.primary)
+            placement=ref.placement, code=raw.code)
 
     def _add(self, document: Document, collection: str) -> None:
         # A Document with no text is still found by its title: it gets one empty Passage.
@@ -830,16 +826,17 @@ class _Stored:
 def _context(document: Document, piece: Piece) -> str:
     """What is put before a Passage's text when it is embedded and keyword-indexed: a
     Document's title, or for code its Repository, path and symbol."""
-    if piece.start_line is None or not (document.repository or document.path):
+    if piece.start_line is None or document.code is None:
         return document.title
-    return "/".join(filter(None, (document.repository, document.path, piece.symbol)))
+    return "/".join(filter(None, (
+        document.code.tracked_ref.repository, document.code.path, piece.symbol)))
 
 
 def _code_payload(document: Document, piece: Piece) -> dict:
     """What a code Passage adds to the Document's ``_of_code`` payload: its file path and lines."""
     if piece.start_line is None:
         return {}
-    return {"path": document.path,
+    return {"path": document.code and document.code.path,
             "start_line": piece.start_line, "end_line": piece.end_line, "symbol": piece.symbol}
 
 
@@ -857,10 +854,20 @@ def _document_point(document: Document) -> models.PointStruct:
 def _of_code(document: Document) -> dict:
     """The payload of a Document from code: its Repository, Tracked ref and whether that is
     the Primary ref. Other Documents carry none, so no filter on these keeps them out."""
-    if document.repository is None:
+    if document.code is None:
         return {}
-    return {"repository": document.repository, "ref": document.ref,
-            "primary": document.primary}
+    tracked = document.code.tracked_ref
+    return {"repository": tracked.repository, "ref": tracked.ref, "primary": tracked.primary}
+
+
+def _code_file(payload: Mapping) -> CodeFile | None:
+    """Where a stored Passage of code was read, from its ``_of_code`` payload; its path is in
+    the Document's id when the Passage has no lines of its own."""
+    if payload.get("repository") is None:
+        return None
+    tracked = TrackedRef(payload["repository"], payload["ref"], payload.get("primary", True))
+    _, _, local_id = payload["document_id"].partition(":")
+    return CodeFile(tracked, payload.get("path") or CodeFile.split_id(local_id)[1])
 
 
 def _connect(settings: Settings) -> QdrantClient:

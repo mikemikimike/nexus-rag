@@ -202,8 +202,8 @@ def _format_passages(passages: list[Passage]) -> str:
     for number, passage in enumerate(passages, 1):
         page_id = passage.parent_id or passage.document_id
         header = f"{passage.link} | page_id: {page_id} | space: {passage.space}"
-        if passage.ref:
-            header += f" | ref: {passage.ref}"
+        if passage.code:
+            header += f" | ref: {passage.code.tracked_ref.ref}"
         if passage.parent_id:
             header += f" | attachment: {passage.document_id}"
         for name, value in passage.code_location:
