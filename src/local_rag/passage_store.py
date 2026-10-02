@@ -62,6 +62,19 @@ class Passage:
                  ("lines", self.line_range), ("symbol", self.symbol)]
         return [(name, value) for name, value in found if value]
 
+    def citation(self) -> tuple[tuple[str, str], ...]:
+        """The ordered (name, value) fields that cite it: where to read it, the page it is on
+        (its parent's, for an Attachment), its space, the Tracked ref for code, the Attachment
+        itself, and the code location. Renderers show these and decide only the layout."""
+        fields = [("link", self.link),
+                  ("page_id", self.parent_id or self.document_id),
+                  ("space", self.space)]
+        if self.code:
+            fields.append(("ref", self.code.tracked_ref.ref))
+        if self.parent_id:
+            fields.append(("attachment", self.document_id))
+        return (*fields, *self.code_location)
+
     @property
     def link(self) -> str:
         """Where to read it: the Document's URL, at its lines for code (GitLab's anchor)."""
