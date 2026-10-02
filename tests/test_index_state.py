@@ -6,7 +6,7 @@ from local_rag.corpus import InMemoryCorpus
 from conftest import DOCUMENTS
 from index_states import (
     collections, lose_the_collection, lose_the_registry, overwrite_registry, registry_payload,
-    replace_with_a_non_index)
+    replace_with_a_non_index, strip_from_every_point)
 from test_sync import CountingGateway
 
 
@@ -75,6 +75,20 @@ def test_an_unreadable_generation_registry_is_reported(two_generations, client, 
     overwrite_registry(client, damage(registry_payload(client)))
 
     assert_reported_not_empty(two_generations, client, gateway)
+
+
+@pytest.mark.parametrize("field, use", [
+    ("document_id", lambda index: index.search("ORA-00942")),
+    ("document_id", lambda index: index.sync(InMemoryCorpus(DOCUMENTS))),
+    ("space", lambda index: index.search("ORA-00942")),
+    ("space", lambda index: index.list_spaces()),
+], ids=["search without ids", "sync without ids", "search without spaces", "spaces"])
+def test_points_that_cannot_be_read_are_reported_not_skipped(index, client, field, use):
+    index.sync(InMemoryCorpus(DOCUMENTS))
+    strip_from_every_point(client, field)
+
+    with pytest.raises(CorruptIndex, match="unreadable.*Rebuild"):
+        use(index)
 
 
 def test_a_collection_that_is_not_an_index_is_reported(two_generations, client, gateway):

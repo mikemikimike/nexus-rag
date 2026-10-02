@@ -541,14 +541,15 @@ class KnowledgeIndex:
                 return None
             return len(vector)
 
-        dense = self._store.dense_size(generation)  # a Keyword-only index has none
+        dimension = self._store.dense_size(generation)  # a Keyword-only index has none
         recorded = self._generations.format_of(generation)
-        if recorded is not None and (recorded.retrieval is RetrievalMode.HYBRID) != bool(dense):
+        dense = dimension is not None
+        if recorded is not None and (recorded.retrieval is RetrievalMode.HYBRID) != dense:
             raise CorruptIndex(
                 f"{generation} records {recorded.retrieval.value} retrieval but its collection "
                 f"{'has' if dense else 'has no'} dense vectors")
         assessment = assess(
-            recorded, dense,
+            recorded, dimension,
             self._settings, running_dimension if verify_dimension else None)
         if verify_dimension and reachable:  # an unverified answer is worth asking for again
             self._assessments[generation] = assessment

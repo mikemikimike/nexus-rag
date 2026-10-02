@@ -15,7 +15,7 @@ from local_rag.corpus import check_corpus_name
 class IndexNames:
     def __init__(self, name: str):
         self.name = name
-        self.legacy = name  # the whole index, as earlier versions kept it
+        self.plain = name  # the whole index, as earlier versions kept it
         self.live = f"{name}.live"  # aliases, not collections
         self.previous = f"{name}.previous"
         self.registry = f"{name}.generations"
@@ -43,10 +43,14 @@ class IndexNames:
         """A name for a new generation, not yet recorded or created."""
         return f"{self.name}.gen-{uuid.uuid4().hex[:12]}"
 
+    def is_generation(self, collection: str) -> bool:
+        """Whether ``collection`` is named like one of this index's generations."""
+        return self._generation.fullmatch(collection) is not None
+
     def owns(self, collection: str) -> bool:
         """Whether ``collection`` has a name this index gives its collections. A collection
         named like a generation may still be another's: only the registry says it is ours."""
-        return (collection in (self.legacy, self.registry, self.last_sync, self.lock,
+        return (collection in (self.plain, self.registry, self.last_sync, self.lock,
                                self.promote_lock)
                 or self.corpus_of_lock(collection) is not None
-                or self._generation.fullmatch(collection) is not None)
+                or self.is_generation(collection))

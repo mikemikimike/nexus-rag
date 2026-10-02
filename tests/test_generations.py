@@ -1,15 +1,10 @@
 """Generations record a new collection before it exists, so cleanup always knows it."""
 import pytest
-from qdrant_client import QdrantClient, models
+from qdrant_client import models
 
 from local_rag import IndexFormat, Settings
 from local_rag.generations import Generations
 from local_rag.index_names import IndexNames
-
-
-@pytest.fixture
-def client():
-    return QdrantClient(location=":memory:")
 
 
 @pytest.fixture

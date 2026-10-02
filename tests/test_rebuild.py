@@ -311,7 +311,7 @@ def test_a_rebuild_replaces_an_index_written_by_an_earlier_version_and_cleans_it
     index.switch_back()
     index.rebuild([corpus_saying("second")])
 
-    assert NAMES.legacy not in collections(client)
+    assert NAMES.plain not in collections(client)
     assert index.get_document("default:dba/ora-00942") == "second"
 
 

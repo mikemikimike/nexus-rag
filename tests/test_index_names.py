@@ -5,7 +5,7 @@ from local_rag.index_names import IndexNames
 def test_every_collection_an_index_makes_is_named_after_it():
     names = IndexNames("knowledge")
 
-    made = [names.legacy, names.registry, names.last_sync, names.lock, names.promote_lock,
+    made = [names.plain, names.registry, names.last_sync, names.lock, names.promote_lock,
             names.corpus_lock("docs"), names.fresh_generation()]
 
     assert all(names.owns(collection) for collection in made)

@@ -21,7 +21,7 @@ def collections(client: QdrantClient) -> set[str]:
 
 
 def generations_in(client: QdrantClient) -> set[str]:
-    return {name for name in collections(client) if ".gen-" in name}
+    return {name for name in collections(client) if NAMES.is_generation(name)}
 
 
 def legacy_index(client: QdrantClient, gateway: ModelGateway,
@@ -31,9 +31,9 @@ def legacy_index(client: QdrantClient, gateway: ModelGateway,
     store, sparse = PassageStore(client, payload_indexes=False), SparseEncoder(Settings().sparse)
     contents = [f"{document.title}\n\n{document.text}" for document in documents]
     vectors = gateway.embed(contents)
-    store.create(NAMES.legacy, dimension=len(vectors[0]))
+    store.create(NAMES.plain, dimension=len(vectors[0]))
     for document, content, vector in zip(documents, contents, vectors):
-        store.write(NAMES.legacy, document,
+        store.write(NAMES.plain, document,
                     [Written(Piece(document.text), sparse.encode_document(content), vector)])
 
 
@@ -68,6 +68,11 @@ def replace_with_a_non_index(client: QdrantClient, generation: str) -> None:
     client.update_collection_aliases(change_aliases_operations=[
         models.CreateAliasOperation(create_alias=models.CreateAlias(
             collection_name=generation, alias_name=NAMES.live))])
+
+
+def strip_from_every_point(client: QdrantClient, field: str) -> None:
+    """Points of the Live index that lost a field every version writes."""
+    client.delete_payload(NAMES.live, keys=[field], points=models.Filter())
 
 
 def overwrite_the_last_sync(client: QdrantClient, payload: dict) -> None:

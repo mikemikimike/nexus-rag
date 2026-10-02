@@ -47,7 +47,7 @@ class _Registry:
 class Generations:
     def __init__(self, client: QdrantClient, names: IndexNames):
         self._client = client
-        self._name = names.legacy
+        self._name = names.plain
         self._live_alias = names.live
         self._previous_alias = names.previous
         self._registry = names.registry

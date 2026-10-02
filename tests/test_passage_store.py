@@ -75,3 +75,14 @@ def test_a_collection_that_is_not_a_passage_store_is_reported_as_corrupt(client,
     assert store.dense_size(COLLECTION) is None
     with pytest.raises(CorruptIndex, match="not-ours"):
         store.dense_size("not-ours")
+
+
+@pytest.mark.parametrize("read", [
+    lambda store: store.stored("missing", "docs"),
+    lambda store: store.spaces("missing"),
+], ids=["stored", "spaces"])
+def test_a_failing_qdrant_is_not_mistaken_for_a_corrupt_point(store, read):
+    with pytest.raises(Exception) as raised:
+        read(store)
+
+    assert not isinstance(raised.value, CorruptIndex)

@@ -7,7 +7,7 @@ from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from local_rag.sparse import SparseParams
 from conftest import DOCUMENTS
-from index_states import collections, legacy_index
+from index_states import NAMES, collections, generations_in, legacy_index
 from test_sync import CountingGateway, revised
 
 
@@ -71,8 +71,7 @@ def test_a_read_only_index_refuses_a_sync_and_never_rebuilds_on_its_own(client):
     upgraded.status()
 
     assert len(gateway.embedded) == embedded  # nothing re-embedded
-    assert {n for n in collections(client) if ".gen-" in n} == \
-        {n for n in before if ".gen-" in n}
+    assert generations_in(client) == {n for n in before if NAMES.is_generation(n)}
     assert upgraded.get_document("default:garage/battery") == DOCUMENTS[2].text
 
 

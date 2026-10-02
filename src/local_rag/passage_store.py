@@ -214,11 +214,11 @@ class PassageStore:
 
         More than one version means an interrupted replace, so the Document is re-synced.
         """
+        points = self._scroll(collection, models.Filter(must=[_match("corpus", corpus)]),
+                              ["document_id", "version", "parts", "placement"])
         found: dict[str, Stored] = {}
         with self._reading(collection):
-            for point in self._scroll(
-                    collection, models.Filter(must=[_match("corpus", corpus)]),
-                    ["document_id", "version", "parts", "placement"]):
+            for point in points:
                 found.setdefault(point.payload["document_id"], Stored()).add(point.payload)
         return found
 
@@ -230,10 +230,10 @@ class PassageStore:
 
     def spaces(self, collection: str) -> list[str]:
         """The named Spaces that have at least one Document, sorted."""
+        points = self._scroll(collection, None, ["space"])
         with self._reading(collection):
             # A Document outside any named Space (a top-level project) has an empty one.
-            return sorted({p.payload["space"] for p in self._scroll(collection, None, ["space"])
-                           if p.payload["space"]})
+            return sorted({p.payload["space"] for p in points if p.payload["space"]})
 
     def document_text(self, collection: str, document_id: str) -> str | None:
         """The full text of a Document, or None if it is not there."""
@@ -283,18 +283,20 @@ class PassageStore:
                 for p in points]
 
     def _scroll(self, collection: str, where: models.Filter | None,
-                fields: list[str]) -> Iterator[models.Record]:
-        offset = None
+                fields: list[str]) -> list[models.Record]:
+        found, offset = [], None
         while True:
             points, offset = self._client.scroll(
                 collection, limit=1000, offset=offset, with_vectors=False,
                 scroll_filter=where, with_payload=fields)
-            yield from points
+            found.extend(points)
             if offset is None:
-                return
+                return found
 
     @contextmanager
     def _reading(self, collection: str) -> Iterator[None]:
+        """Report a payload that cannot be read as a corrupt index. Only reading payloads goes
+        in here: an error from Qdrant itself is not corruption."""
         try:
             yield
         except (KeyError, TypeError, ValueError) as error:
