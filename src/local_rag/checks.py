@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import TextIO
 from urllib.parse import urlsplit
 
+from local_rag.errors import describe
 from local_rag.gateway import ModelGateway
 from local_rag.settings import RetrievalMode, Settings
 
@@ -140,7 +141,7 @@ def run_command(command: Sequence[str]) -> str:
 
 def gateway_failure(error: Exception) -> Failure:
     """A Model gateway error, with the cause its wording points to."""
-    text = str(error) or type(error).__name__
+    text = describe(error)
     if "answered 401" in text or "answered 403" in text:
         return Failure(text, cause="LITELLM_API_KEY is wrong or missing",
                        see='section 10 (row "gateway ... answered 401")')
@@ -180,7 +181,7 @@ def rerank(settings: Settings, gateway: ModelGateway | None) -> str:
     try:
         scores = gateway.rerank("how do I reset my password", [unrelated, relevant])
     except Exception as error:
-        raise Failure(str(error) or type(error).__name__,
+        raise Failure(describe(error),
                       cause="the Model gateway does not serve /v1/rerank for "
                             "RAG_RERANK_MODEL; unset it to disable rerank",
                       see='section 10 (the proxy row) and the README troubleshooting "Rerank ignored"'

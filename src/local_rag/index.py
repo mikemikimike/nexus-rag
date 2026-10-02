@@ -10,6 +10,7 @@ from local_rag.chunker import Chunker, Piece
 from local_rag.corpus import (
     Corpus, Document, DocumentRef, RawDocument, check_corpus_name, listing_failures,
     qualified_id)
+from local_rag.errors import describe
 from local_rag.exclusive import ExclusiveRun, Lease, SyncInProgress
 from local_rag.extraction import Extractor
 from local_rag.gateway import ModelGateway
@@ -187,7 +188,7 @@ class KnowledgeIndex:
                         target = live
                 self._add(document, target)
             except Exception as error:
-                failures[stored] = _describe(error)
+                failures[stored] = describe(error)
             else:
                 if live is None:  # the first Document makes a new index live
                     lease.check()
@@ -210,7 +211,7 @@ class KnowledgeIndex:
             try:
                 self._store.remove(target, document_id)
             except Exception as error:
-                failures[document_id] = _describe(error)
+                failures[document_id] = describe(error)
             else:
                 removed += 1
         return SyncReport(added=added, replaced=replaced, removed=removed,
@@ -269,7 +270,7 @@ class KnowledgeIndex:
                         self._add(self._extract(corpus, corpus.fetch(ref.id), ref),
                                   generation)
                     except Exception as error:
-                        failures[qualified_id(corpus.name, ref.id)] = _describe(error)
+                        failures[qualified_id(corpus.name, ref.id)] = describe(error)
             failed = len(failures)
             reason = self._refusal(total, failed)
             if reason is None:
@@ -331,7 +332,7 @@ class KnowledgeIndex:
         try:
             report = run()
         except Exception as error:
-            self._note(kind, "failed", _describe(error), corpus)
+            self._note(kind, "failed", describe(error), corpus)
             raise
         if isinstance(report, SyncReport):
             outcome = "completed with failures" if report.failed else "completed"
@@ -417,7 +418,7 @@ class KnowledgeIndex:
             try:
                 vectors = self._gateway.embed(texts)
             except Exception as error:
-                self._embedding_failure = _describe(error)
+                self._embedding_failure = describe(error)
                 # Only an error that says another try could help is tried again: a bug, or a
                 # wrong key, would just wait and fail the same way.
                 if attempt == settings.embed_attempts or not getattr(error, "retryable", False):
@@ -436,7 +437,7 @@ class KnowledgeIndex:
         try:
             vector = self._gateway.embed_query(query)
         except Exception as error:
-            self._embedding_failure = _describe(error)
+            self._embedding_failure = describe(error)
             log.warning("the embedding model could not be reached: %s", self._embedding_failure)
             return None
         self._embedding_failure = None
@@ -465,12 +466,12 @@ class KnowledgeIndex:
         try:
             self._client.get_collections()
         except Exception as error:
-            return Health(False, False, (f"Qdrant is unreachable: {_describe(error)}",))
+            return Health(False, False, (f"Qdrant is unreachable: {describe(error)}",))
         try:
             status = self._status(verify_dimension=False)
         except Exception as error:
             return Health(
-                True, False, (f"the Knowledge index cannot be read: {_describe(error)}",))
+                True, False, (f"the Knowledge index cannot be read: {describe(error)}",))
         notes = status.warnings
         if self._embedding_failure:
             notes = (*notes, f"the embedding model was unreachable the last time it was used "
@@ -608,10 +609,6 @@ class KnowledgeIndex:
 
 def _explain(what: str, assessment: Assessment) -> str:
     return f"{what}: {'; '.join(assessment.warnings)}"
-
-
-def _describe(error: Exception) -> str:
-    return str(error) or type(error).__name__
 
 
 def _context(document: Document, piece: Piece) -> str:

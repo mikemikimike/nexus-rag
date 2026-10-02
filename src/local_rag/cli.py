@@ -21,6 +21,7 @@ from local_rag.corpus import Corpus
 from local_rag.declaration import Declaration, DeclarationError
 from local_rag.environment import (
     DEFAULT_CORPORA_FILE, Environment, environment_from, settings_from_environment)
+from local_rag.errors import describe
 from local_rag.gateway import ModelGateway
 from local_rag.gateway_litellm import gateway_from_settings
 from local_rag.index import IndexStatus, KnowledgeIndex, Passage, RebuildReport, SyncReport
@@ -72,7 +73,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
         print(f"error: {error}", file=err)
         return 2
     except Exception as error:
-        print(f"error: {_describe(error)}", file=err)
+        print(f"error: {describe(error)}", file=err)
         return 1
 
 
@@ -263,5 +264,3 @@ def _print_status(status: IndexStatus, out: TextIO) -> None:
         print(f"warning: {warning}", file=out)
 
 
-def _describe(error: Exception) -> str:
-    return str(error) or type(error).__name__
