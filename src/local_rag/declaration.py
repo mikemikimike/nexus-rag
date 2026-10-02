@@ -37,11 +37,10 @@ from typing import Any
 
 from local_rag.confluence import DEFAULT_EXCLUDED_ATTACHMENTS, ConfluenceCorpus
 from local_rag.corpus import Corpus, check_corpus_name
-from local_rag.environment import DEFAULT_CORPORA_FILE, Environment
+from local_rag.environment import Environment
 from local_rag.folder import FolderCorpus
 from local_rag.gitlab import GitLabCorpus, Repository
 
-DEFAULT_PATH = DEFAULT_CORPORA_FILE
 DEFAULT_GITLAB_CACHE = Path(".cache/local-rag/gitlab")  # below HOME
 
 

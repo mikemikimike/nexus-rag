@@ -16,6 +16,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from local_rag.acceptance_report import Context
 from local_rag.checks import QDRANT_DOWN, Failure
+from local_rag.environment import split_tokens
 
 TIMEOUT = 20.0
 _DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # a local server, no proxy
@@ -36,9 +37,7 @@ def server_url(ctx: Context) -> str:
 
 
 def tokens(ctx: Context) -> list[str]:
-    if ctx.args.token:
-        return [t.strip() for t in ctx.args.token.split(",") if t.strip()]
-    return list(ctx.environment.mcp_tokens)
+    return list(split_tokens(ctx.args.token) if ctx.args.token else ctx.environment.mcp_tokens)
 
 
 def run_mcp(ctx: Context) -> None:

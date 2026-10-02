@@ -1,5 +1,6 @@
-"""Settings and the Environment from environment variables: how the adapters (CLI, MCP
-server, Smoke check, Acceptance suite) configure the core and find what lies outside it.
+"""Settings and the wiring around the core (``Environment``), from environment variables: how
+the adapters (CLI, MCP server, Smoke check, Acceptance suite) configure the core and find what
+lies outside it.
 
 Only variables that are set and non-empty override a default, so the defaults live in
 Settings alone, except Qdrant's location: a command line that kept nothing because it
@@ -57,7 +58,7 @@ def environment_from(environ: Mapping[str, str]) -> Environment:
     corpora_file = text("RAG_CORPORA_FILE")
     home = text("HOME")
     return Environment(**_given(
-        mcp_tokens=tuple(t.strip() for t in environ.get("MCP_TOKENS", "").split(",") if t.strip()),
+        mcp_tokens=split_tokens(environ.get("MCP_TOKENS", "")),
         mcp_host=text("MCP_HOST"),
         mcp_port=port,
         mcp_tls_cert=text("MCP_TLS_CERT"),
@@ -69,6 +70,11 @@ def environment_from(environ: Mapping[str, str]) -> Environment:
         gitlab_token=text("GITLAB_TOKEN"),
         home=Path(home) if home else None,
     ))
+
+
+def split_tokens(listed: str) -> tuple[str, ...]:
+    """The tokens of a comma-separated list, as MCP_TOKENS holds them; blanks are dropped."""
+    return tuple(token.strip() for token in listed.split(",") if token.strip())
 
 
 def settings_from_environment(environ: Mapping[str, str], *,

@@ -1,7 +1,7 @@
 """MCP server adapter over the Knowledge index: search_docs, list_spaces, get_page.
 
-It talks only to the Knowledge index and reads no data directory. Settings and the
-Environment come from the environment (see ``environment``), which holds for this server:
+It talks only to the Knowledge index and reads no data directory. Its Settings and wiring come
+from environment variables (see ``environment``); for this server those are:
 
     MCP_TOKENS    comma-separated bearer tokens; every valid token sees all indexed content
     MCP_HOST      address to listen on (default 127.0.0.1)

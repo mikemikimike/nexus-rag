@@ -294,7 +294,8 @@ SHARED_SETTINGS = """\
 # suggested one is below; unset leaves queries as they are. Needs no Rebuild.
 # RAG_QUERY_INSTRUCTION=Given a question, retrieve the passages that answer it
 # Other tuning (RAG_REBUILD_FAILURE_THRESHOLD, RAG_CHUNK_TOKENS, RAG_TOP_K, ...): the RAG_*
-# names in src/local_rag/environment.py; unset means the default.
+# names in src/local_rag/environment.py (on the container route, listed in the compose file);
+# unset means the default.
 
 # Confluence (read by confluence-cli during a Sync)
 # CONFLUENCE_DOMAIN=confluence.example.test

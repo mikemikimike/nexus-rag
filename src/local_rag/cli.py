@@ -18,8 +18,9 @@ from typing import TextIO
 from qdrant_client import QdrantClient
 
 from local_rag.corpus import Corpus
-from local_rag.declaration import DEFAULT_PATH, Declaration, DeclarationError
-from local_rag.environment import Environment, environment_from, settings_from_environment
+from local_rag.declaration import Declaration, DeclarationError
+from local_rag.environment import (
+    DEFAULT_CORPORA_FILE, Environment, environment_from, settings_from_environment)
 from local_rag.gateway import ModelGateway
 from local_rag.gateway_litellm import gateway_from_settings
 from local_rag.index import IndexStatus, KnowledgeIndex, Passage, RebuildReport, SyncReport
@@ -88,7 +89,7 @@ def _parser() -> argparse.ArgumentParser:
     declared = argparse.ArgumentParser(add_help=False)
     declared.add_argument(
         "--corpora", type=Path, metavar="FILE",
-        help=f"the Corpus declaration file (default: $RAG_CORPORA_FILE, else {DEFAULT_PATH})")
+        help=f"the Corpus declaration file (default: $RAG_CORPORA_FILE, else {DEFAULT_CORPORA_FILE})")
 
     sync = commands.add_parser(
         "sync", parents=[declared], help="bring one Corpus's Documents up to date")
