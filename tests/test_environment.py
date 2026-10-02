@@ -167,3 +167,8 @@ def test_a_port_that_is_not_a_number_names_its_variable():
 
 def test_the_tokens_never_appear_in_the_environment_s_repr():
     assert "s3cret" not in repr(environment_from({"MCP_TOKENS": "s3cret", "GITLAB_TOKEN": "s3cret"}))
+
+
+def test_without_home_the_environment_leaves_the_home_to_be_found_when_a_cache_needs_it():
+    # A process with no HOME and no passwd entry must still start: only a GitLab Corpus asks.
+    assert environment_from({}).home is None

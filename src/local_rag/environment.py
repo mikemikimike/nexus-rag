@@ -42,7 +42,7 @@ class Environment:
     confluence_domain: str | None = None
     gitlab_url: str | None = None  # the GitLab base URL, without a project path
     gitlab_token: str | None = field(default=None, repr=False)
-    home: Path = field(default_factory=Path.home)  # below which the GitLab mirrors are cached
+    home: Path | None = None  # below which the GitLab mirrors are cached; None: the user's home
 
 
 def environment_from(environ: Mapping[str, str]) -> Environment:

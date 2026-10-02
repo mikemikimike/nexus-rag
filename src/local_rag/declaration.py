@@ -178,7 +178,7 @@ def _gitlab(name: str, table: _Table, environment: Environment) -> Corpus:
         raise DeclarationError(
             f"corpus {name!r}: {' and '.join(missing)} must be set in the environment")
     cache = (table.base / table.text("cache") if "cache" in table
-             else environment.home / DEFAULT_GITLAB_CACHE)
+             else (environment.home or Path.home()) / DEFAULT_GITLAB_CACHE)
     return GitLabCorpus(repositories, name=name, url=url, token=token, cache=cache)
 
 
