@@ -2,6 +2,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import quote
 
 # A Corpus name prefixes the id of each of its Documents in the Knowledge index ("name:id"),
 # so it must not hold the separator: the first colon of a stored id ends the name.
@@ -31,6 +32,51 @@ def qualified_id(corpus: str, document_id: str) -> str:
 
 
 @dataclass(frozen=True)
+class TrackedRef:
+    """A Repository at one branch or tag whose files a GitLab Corpus contributes."""
+
+    repository: str  # the Repository's full path, ``platform/payments``
+    ref: str  # a branch or a tag
+    primary: bool = True  # whether this is the Repository's Primary ref
+
+    @property
+    def part(self) -> str:
+        """What a failure to read it is called in a listing: ``<repository>@<ref>``."""
+        return f"{self.repository}@{self.ref}"
+
+
+@dataclass(frozen=True)
+class CodeFile:
+    """Where a Document from code was read: a file at a Tracked ref."""
+
+    tracked_ref: TrackedRef
+    path: str  # the file's path within its Repository
+
+    @property
+    def document_id(self) -> str:
+        """``<repository>@<ref>:<path>``: a ref and a Repository path never hold a colon."""
+        return f"{self.tracked_ref.part}:{self.path}"
+
+    @staticmethod
+    def split_id(document_id: str) -> tuple[str, str]:
+        """A code Document's id as its Tracked ref's ``part`` and the file's path."""
+        part, _, path = document_id.partition(":")
+        if "@" not in part or not path:
+            raise ValueError(f"{document_id!r} is not the id of a file at a Tracked ref")
+        return part, path
+
+    def link(self, base_url: str) -> str:
+        """Where GitLab shows the file at its ref."""
+        ref = self.tracked_ref
+        return f"{base_url.rstrip('/')}/{ref.repository}/-/blob/{quote(ref.ref)}/{quote(self.path)}"
+
+    def placement(self, base_url: str) -> str:
+        """The listing's own say on the file (see ``DocumentRef.placement``): whether its ref is
+        the Primary ref, and its link."""
+        return f"{'primary' if self.tracked_ref.primary else 'tracked'} {self.link(base_url)}"
+
+
+@dataclass(frozen=True)
 class Document:
     id: str
     title: str
@@ -42,10 +88,7 @@ class Document:
     corpus: str | None = None  # the Corpus that owns it; set by the Knowledge index
     media_type: str = "text/plain"  # the Media type its Corpus gave it, kept past extraction
     parts: tuple[str, ...] = ()  # the parts of its Corpus it was listed under; set by the index
-    repository: str | None = None  # code: the Repository's path; None for other Corpora
-    ref: str | None = None  # code: the Tracked ref the file was read at
-    primary: bool = True  # code: whether that is the Repository's Primary ref
-    path: str | None = None  # a code file's path within its Repository
+    code: CodeFile | None = None  # where a Document from code was read; None for other Corpora
     placement: str = ""  # see DocumentRef.placement; set by the index
 
 
@@ -61,10 +104,7 @@ class RawDocument:
     content: bytes
     media_type: str
     parent_id: str | None = None  # the page an Attachment belongs to
-    repository: str | None = None  # code: the Repository's path; None for other Corpora
-    ref: str | None = None  # code: the Tracked ref the file was read at
-    primary: bool = True  # code: whether that is the Repository's Primary ref
-    path: str | None = None  # a code file's path within its Repository
+    code: CodeFile | None = None  # where a Document from code was read; None for other Corpora
 
 
 @dataclass(frozen=True)

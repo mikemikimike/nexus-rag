@@ -204,8 +204,8 @@ def _print_passage(number: int, passage: Passage, out: TextIO) -> None:
     for name, value in passage.code_location:
         print(f"   {name}: {value}", file=out)
     print(f"   space: {passage.space}", file=out)
-    if passage.ref:
-        print(f"   ref: {passage.ref}", file=out)
+    if passage.code:
+        print(f"   ref: {passage.code.tracked_ref.ref}", file=out)
     print(f"   page id: {passage.parent_id or passage.document_id}", file=out)
     if passage.parent_id:
         print(f"   attachment: {passage.document_id}", file=out)

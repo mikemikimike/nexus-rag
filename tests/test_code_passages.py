@@ -8,7 +8,7 @@ from qdrant_client import QdrantClient
 from local_rag import Access, KnowledgeIndex, Settings
 from local_rag.chunker import Chunker
 from local_rag.cli import main
-from local_rag.corpus import InMemoryCorpus, RawDocument
+from local_rag.corpus import CodeFile, InMemoryCorpus, RawDocument, TrackedRef
 from local_rag.environment import SettingsError, settings_from_environment
 from local_rag.settings import RetrievalMode
 from local_rag.tokens import count_tokens
@@ -29,7 +29,7 @@ def code(text: str, *, path: str = "src/ledger.py", media_type: str = "text/x-py
     return RawDocument(
         id=f"platform/payments@main:{path}", title=f"payments/{path}", url=URL,
         space="platform", version="1", content=text.replace("\n", eol).encode(),
-        media_type=media_type, repository="platform/payments", ref="main", path=path)
+        media_type=media_type, code=CodeFile(TrackedRef("platform/payments", "main"), path))
 
 
 def indexed(text: str, settings: Settings = SMALL, **kwargs) -> KnowledgeIndex:
