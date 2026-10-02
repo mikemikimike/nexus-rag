@@ -6,9 +6,11 @@ from pathlib import Path
 
 from local_rag.acceptance_report import Context
 from local_rag.checks import QDRANT_DOWN, SYSTEMD_UNITS, Failure, Skipped
+from local_rag.container import ContainerLayout
+from local_rag.installer import Layout
 
-SYSTEMD_ENV_FILE = "/etc/local-rag/local-rag.env"
-CONTAINER_ENV_FILE = "/etc/local-rag/container.env"
+SYSTEMD_ENV_FILE = str(Layout(Path("/")).env_file)
+CONTAINER_ENV_FILE = str(ContainerLayout(Path("/")).env_file)
 CONTAINER_TIMERS = ("local-rag-container-sync.timer", "local-rag-container-full.timer")
 CONTAINER_SERVICES = ("qdrant", "mcp")
 COMPOSE_PROJECT = "local-rag"
@@ -155,8 +157,8 @@ def run_gitlab(ctx: Context) -> None:
 def _declared(ctx: Context, read):
     """What ``read`` makes of the Corpus declaration, and the file's path; the check is skipped
     when the file cannot be used."""
-    from local_rag.declaration import DEFAULT_PATH, Declaration, DeclarationError  # not at import: the install group runs without it
-    path = Path(ctx.args.corpora or ctx.environ.get("RAG_CORPORA_FILE") or DEFAULT_PATH)
+    from local_rag.declaration import Declaration, DeclarationError  # not at import: the install group runs without it
+    path = Path(ctx.args.corpora or ctx.environment.corpora_file)
     try:
         return read(Declaration.read(path)), path
     except DeclarationError as error:
@@ -165,7 +167,7 @@ def _declared(ctx: Context, read):
 
 def _tool_runs(ctx: Context, declared: list) -> str:
     found, path = _declared(ctx, lambda declaration: [
-        declaration.corpus(name, ctx.environ) for name in declaration.names_of("gitlab")])
+        declaration.corpus(name, ctx.environment) for name in declaration.names_of("gitlab")])
     declared += found
     if not declared:
         raise Skipped(f"{path} declares no GitLab Corpus")
@@ -194,11 +196,11 @@ def _repositories(declared: list) -> str:
 
 
 def _command(ctx: Context) -> str:
-    return ctx.environ.get("CONFLUENCE_BIN") or "confluence"
+    return ctx.environment.confluence_bin
 
 
 def _read(ctx: Context) -> str:
-    domain = ctx.environ.get("CONFLUENCE_DOMAIN")
+    domain = ctx.environment.confluence_domain
     if not domain:
         raise Skipped("CONFLUENCE_DOMAIN is not set, so Confluence is not this Corpus")
     command = _command(ctx)

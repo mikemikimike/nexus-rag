@@ -39,7 +39,8 @@ from typing import TextIO
 from local_rag.binary_drop import (
     QDRANT, SYSTEM_VERSION, Artifact, DropRefused, parse_reported_version, require_version,
     sha256_of, unpack_code, verified_code_archive, verify_against_sums)
-from local_rag.installer import CORPORA_FILE, CommandFailed, Layout, SystemHost, create_text
+from local_rag.installer import (
+    CORPORA_FILE, SHARED_SETTINGS, CommandFailed, Layout, SystemHost, create_text)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SYSTEM_REPOSITORY = "local-rag"
@@ -244,33 +245,7 @@ QDRANT_API_KEY={qdrant_key}
 MCP_TOKENS={mcp_token}
 MCP_PORT=8765
 
-# Retrieval mode: hybrid (the default) searches by meaning and keywords and needs an embedding
-# model; keyword searches by keywords alone and needs none. Changing it later means a Rebuild.
-# RAG_RETRIEVAL=hybrid
-
-# Model gateway (LiteLLM): set these before the first Sync
-# LITELLM_BASE_URL=http://GATEWAY_HOST:4000/v1
-# LITELLM_API_KEY=
-# RAG_EMBED_MODEL=YOUR-EMBEDDING-MODEL-NAME
-# RAG_RERANK_MODEL=
-# Qwen3-Embedding wants an instruction in front of each query (not of documents), so a
-# suggested one is below; unset leaves queries as they are. Needs no Rebuild.
-# RAG_QUERY_INSTRUCTION=Given a question, retrieve the passages that answer it
-# Other tuning (RAG_REBUILD_FAILURE_THRESHOLD, RAG_CHUNK_TOKENS, RAG_TOP_K, ...): the RAG_*
-# names in src/local_rag/environment.py, listed in the compose file; unset means the default.
-
-# Confluence (read by confluence-cli during a Sync)
-# CONFLUENCE_DOMAIN=confluence.example.test
-# CONFLUENCE_API_PATH=/rest/api
-# CONFLUENCE_AUTH_TYPE=bearer
-# CONFLUENCE_API_TOKEN=
-# CONFLUENCE_READ_ONLY=true
-
-# GitLab (read by a `kind = "gitlab"` Corpus; a read-only token that can see only code
-# suitable for every user of this server; the URL is the base, without a project path)
-# GITLAB_URL=https://gitlab.example.test
-# GITLAB_TOKEN=
-"""
+""" + SHARED_SETTINGS
 
 
 def _check_versions(host, qdrant: Artifact) -> None:

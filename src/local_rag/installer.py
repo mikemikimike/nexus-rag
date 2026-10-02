@@ -39,6 +39,7 @@ from typing import TextIO
 from local_rag.binary_drop import (
     QDRANT, Artifact, DropRefused, place_binary, sha256_of, unpack_code, verified_code_archive,
     verified_qdrant_binary)
+from local_rag.environment import DEFAULT_CORPORA_FILE
 
 
 SERVICE_USER = "ragsvc"
@@ -60,7 +61,7 @@ class Layout:
     service_directories = property(lambda self: [
         self.at("/var/lib/qdrant"), self.at("/var/lib/qdrant/storage"),
         self.at("/var/lib/qdrant/snapshots")])
-    corpora_file = property(lambda self: self.at("/etc/local-rag/corpora.toml"))
+    corpora_file = property(lambda self: self.at(str(DEFAULT_CORPORA_FILE)))
     units_directory = property(lambda self: self.at("/etc/systemd/system"))
     venv = property(lambda self: self.at("/opt/local-rag/venv"))
     state_file = property(lambda self: self.at("/opt/local-rag/installed.json"))
@@ -278,6 +279,38 @@ def _missing_prerequisites(host, *, real_root: bool) -> list[str]:
     return problems
 
 
+# The env file's settings after a route's own Qdrant and MCP server parts, the same on both routes.
+SHARED_SETTINGS = """\
+# Retrieval mode: hybrid (the default) searches by meaning and keywords and needs an embedding
+# model; keyword searches by keywords alone and needs none. Changing it later means a Rebuild.
+# RAG_RETRIEVAL=hybrid
+
+# Model gateway (LiteLLM): set these before the first Sync
+# LITELLM_BASE_URL=http://GATEWAY_HOST:4000/v1
+# LITELLM_API_KEY=
+# RAG_EMBED_MODEL=YOUR-EMBEDDING-MODEL-NAME
+# RAG_RERANK_MODEL=
+# Qwen3-Embedding wants an instruction in front of each query (not of documents), so a
+# suggested one is below; unset leaves queries as they are. Needs no Rebuild.
+# RAG_QUERY_INSTRUCTION=Given a question, retrieve the passages that answer it
+# Other tuning (RAG_REBUILD_FAILURE_THRESHOLD, RAG_CHUNK_TOKENS, RAG_TOP_K, ...): the RAG_*
+# names in src/local_rag/environment.py (on the container route, listed in the compose file);
+# unset means the default.
+
+# Confluence (read by confluence-cli during a Sync)
+# CONFLUENCE_DOMAIN=confluence.example.test
+# CONFLUENCE_API_PATH=/rest/api
+# CONFLUENCE_AUTH_TYPE=bearer
+# CONFLUENCE_API_TOKEN=
+# CONFLUENCE_READ_ONLY=true
+
+# GitLab (read by a `kind = "gitlab"` Corpus; a read-only token that can see only code
+# suitable for every user of this server; the URL is the base, without a project path)
+# GITLAB_URL=https://gitlab.example.test
+# GITLAB_TOKEN=
+"""
+
+
 ENV_FILE = """\
 # local-rag settings and secrets, read by every service (systemd EnvironmentFile).
 # Written once by the Installer; an upgrade never touches it. Restart the services after
@@ -301,31 +334,7 @@ MCP_PORT=8765
 # MCP_TLS_CERT=/etc/local-rag/tls/server.crt
 # MCP_TLS_KEY=/etc/local-rag/tls/server.key
 
-# Retrieval mode: hybrid (the default) searches by meaning and keywords and needs an embedding
-# model; keyword searches by keywords alone and needs none. Changing it later means a Rebuild.
-# RAG_RETRIEVAL=hybrid
-
-# Model gateway (LiteLLM): set these before the first Sync
-# LITELLM_BASE_URL=http://GATEWAY_HOST:4000/v1
-# LITELLM_API_KEY=
-# RAG_EMBED_MODEL=YOUR-EMBEDDING-MODEL-NAME
-# RAG_RERANK_MODEL=
-# Qwen3-Embedding wants an instruction in front of each query (not of documents), so a
-# suggested one is below; unset leaves queries as they are. Needs no Rebuild.
-# RAG_QUERY_INSTRUCTION=Given a question, retrieve the passages that answer it
-
-# Confluence (read by confluence-cli during a Sync)
-# CONFLUENCE_DOMAIN=confluence.example.test
-# CONFLUENCE_API_PATH=/rest/api
-# CONFLUENCE_AUTH_TYPE=bearer
-# CONFLUENCE_API_TOKEN=
-# CONFLUENCE_READ_ONLY=true
-
-# GitLab (read by a `kind = "gitlab"` Corpus; a read-only token that can see only code
-# suitable for every user of this server; the URL is the base, without a project path)
-# GITLAB_URL=https://gitlab.example.test
-# GITLAB_TOKEN=
-"""
+""" + SHARED_SETTINGS
 
 
 CORPORA_FILE = """\

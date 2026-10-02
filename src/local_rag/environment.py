@@ -1,4 +1,6 @@
-"""Settings from environment variables: how the adapters (CLI, MCP server) configure the core.
+"""Settings and the wiring around the core (``Environment``), from environment variables: how
+the adapters (CLI, MCP server, Smoke check, Acceptance suite) configure the core and find what
+lies outside it.
 
 Only variables that are set and non-empty override a default, so the defaults live in
 Settings alone, except Qdrant's location: a command line that kept nothing because it
@@ -7,6 +9,7 @@ Qdrant server. The variable names are the ones operators already know from earli
 """
 import sys
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from local_rag.settings import RetrievalMode, Settings
@@ -14,10 +17,64 @@ from local_rag.sparse import SparseParams
 
 
 DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
+DEFAULT_MCP_HOST = "127.0.0.1"
+DEFAULT_MCP_PORT = 8765
+DEFAULT_CORPORA_FILE = Path("/etc/local-rag/corpora.toml")
 
 
 class SettingsError(ValueError):
     """An environment variable holds something that cannot be used."""
+
+
+@dataclass(frozen=True)
+class Environment:
+    """How this installation is wired outside the Knowledge index: who may call the MCP server
+    and where it listens, where the Corpus declaration is, and how the Corpora reach their
+    sources. Whether a value is required is for whoever uses it to say."""
+
+    mcp_tokens: tuple[str, ...] = field(default=(), repr=False)  # every valid token sees all content
+    mcp_host: str = DEFAULT_MCP_HOST
+    mcp_port: int = DEFAULT_MCP_PORT
+    mcp_tls_cert: str | None = None  # serve HTTPS with this certificate and key
+    mcp_tls_key: str | None = None
+    corpora_file: Path = DEFAULT_CORPORA_FILE
+    confluence_bin: str = "confluence"  # the Confluence CLI
+    confluence_domain: str | None = None
+    gitlab_url: str | None = None  # the GitLab base URL, without a project path
+    gitlab_token: str | None = field(default=None, repr=False)
+    home: Path | None = None  # below which the GitLab mirrors are cached; None: the user's home
+
+
+def environment_from(environ: Mapping[str, str]) -> Environment:
+    """The Environment the variables ask for; raises SettingsError for an unusable value."""
+    def text(name: str) -> str | None:
+        return environ.get(name, "").strip() or None
+
+    port = text("MCP_PORT")
+    try:
+        port = int(port) if port else None
+    except ValueError:
+        raise SettingsError(f"MCP_PORT must be a number, got {port!r}") from None
+    corpora_file = text("RAG_CORPORA_FILE")
+    home = text("HOME")
+    return Environment(**_given(
+        mcp_tokens=split_tokens(environ.get("MCP_TOKENS", "")),
+        mcp_host=text("MCP_HOST"),
+        mcp_port=port,
+        mcp_tls_cert=text("MCP_TLS_CERT"),
+        mcp_tls_key=text("MCP_TLS_KEY"),
+        corpora_file=Path(corpora_file) if corpora_file else None,
+        confluence_bin=text("CONFLUENCE_BIN"),
+        confluence_domain=text("CONFLUENCE_DOMAIN"),
+        gitlab_url=text("GITLAB_URL"),
+        gitlab_token=text("GITLAB_TOKEN"),
+        home=Path(home) if home else None,
+    ))
+
+
+def split_tokens(listed: str) -> tuple[str, ...]:
+    """The tokens of a comma-separated list, as MCP_TOKENS holds them; blanks are dropped."""
+    return tuple(token.strip() for token in listed.split(",") if token.strip())
 
 
 def settings_from_environment(environ: Mapping[str, str], *,

@@ -7,6 +7,7 @@ from index_states import NAMES
 from local_rag import KnowledgeIndex, Settings
 from local_rag.corpus import CodeFile, TrackedRef, listing_failures
 from local_rag.declaration import Declaration
+from local_rag.environment import Environment
 from local_rag.fakes import FakeModelGateway
 from local_rag.gitlab import GitLabCorpus, Repository
 from local_rag.settings import RetrievalMode
@@ -211,9 +212,9 @@ cache = "{cache}"
 path = "{REPOSITORY}"
 refs = ["main"]
 ''')
-    environ = {"GITLAB_URL": gitlab.url, "GITLAB_TOKEN": TOKEN}
+    environment = Environment(gitlab_url=gitlab.url, gitlab_token=TOKEN)
 
-    built = Declaration.read(file).corpus("code", environ)
+    built = Declaration.read(file).corpus("code", environment)
 
     assert built.name == "code"
     assert document_ids(built) == ids(*FILES)
@@ -332,11 +333,11 @@ def declared_code(tmp_path, cache, refs):
 
 def test_the_declaration_lists_tracked_refs_with_excludes(gitlab, cache, tmp_path):
     tracked(gitlab)
-    environ = {"GITLAB_URL": gitlab.url, "GITLAB_TOKEN": TOKEN}
+    environment = Environment(gitlab_url=gitlab.url, gitlab_token=TOKEN)
 
     built = declared_code(
         tmp_path, cache, '["main", {name = "feature/x", exclude = ["src/hook.py"]}]'
-    ).corpus("code", environ)
+    ).corpus("code", environment)
 
     assert {r.code.tracked_ref.ref: r.code.tracked_ref.primary
             for r in map(built.fetch, document_ids(built))} == {
@@ -346,11 +347,11 @@ def test_the_declaration_lists_tracked_refs_with_excludes(gitlab, cache, tmp_pat
 
 def test_the_declaration_can_mark_another_ref_primary(gitlab, cache, tmp_path):
     tracked(gitlab)
-    environ = {"GITLAB_URL": gitlab.url, "GITLAB_TOKEN": TOKEN}
+    environment = Environment(gitlab_url=gitlab.url, gitlab_token=TOKEN)
 
     built = declared_code(
         tmp_path, cache, '["main", {name = "feature/x", primary = true}]'
-    ).corpus("code", environ)
+    ).corpus("code", environment)
 
     assert {r.code.tracked_ref.ref: r.code.tracked_ref.primary
             for r in map(built.fetch, document_ids(built))} == {
@@ -365,7 +366,7 @@ def test_the_declaration_rejects_unusable_refs(tmp_path, refs):
     from local_rag.declaration import DeclarationError
     with pytest.raises(DeclarationError):
         declared_code(tmp_path, tmp_path / "c", refs).corpus(
-            "code", {"GITLAB_URL": "x", "GITLAB_TOKEN": "y"})
+            "code", Environment(gitlab_url="x", gitlab_token="y"))
 
 
 def test_a_file_that_is_not_utf_8_or_has_a_nul_anywhere_is_left_out(gitlab, cache):

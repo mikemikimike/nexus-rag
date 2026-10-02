@@ -37,10 +37,10 @@ from typing import Any
 
 from local_rag.confluence import DEFAULT_EXCLUDED_ATTACHMENTS, ConfluenceCorpus
 from local_rag.corpus import Corpus, check_corpus_name
+from local_rag.environment import Environment
 from local_rag.folder import FolderCorpus
 from local_rag.gitlab import GitLabCorpus, Repository
 
-DEFAULT_PATH = "/etc/local-rag/corpora.toml"
 DEFAULT_GITLAB_CACHE = Path(".cache/local-rag/gitlab")  # below HOME
 
 
@@ -51,7 +51,7 @@ class DeclarationError(ValueError):
 @dataclass(frozen=True)
 class _Builder:
     parameters: frozenset[str]  # the keys a table of this kind may hold besides ``kind``
-    build: Callable[[str, "_Table", Mapping[str, str]], Corpus]
+    build: Callable[[str, "_Table", Environment], Corpus]
 
 
 class _Table:
@@ -122,7 +122,7 @@ class _Table:
         return value
 
 
-def _folder(name: str, table: _Table, environ: Mapping[str, str]) -> Corpus:
+def _folder(name: str, table: _Table, environment: Environment) -> Corpus:
     path = table.base / table.text("path")
     if not path.is_dir():
         # An absent folder (an unmounted share) must not look like an empty Corpus,
@@ -131,12 +131,12 @@ def _folder(name: str, table: _Table, environ: Mapping[str, str]) -> Corpus:
     return FolderCorpus(path, name=name)
 
 
-def _confluence(name: str, table: _Table, environ: Mapping[str, str]) -> Corpus:
+def _confluence(name: str, table: _Table, environment: Environment) -> Corpus:
     roots = table.texts("roots")
     if not roots:
         raise DeclarationError(f"corpus {name!r}: roots must name at least one Root")
     return ConfluenceCorpus(
-        roots, name=name, confluence_bin=environ.get("CONFLUENCE_BIN") or "confluence",
+        roots, name=name, confluence_bin=environment.confluence_bin,
         max_depth=table.whole("max_depth", 0), attachments=table.flag("attachments", True),
         exclude_attachments=table.texts("exclude_attachments", DEFAULT_EXCLUDED_ATTACHMENTS))
 
@@ -170,16 +170,16 @@ def _repository(table: _Table) -> Repository:
         raise DeclarationError(f"corpus {table.name!r}: {error}") from None
 
 
-def _gitlab(name: str, table: _Table, environ: Mapping[str, str]) -> Corpus:
+def _gitlab(name: str, table: _Table, environment: Environment) -> Corpus:
     repositories = [_repository(t) for t in table.tables("repositories")]
-    missing = [v for v in ("GITLAB_URL", "GITLAB_TOKEN") if not environ.get(v, "").strip()]
+    url, token = environment.gitlab_url, environment.gitlab_token
+    missing = [v for v, value in (("GITLAB_URL", url), ("GITLAB_TOKEN", token)) if not value]
     if missing:
         raise DeclarationError(
             f"corpus {name!r}: {' and '.join(missing)} must be set in the environment")
-    home = Path(environ.get("HOME") or Path.home())
-    cache = table.base / table.text("cache") if "cache" in table else home / DEFAULT_GITLAB_CACHE
-    return GitLabCorpus(repositories, name=name, url=environ["GITLAB_URL"].strip(),
-                        token=environ["GITLAB_TOKEN"].strip(), cache=cache)
+    cache = (table.base / table.text("cache") if "cache" in table
+             else (environment.home or Path.home()) / DEFAULT_GITLAB_CACHE)
+    return GitLabCorpus(repositories, name=name, url=url, token=token, cache=cache)
 
 
 _KINDS: dict[str, _Builder] = {
@@ -250,17 +250,18 @@ class Declaration:
         """The names of the declared Corpora of one kind (``folder``, ``confluence``, ``gitlab``)."""
         return [name for name, declared in self._kinds.items() if declared == kind]
 
-    def corpus(self, name: str, environ: Mapping[str, str] | None = None) -> Corpus:
+    def corpus(self, name: str, environment: Environment | None = None) -> Corpus:
         """The Corpus declared under ``name``; raises DeclarationError if there is none or its
         parameters cannot be used (for example a folder that is not there)."""
         if name not in self._tables:
             declared = ", ".join(self.names) or "none"
             raise DeclarationError(f"no Corpus named {name!r} is declared (declared: {declared})")
-        return _KINDS[self._kinds[name]].build(name, self._tables[name], environ or {})
+        return _KINDS[self._kinds[name]].build(name, self._tables[name],
+                                               environment or Environment())
 
-    def corpora(self, environ: Mapping[str, str] | None = None) -> list[Corpus]:
+    def corpora(self, environment: Environment | None = None) -> list[Corpus]:
         """Every declared Corpus, built."""
-        return [self.corpus(name, environ) for name in self.names]
+        return [self.corpus(name, environment) for name in self.names]
 
     def confluence_roots(self) -> list[str]:
         """The Roots of every Confluence Corpus declared, for checks that need them resolved."""

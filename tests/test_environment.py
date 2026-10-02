@@ -1,9 +1,11 @@
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from local_rag import Settings
-from local_rag.environment import SettingsError, settings_from_environment
+from local_rag.environment import (
+    Environment, SettingsError, environment_from, settings_from_environment)
 from local_rag.settings import RetrievalMode
 from local_rag.sparse import SparseParams
 
@@ -126,3 +128,47 @@ def test_the_query_instruction_comes_from_the_environment():
 
 def test_a_blank_query_instruction_leaves_queries_unchanged():
     assert settings_from_environment({**BGE, "RAG_QUERY_INSTRUCTION": "  "}).query_instruction == ""
+
+
+def test_an_empty_environment_gives_the_wiring_defaults():
+    environment = environment_from({"HOME": "/home/rag"})
+
+    assert environment == Environment(
+        mcp_tokens=(), mcp_host="127.0.0.1", mcp_port=8765, mcp_tls_cert=None, mcp_tls_key=None,
+        corpora_file=Path("/etc/local-rag/corpora.toml"), confluence_bin="confluence",
+        confluence_domain=None, gitlab_url=None, gitlab_token=None, home=Path("/home/rag"))
+
+
+def test_the_mcp_tokens_are_split_at_commas_with_blanks_dropped():
+    environment = environment_from({"MCP_TOKENS": " alice, bob ,,  "})
+
+    assert environment.mcp_tokens == ("alice", "bob")
+
+
+def test_each_variable_reaches_its_place_in_the_environment():
+    environment = environment_from({
+        "MCP_TOKENS": "alice", "MCP_HOST": "0.0.0.0", "MCP_PORT": "9000",
+        "MCP_TLS_CERT": "/tls/server.crt", "MCP_TLS_KEY": "/tls/server.key",
+        "RAG_CORPORA_FILE": "/srv/corpora.toml", "CONFLUENCE_BIN": "/opt/confluence",
+        "CONFLUENCE_DOMAIN": "wiki.example.test", "GITLAB_URL": " https://gitlab.example.test ",
+        "GITLAB_TOKEN": "glpat", "HOME": "/data"})
+
+    assert environment == Environment(
+        mcp_tokens=("alice",), mcp_host="0.0.0.0", mcp_port=9000, mcp_tls_cert="/tls/server.crt",
+        mcp_tls_key="/tls/server.key", corpora_file=Path("/srv/corpora.toml"),
+        confluence_bin="/opt/confluence", confluence_domain="wiki.example.test",
+        gitlab_url="https://gitlab.example.test", gitlab_token="glpat", home=Path("/data"))
+
+
+def test_a_port_that_is_not_a_number_names_its_variable():
+    with pytest.raises(SettingsError, match="MCP_PORT"):
+        environment_from({"MCP_PORT": "http"})
+
+
+def test_the_tokens_never_appear_in_the_environment_s_repr():
+    assert "s3cret" not in repr(environment_from({"MCP_TOKENS": "s3cret", "GITLAB_TOKEN": "s3cret"}))
+
+
+def test_without_home_the_environment_leaves_the_home_to_be_found_when_a_cache_needs_it():
+    # A process with no HOME and no passwd entry must still start: only a GitLab Corpus asks.
+    assert environment_from({}).home is None

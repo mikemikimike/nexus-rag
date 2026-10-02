@@ -16,7 +16,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from local_rag.acceptance_report import Context
 from local_rag.checks import QDRANT_DOWN, Failure
-from local_rag.mcp_server import DEFAULT_HOST, DEFAULT_PORT
+from local_rag.environment import split_tokens
 
 TIMEOUT = 20.0
 _DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # a local server, no proxy
@@ -28,18 +28,16 @@ def server_url(ctx: Context) -> str:
     """Where the MCP server listens, as this process's environment says (or --mcp-url)."""
     if ctx.args.mcp_url:
         return ctx.args.mcp_url.rstrip("/")
-    environ = ctx.environ
-    host = environ.get("MCP_HOST") or DEFAULT_HOST
+    environment = ctx.environment
+    host = environment.mcp_host
     if host in ("0.0.0.0", "::"):  # listening everywhere includes here
         host = "127.0.0.1"
-    scheme = "https" if environ.get("MCP_TLS_CERT") else "http"
-    return f"{scheme}://{host}:{environ.get('MCP_PORT') or DEFAULT_PORT}"
+    scheme = "https" if environment.mcp_tls_cert else "http"
+    return f"{scheme}://{host}:{environment.mcp_port}"
 
 
 def tokens(ctx: Context) -> list[str]:
-    given = ctx.args.token or ""
-    listed = ctx.environ.get("MCP_TOKENS", "")
-    return [t.strip() for t in (given or listed).split(",") if t.strip()]
+    return list(split_tokens(ctx.args.token) if ctx.args.token else ctx.environment.mcp_tokens)
 
 
 def run_mcp(ctx: Context) -> None:

@@ -1,7 +1,7 @@
 """MCP server adapter over the Knowledge index: search_docs, list_spaces, get_page.
 
-It talks only to the Knowledge index and reads no data directory. Settings come from the
-environment (see ``environment``), plus:
+It talks only to the Knowledge index and reads no data directory. Its Settings and wiring come
+from environment variables (see ``environment``); for this server those are:
 
     MCP_TOKENS    comma-separated bearer tokens; every valid token sees all indexed content
     MCP_HOST      address to listen on (default 127.0.0.1)
@@ -23,14 +23,12 @@ from mcp.server.mcpserver import MCPServer
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 
-from local_rag.environment import SettingsError, settings_from_environment
+from local_rag.environment import SettingsError, environment_from, settings_from_environment
 from local_rag.gateway_litellm import gateway_from_settings
 from local_rag.index import KnowledgeIndex, Passage, SearchResults
 from local_rag.settings import RetrievalMode
 
 MAX_TOP_K = 15  # most Passages one search_docs call may ask for
-DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8765
 
 type Serve = Callable[..., None]  # (app, *, host, port, certfile, keyfile), blocks until stopped
 
@@ -116,13 +114,16 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
     if unknown:
         print(f"error: unknown arguments: {' '.join(unknown)}", file=err)
         return 2
-    tokens = _split(environ.get("MCP_TOKENS", ""))
-    if not stdio and not tokens:
+    try:
+        environment = environment_from(environ)
+    except SettingsError as error:
+        print(f"error: {error}", file=err)
+        return 2
+    if not stdio and not environment.mcp_tokens:
         print("error: MCP_TOKENS is empty; set at least one token "
               "(refusing to serve without authentication)", file=err)
         return 2
     try:
-        port = _port(environ)
         if index is None:
             settings = settings_from_environment(environ)
             index = KnowledgeIndex(settings, gateway_from_settings(settings))
@@ -133,8 +134,9 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
         build_server(index).run("stdio")  # stdout belongs to the protocol
         return 0
     (serve or _serve_with_uvicorn)(
-        build_app(index, tokens), host=environ.get("MCP_HOST") or DEFAULT_HOST, port=port,
-        certfile=environ.get("MCP_TLS_CERT") or None, keyfile=environ.get("MCP_TLS_KEY") or None)
+        build_app(index, environment.mcp_tokens), host=environment.mcp_host,
+        port=environment.mcp_port, certfile=environment.mcp_tls_cert,
+        keyfile=environment.mcp_tls_key)
     return 0
 
 
@@ -142,18 +144,6 @@ def run() -> None:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr,
                         format="%(levelname)s: %(message)s")
     sys.exit(main(sys.argv[1:], os.environ))
-
-
-def _split(tokens: str) -> list[str]:
-    return [token.strip() for token in tokens.split(",") if token.strip()]
-
-
-def _port(environ: Mapping[str, str]) -> int:
-    value = environ.get("MCP_PORT") or str(DEFAULT_PORT)
-    try:
-        return int(value)
-    except ValueError:
-        raise ValueError(f"MCP_PORT must be a number, got {value!r}") from None
 
 
 def _serve_with_uvicorn(app, *, host: str, port: int,
