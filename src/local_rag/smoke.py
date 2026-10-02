@@ -4,22 +4,22 @@ Qdrant, LiteParse, Confluence CLI and (the systemd route) units?
     python -m local_rag.smoke [--systemd]
 
 Run it with the settings the services run with, as the service user. It prints one line
-per check, ``[ OK ]``, ``[WARN]``, ``[SKIP]`` or ``[FAIL]``, never a secret, and exits 0
-unless a check failed (1), or the command line cannot be used (2). It changes nothing: it
-embeds one sentence, reads the Knowledge index's status and runs ``--version`` style
+per check, ``[ OK ]``, ``[WARN]``, ``[SKIP]`` or ``[FAIL]``, never a secret, then a summary
+ending ``SMOKE CHECK PASSED`` or ``SMOKE CHECK FAILED: <checks>``, and exits 0 unless a
+check failed (1), or the command line cannot be used (2). It changes nothing: it embeds one
+sentence, reranks two texts, reads the Knowledge index's status and runs ``--version`` style
 commands. The README says how to run it on each route.
 """
 import argparse
 import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from typing import TextIO
 
 from qdrant_client import QdrantClient
 
-from local_rag.acceptance_host import SYSTEMD_UNITS
-from local_rag.acceptance_report import run_command
+from local_rag import checks
+from local_rag.checks import QDRANT_DOWN, SYSTEMD_UNITS, Failure, Report, Skipped, Warned, run_command
 from local_rag.environment import SettingsError, settings_from_environment
 from local_rag.gateway import ModelGateway
 from local_rag.gateway_litellm import gateway_from_settings
@@ -28,18 +28,9 @@ from local_rag.index_format import Access
 from local_rag.settings import RetrievalMode
 
 PLACEHOLDER_PREFIX = "CHANGE_ME"
+EMBEDDINGS = "Model gateway (embeddings)"
 
 type Run = Callable[[Sequence[str]], str]  # runs a command, returns its output, raises if it fails
-
-
-@dataclass
-class _Skipped(Exception):
-    why: str
-
-
-@dataclass
-class _Warning(Exception):
-    what: str
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str], *,
@@ -49,111 +40,122 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
     """Run the checks; returns 0 if none failed. The keyword arguments replace the Model
     gateway, the Qdrant connection and the host's commands, for callers (tests) that have
     stand-ins."""
-    out = stdout or sys.stdout
     try:
         args = _parser().parse_args(argv)
     except SystemExit as stop:
         return int(stop.code or 0)
     run = run or run_command
-    failed = False
-
-    def check(name: str, what: Callable[[], str]) -> None:
-        nonlocal failed
-        try:
-            print(f"[ OK ] {name}: {what()}", file=out)
-        except _Skipped as skipped:
-            print(f"[SKIP] {name}: {skipped.why}", file=out)
-        except _Warning as warning:
-            print(f"[WARN] {name}: {warning.what}", file=out)
-        except Exception as error:
-            failed = True
-            print(f"[FAIL] {name}: {str(error) or type(error).__name__}", file=out)
+    report = Report(stdout or sys.stdout, checks.secrets_in(environ), verdict="SMOKE CHECK")
+    check = report.check
 
     check("MCP_TOKENS", lambda: _tokens(environ))
     try:
         settings = settings_from_environment(environ)
     except SettingsError as error:
-        check("settings", lambda: _raise(error))
+        check("settings", lambda: _settings_error(error))
+        report.summary()
         return 1
 
     gateway = gateway or gateway_from_settings(settings)
-    check("Model gateway (embeddings)", lambda: _embeddings(settings, gateway))
-    check("Rerank", lambda: _rerank(settings.rerank_model, gateway))
+    check(EMBEDDINGS, lambda: checks.embeddings(settings, gateway))
+    # A reranker is checked on its own in Keyword-only retrieval, which has no embedding check.
+    check("Rerank", lambda: checks.rerank(settings, gateway),
+          needs=[] if settings.retrieval is RetrievalMode.KEYWORD else [EMBEDDINGS])
     check("Knowledge index", lambda: _index(settings, gateway, client))
-    check("LiteParse", lambda: _version(run, settings.liteparse_bin))
+    check("LiteParse", lambda: _liteparse(run, settings.liteparse_bin))
     check("Confluence CLI", lambda: _confluence(environ, run))
     check("GitLab (git)", lambda: _gitlab(environ, run))
     if args.systemd:
         for unit in SYSTEMD_UNITS:
             check(unit, lambda unit=unit: _unit_active(run, unit))
-    return 1 if failed else 0
+    report.summary()
+    return 1 if report.failed else 0
 
 
 def _tokens(environ: Mapping[str, str]) -> str:
     tokens = [t.strip() for t in environ.get("MCP_TOKENS", "").split(",") if t.strip()]
     if not tokens:
-        raise ValueError("MCP_TOKENS is empty; the MCP server refuses to start without a token")
+        raise Failure("MCP_TOKENS is empty; the MCP server refuses to start without a token",
+                      cause="no token was generated into the env file, or this is not the "
+                            "environment the services run with", see="section 3 E (Access control)")
     if any(t.startswith(PLACEHOLDER_PREFIX) for t in tokens):
-        raise ValueError("MCP_TOKENS still holds a placeholder")
+        raise Failure("MCP_TOKENS still holds a placeholder",
+                      cause="the env file's example value was never replaced by a generated token",
+                      see="section 3 E (Access control)")
     return f"{len(tokens)} token{'s' if len(tokens) != 1 else ''}"
-
-
-def _embeddings(settings, gateway: ModelGateway | None) -> str:
-    if settings.retrieval is RetrievalMode.KEYWORD:
-        raise _Skipped("RAG_RETRIEVAL=keyword, so no embedding model is used")
-    dimension = len(gateway.embed_query("smoke test"))
-    return f"model {settings.embed_model!r} answers, {dimension} dimensions"
-
-
-def _rerank(model: str | None, gateway: ModelGateway | None) -> str:
-    if not model:
-        raise _Skipped("RAG_RERANK_MODEL is not set, so search does not rerank")
-    scores = gateway.rerank("smoke test", ["first text", "second text"])
-    if len(scores) != 2:
-        raise ValueError(f"asked to score 2 texts, got {len(scores)} scores")
-    return f"model {model!r} answers"
 
 
 def _index(settings, gateway: ModelGateway | None, client: QdrantClient | None) -> str:
     index = KnowledgeIndex(settings, gateway, client=client)
     health = index.health()
     if not health.qdrant or not health.knowledge_index:
-        raise RuntimeError("; ".join(health.notes) or "not reachable")
+        raise Failure("; ".join(health.notes) or "not reachable",
+                      cause="Qdrant is down, QDRANT_URL or QDRANT_API_KEY is wrong, or an HTTP "
+                            "proxy sits in the way (put the host in NO_PROXY)", see=QDRANT_DOWN)
     status = index.status()
     if status.access is Access.REFUSED:
-        raise RuntimeError("; ".join(status.warnings) or "the Live index is refused")
+        raise Failure("; ".join(status.warnings) or "the Live index is refused",
+                      cause="the index cannot be searched by this code (the embedding model's "
+                            "dimension changed, for example) until a Rebuild",
+                      see='section 10 (row "embedding dimension differs")')
     summary = (f"Qdrant reachable, {status.documents} documents, {status.passages} passages"
                if status.generation else "Qdrant reachable, nothing indexed yet (run a Sync)")
     if status.access is not Access.READ_WRITE or status.warnings:
-        raise _Warning(f"{summary}; {'; '.join(status.warnings)}")
+        raise Warned(f"{summary}; {'; '.join(status.warnings)}")
     return summary
 
 
 def _confluence(environ: Mapping[str, str], run: Run) -> str:
     if not environ.get("CONFLUENCE_DOMAIN"):
-        raise _Skipped("CONFLUENCE_DOMAIN is not set")
+        raise Skipped("CONFLUENCE_DOMAIN is not set")
     command = environ.get("CONFLUENCE_BIN") or "confluence"
-    run([command, "spaces"])  # one authenticated, read-only call
+    try:
+        run([command, "spaces"])  # one authenticated, read-only call
+    except Exception as error:
+        raise Failure(f"{command} spaces failed: {error}",
+                      cause="the CLI is not on this user's PATH (set CONFLUENCE_BIN), or the "
+                            "domain, token or auth type is wrong",
+                      see='section 10 (rows "Sync: `confluence not found`" and "Sync: '
+                          '`confluence ... failed`")') from None
     return f"{command} reads {environ['CONFLUENCE_DOMAIN']}"
 
 
 def _gitlab(environ: Mapping[str, str], run: Run) -> str:
     if not environ.get("GITLAB_URL"):
-        raise _Skipped("GITLAB_URL is not set")
-    return run(["git", "--version"]).strip() or "git runs"
+        raise Skipped("GITLAB_URL is not set")
+    try:
+        return run(["git", "--version"]).strip() or "git runs"
+    except Exception as error:
+        raise Failure(f"git --version failed: {error}",
+                      cause="git is not installed where the Sync runs (a host prerequisite on "
+                            "the systemd route; the container image carries it)",
+                      see="section 2 (pre-flight)") from None
 
 
-def _version(run: Run, command: str) -> str:
-    return run([command, "--version"]).strip() or "runs"
+def _liteparse(run: Run, command: str) -> str:
+    try:
+        return run([command, "--version"]).strip() or "runs"
+    except Exception as error:
+        raise Failure(f"{command} --version failed: {error}",
+                      cause="LIT_BIN does not name the installed lit command, or the Installer "
+                            "did not finish: run it again, it is idempotent",
+                      see="section 4 (Install)") from None
 
 
 def _unit_active(run: Run, unit: str) -> str:
-    run(["systemctl", "is-active", "--quiet", unit])
+    try:
+        run(["systemctl", "is-active", "--quiet", unit])
+    except Exception as error:
+        raise Failure(f"not active: {error}",
+                      cause="the unit failed or was stopped; `systemctl status` and `journalctl "
+                            "-u` name why", see='section 10 (row "/healthz 503, Qdrant is '
+                                                'unreachable")') from None
     return "active"
 
 
-def _raise(error: Exception) -> str:
-    raise error
+def _settings_error(error: SettingsError) -> str:
+    raise Failure(str(error), cause="a setting in the env file is missing or unusable, as said",
+                  see="section 5 (Configure)")
 
 
 def _parser() -> argparse.ArgumentParser:

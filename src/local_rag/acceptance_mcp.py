@@ -14,7 +14,8 @@ import httpx2
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
-from local_rag.acceptance_report import QDRANT_DOWN, Context, Failure
+from local_rag.acceptance_report import Context
+from local_rag.checks import QDRANT_DOWN, Failure
 from local_rag.mcp_server import DEFAULT_HOST, DEFAULT_PORT
 
 TIMEOUT = 20.0
