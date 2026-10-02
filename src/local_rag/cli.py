@@ -203,15 +203,8 @@ def _print_failures(failures: Mapping[str, str], out: TextIO) -> None:
 
 def _print_passage(number: int, passage: Passage, out: TextIO) -> None:
     print(f"{number}. {passage.title}", file=out)
-    print(f"   link: {passage.link}", file=out)
-    for name, value in passage.code_location:
-        print(f"   {name}: {value}", file=out)
-    print(f"   space: {passage.space}", file=out)
-    if passage.code:
-        print(f"   ref: {passage.code.tracked_ref.ref}", file=out)
-    print(f"   page id: {passage.parent_id or passage.document_id}", file=out)
-    if passage.parent_id:
-        print(f"   attachment: {passage.document_id}", file=out)
+    for name, value in passage.citation():
+        print(f"   {name.replace('_', ' ')}: {value}", file=out)
     for line in passage.text.strip().splitlines():
         print(f"   | {line}", file=out)
     print(file=out)

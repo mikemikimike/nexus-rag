@@ -104,6 +104,28 @@ def test_search_docs_lists_attachments_with_their_parent_page(index, corpus):
     assert "attachment: default:10/attachments/runbook.pdf" in text
 
 
+def test_the_header_of_a_passage_is_one_line_in_a_fixed_order():
+    from dataclasses import replace
+    from local_rag.corpus import CodeFile, TrackedRef
+    from local_rag.mcp_server import _format_passages
+    from local_rag.passage_store import Passage
+    page = Passage(document_id="wiki:10", title="T", url="https://w/10", space="OPS",
+                   text="body", score=1.0)
+    attachment = replace(page, document_id="wiki:10/attachments/a.pdf", parent_id="wiki:10")
+    code = CodeFile(TrackedRef("platform/pay", "main"), "src/pay.py")
+    in_code = replace(page, document_id=code.document_id, url="https://g/pay.py", code=code,
+                      start_line=10, end_line=20, symbol="Pay.run")
+
+    assert _format_passages([page, attachment, in_code]) == (
+        "[1] T\nhttps://w/10 | page_id: wiki:10 | space: OPS\nbody"
+        "\n\n---\n\n"
+        "[2] T\nhttps://w/10 | page_id: wiki:10 | space: OPS"
+        " | attachment: wiki:10/attachments/a.pdf\nbody"
+        "\n\n---\n\n"
+        "[3] T\nhttps://g/pay.py#L10-20 | page_id: platform/pay@main:src/pay.py | space: OPS"
+        " | ref: main | file: src/pay.py | lines: 10-20 | symbol: Pay.run\nbody")
+
+
 def test_search_docs_returns_no_more_passages_than_asked_for(server):
     assert "[2]" in call(server, "search_docs", {"query": "ORA"})
     assert "[2]" not in call(server, "search_docs", {"query": "ORA", "top_k": 1})

@@ -4,8 +4,8 @@ from qdrant_client import QdrantClient, models
 
 from local_rag import CorruptIndex
 from local_rag.chunker import Piece
-from local_rag.corpus import Document
-from local_rag.passage_store import Narrowing, PassageStore, Written
+from local_rag.corpus import CodeFile, Document, TrackedRef
+from local_rag.passage_store import Narrowing, Passage, PassageStore, Written
 from local_rag.sparse import SparseVector
 
 COLLECTION = "knowledge.gen-0123456789ab"
@@ -86,3 +86,31 @@ def test_a_failing_qdrant_is_not_mistaken_for_a_corrupt_point(store, read):
         read(store)
 
     assert not isinstance(raised.value, CorruptIndex)
+
+
+def _passage(**fields):
+    return Passage(**{"document_id": "wiki:10", "title": "T", "url": "https://w/10",
+                      "space": "OPS", "text": "x", "score": 1.0, **fields})
+
+
+def test_a_confluence_pages_citation_is_its_link_page_and_space():
+    assert _passage().citation() == (
+        ("link", "https://w/10"), ("page_id", "wiki:10"), ("space", "OPS"))
+
+
+def test_an_attachments_citation_names_its_page_and_itself():
+    cited = _passage(document_id="wiki:10/attachments/a.pdf", parent_id="wiki:10").citation()
+
+    assert cited[1:] == (("page_id", "wiki:10"), ("space", "OPS"),
+                         ("attachment", "wiki:10/attachments/a.pdf"))
+
+
+def test_a_code_passages_citation_adds_its_ref_and_location():
+    code = CodeFile(TrackedRef("platform/pay", "main"), "src/pay.py")
+    cited = _passage(document_id=code.document_id, url="https://g/pay.py", code=code,
+                     start_line=10, end_line=20, symbol="Pay.run").citation()
+
+    assert cited == (("link", "https://g/pay.py#L10-20"),
+                     ("page_id", "platform/pay@main:src/pay.py"), ("space", "OPS"),
+                     ("ref", "main"), ("file", "src/pay.py"), ("lines", "10-20"),
+                     ("symbol", "Pay.run"))
