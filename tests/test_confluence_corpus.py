@@ -7,6 +7,7 @@ from local_rag.confluence import ConfluenceCorpus, read_roots
 from conftest import DOCUMENTS
 from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
+from test_sync import CountingGateway
 
 ROOT = "100"
 
@@ -365,12 +366,66 @@ def test_a_malformed_listing_is_a_root_failure_not_a_crash(index, site):
     assert index.get_document("confluence:200") is not None
 
 
-def test_a_page_without_a_version_cannot_be_told_unchanged_so_it_is_replaced_each_time(
-        index, site):
+def unversioned(index, site, gateway):
+    """An index holding an unversioned page with an unversioned Attachment, whose Model
+    gateway records what it embeds."""
     site.page("300", "Unversioned", space="ENG", version=None, body="Some text.\n")
+    site.attach("300", "notes.txt", "Escalate to the DBA on call.", version=None)
     index.sync(corpus(site, "300"))
+    gateway.embedded.clear()
 
-    report = index.sync(corpus(site, "300"))
 
-    assert (report.replaced, report.unchanged, report.failed) == (1, 0, 0)
-    assert index.get_document("confluence:300") == "Some text."
+@pytest.fixture
+def gateway():
+    return CountingGateway()
+
+
+@pytest.fixture
+def counted(lit, gateway):
+    return KnowledgeIndex(Settings(liteparse_bin=str(lit)), gateway)
+
+
+def test_an_unversioned_page_is_fetched_but_not_embedded_again_when_its_content_is_unchanged(
+        counted, site, gateway):
+    unversioned(counted, site, gateway)
+    fetches = len(site.calls("export")) + len(downloads(site))
+
+    report = counted.sync(corpus(site, "300"))
+
+    assert (report.unchanged, report.replaced, report.failed) == (2, 0, 0)
+    assert len(site.calls("export")) + len(downloads(site)) == 2 * fetches  # still fetched
+    assert gateway.embedded == []
+    assert counted.get_document("confluence:300") == "Some text."
+
+
+def test_an_unversioned_page_whose_content_changed_is_replaced(counted, site, gateway):
+    unversioned(counted, site, gateway)
+    site.page("300", "Unversioned", space="ENG", version=None, body="Run the QX-5 check.\n")
+
+    report = counted.sync(corpus(site, "300"))
+
+    assert (report.replaced, report.unchanged, report.failed) == (1, 1, 0)
+    assert counted.search("QX-5 check")[0].document_id == "confluence:300"
+    assert "Some text" not in counted.get_document("confluence:300")
+
+
+def test_an_unversioned_attachment_whose_content_changed_is_replaced(counted, site, gateway):
+    unversioned(counted, site, gateway)
+    site.attach("300", "notes.txt", "Escalate to the platform team.", version=None)
+
+    report = counted.sync(corpus(site, "300"))
+
+    assert (report.replaced, report.unchanged, report.failed) == (1, 1, 0)
+    assert counted.get_document(
+        "confluence:300/attachments/notes.txt") == "Escalate to the platform team."
+
+
+def test_an_unchanged_unversioned_page_listed_under_another_root_is_still_re_added(
+        counted, site, gateway):
+    site.page("301", "Unversioned child", parent="300", version=None, body="Child text.\n")
+    unversioned(counted, site, gateway)
+
+    report = counted.sync(corpus(site, "301"))
+
+    assert (report.replaced, report.unchanged, report.removed) == (1, 0, 2)
+    assert gateway.embedded != []

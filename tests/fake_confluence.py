@@ -95,7 +95,8 @@ class FakeSite:
             "attachments": old.get("attachments", {}), "fail": old.get("fail", [])}
         self._save()
 
-    def attach(self, page_id: str, name: str, content: str, *, version: int = 1) -> None:
+    def attach(self, page_id: str, name: str, content: str, *,
+               version: int | None = 1) -> None:
         self._pages[page_id]["attachments"][name] = {"content": content, "version": version}
         self._save()
 

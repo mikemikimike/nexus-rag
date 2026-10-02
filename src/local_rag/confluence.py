@@ -14,7 +14,8 @@ from local_rag.extraction import MEDIA_TYPES
 _MAX_ERROR_LENGTH = 400
 _PAGE_FILE = "page.md"
 # The version of a page the CLI gave none for. It matches nothing indexed, so such a page
-# is fetched and replaced on every Sync instead of being taken for unchanged for good.
+# is fetched on every Sync instead of being taken for unchanged for good; the index then
+# compares the version it was fetched as (its content's hash) with the stored one.
 _UNVERSIONED = "unversioned"
 # Attachments left out by default: images (they are only readable with OCR, which is
 # off unless enabled, and a page's screenshots would each fail as an empty Document),
