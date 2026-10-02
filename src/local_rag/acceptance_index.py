@@ -18,6 +18,7 @@ from local_rag.corpus import qualified_id
 from local_rag.folder import FolderCorpus
 from local_rag.index import KnowledgeIndex
 from local_rag.index_format import Access
+from local_rag.index_names import IndexNames
 from local_rag.tokens import count_tokens
 
 SEARCH_K = 3  # few enough that a Document is found by being near the query, not by being one of few
@@ -45,12 +46,11 @@ class _RoundTrip:
 
     def _remove_collections(self) -> str:
         name = self.settings.collection
-        ours = [c.name for c in self.client.get_collections().collections
-                if c.name == name or c.name.startswith(f"{name}.")]
+        names = IndexNames(name)
+        ours = [c.name for c in self.client.get_collections().collections if names.owns(c.name)]
         for collection in ours:  # an alias goes with its collection
             self.client.delete_collection(collection)
-        left = [c.name for c in self.client.get_collections().collections
-                if c.name == name or c.name.startswith(f"{name}.")]
+        left = [c.name for c in self.client.get_collections().collections if names.owns(c.name)]
         if left:
             raise Failure(f"could not remove {', '.join(left)} from Qdrant",
                           cause="the Qdrant key may not allow deleting collections; remove them "

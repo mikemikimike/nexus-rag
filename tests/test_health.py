@@ -37,10 +37,10 @@ def test_an_unreachable_qdrant_is_reported_not_raised(gateway):
     assert "Qdrant" in health.notes[0] and "connection refused" in health.notes[0]
 
 
-def test_a_corrupt_index_is_reported_unreachable_while_qdrant_is_up(index):
+def test_a_corrupt_index_is_reported_unreachable_while_qdrant_is_up(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
     index.rebuild([InMemoryCorpus(DOCUMENTS)])
-    lose_the_live_collection(index)
+    lose_the_live_collection(index, client)
 
     health = index.health()
 
@@ -48,10 +48,10 @@ def test_a_corrupt_index_is_reported_unreachable_while_qdrant_is_up(index):
     assert "Rebuild" in health.notes[0]
 
 
-def test_a_read_only_index_is_still_reachable_and_says_why(index):
+def test_a_read_only_index_is_still_reachable_and_says_why(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
 
-    health = after_an_upgrade(index, embed_model="embed-v2").health()
+    health = after_an_upgrade(index, client, embed_model="embed-v2").health()
 
     assert (health.qdrant, health.knowledge_index) == (True, True)
     assert any("embedding model" in note for note in health.notes)
@@ -66,7 +66,7 @@ def test_a_refused_index_is_not_reachable(index, monkeypatch):
     assert (health.qdrant, health.knowledge_index) == (True, False)
 
 
-def test_health_never_calls_the_model_gateway(index):
+def test_health_never_calls_the_model_gateway(index, client):
     class CountingQueries(FakeModelGateway):
         calls = 0
 
@@ -75,7 +75,7 @@ def test_health_never_calls_the_model_gateway(index):
             return super().embed_query(text)
 
     index.sync(InMemoryCorpus(DOCUMENTS))
-    upgraded = after_an_upgrade(index, CountingQueries(), embed_model="embed-v2")
+    upgraded = after_an_upgrade(index, client, CountingQueries(), embed_model="embed-v2")
 
     health = upgraded.health()
 

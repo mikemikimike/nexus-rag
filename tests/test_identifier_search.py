@@ -55,17 +55,17 @@ def test_an_identifier_is_still_found_whole(code_index, query, expected):
     assert code_index.search(query)[0].document_id == f"default:{expected}"
 
 
-def test_an_index_without_identifier_splitting_is_read_only_until_a_rebuild(monkeypatch):
+def test_an_index_without_identifier_splitting_is_read_only_until_a_rebuild(monkeypatch, client):
     real = IndexFormat.to_payload
 
     def without_splitting(self):  # what the previous version wrote
         return {k: v for k, v in real(self).items() if k != "identifier_splitting"}
 
-    index = KnowledgeIndex(Settings(retrieval=RetrievalMode.KEYWORD), None)
+    index = KnowledgeIndex(Settings(retrieval=RetrievalMode.KEYWORD), None, client=client)
     monkeypatch.setattr(IndexFormat, "to_payload", without_splitting)
     index.sync(CODE)
     monkeypatch.setattr(IndexFormat, "to_payload", real)
-    upgraded = after_an_upgrade(index)
+    upgraded = after_an_upgrade(index, client)
 
     status = upgraded.status()
 

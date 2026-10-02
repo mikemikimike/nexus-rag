@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from local_rag.gateway import ModelGateway
 
 if TYPE_CHECKING:
-    from local_rag.index import Passage
+    from local_rag.passage_store import Passage
 
 log = logging.getLogger(__name__)
 

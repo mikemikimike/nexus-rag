@@ -1,4 +1,5 @@
 import pytest
+from qdrant_client import QdrantClient
 
 from local_rag import KnowledgeIndex, Settings
 from local_rag.corpus import Document, InMemoryCorpus
@@ -44,8 +45,14 @@ def gateway():
 
 
 @pytest.fixture
-def index(gateway):
-    return KnowledgeIndex(Settings(), gateway)
+def client():
+    """The Qdrant a test's indexes share; another process would open the same one."""
+    return QdrantClient(location=":memory:")
+
+
+@pytest.fixture
+def index(gateway, client):
+    return KnowledgeIndex(Settings(), gateway, client=client)
 
 
 @pytest.fixture

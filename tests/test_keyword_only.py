@@ -9,6 +9,7 @@ from local_rag.fakes import FakeModelGateway
 from local_rag.gateway_litellm import GatewayError
 from local_rag.settings import RetrievalMode
 from conftest import SYNONYMS
+from index_states import record_format
 from test_index_format import after_an_upgrade
 
 KEYWORD = RetrievalMode.KEYWORD
@@ -31,8 +32,8 @@ class NoEmbeddingModel(FakeModelGateway):
         raise AssertionError("an embedding model was used")
 
 
-def keyword_index(gateway=None, **settings):
-    return KnowledgeIndex(Settings(retrieval=KEYWORD, **settings), gateway)
+def keyword_index(gateway=None, client=None, **settings):
+    return KnowledgeIndex(Settings(retrieval=KEYWORD, **settings), gateway, client=client)
 
 
 def test_a_keyword_only_index_is_synced_and_searched_with_no_gateway(corpus):
@@ -59,18 +60,18 @@ def test_a_keyword_only_index_never_asks_the_gateway_to_embed(corpus):
 
 # --- a mode that disagrees with the index ----------------------------------------------
 
-def reopened(index, gateway=None, **changed):
+def reopened(index, client, gateway=None, **changed):
     """The same Qdrant, opened by code whose settings differ from what wrote the index."""
-    return after_an_upgrade(index, gateway, **changed)
+    return after_an_upgrade(index, client, gateway, **changed)
 
 
 def test_a_keyword_only_index_under_hybrid_settings_is_read_only_and_searched_by_keywords(
-        corpus):
-    keyword = keyword_index()
+        corpus, client):
+    keyword = keyword_index(client=client)
     keyword.sync(corpus)
     gateway = NoEmbeddingModel()
 
-    hybrid = reopened(keyword, gateway, retrieval=HYBRID)
+    hybrid = reopened(keyword, client, gateway, retrieval=HYBRID)
 
     status = hybrid.status()
     assert status.access == Access.READ_ONLY
@@ -82,10 +83,10 @@ def test_a_keyword_only_index_under_hybrid_settings_is_read_only_and_searched_by
 
 
 def test_a_hybrid_index_under_keyword_settings_is_read_only_and_searched_by_keywords(
-        index, corpus):
+        index, corpus, client):
     index.sync(corpus)
 
-    keyword = reopened(index, None, retrieval=KEYWORD)
+    keyword = reopened(index, client, None, retrieval=KEYWORD)
 
     status = keyword.status()
     assert status.access == Access.READ_ONLY
@@ -95,9 +96,9 @@ def test_a_hybrid_index_under_keyword_settings_is_read_only_and_searched_by_keyw
         keyword.sync(corpus)
 
 
-def test_a_rebuild_brings_an_index_to_the_mode_the_code_runs_in(index, corpus):
+def test_a_rebuild_brings_an_index_to_the_mode_the_code_runs_in(index, corpus, client):
     index.sync(corpus)
-    keyword = reopened(index, None, retrieval=KEYWORD)
+    keyword = reopened(index, client, None, retrieval=KEYWORD)
 
     assert keyword.rebuild([corpus]).promoted
 
@@ -107,7 +108,7 @@ def test_a_rebuild_brings_an_index_to_the_mode_the_code_runs_in(index, corpus):
     assert (status.format.embed_model, status.format.dimension) == (None, None)
     assert keyword.sync(corpus).unchanged == 3
 
-    hybrid = reopened(index, FakeModelGateway(synonyms=SYNONYMS), retrieval=HYBRID)
+    hybrid = reopened(index, client, FakeModelGateway(synonyms=SYNONYMS), retrieval=HYBRID)
     assert hybrid.status().access == Access.READ_ONLY
     assert hybrid.rebuild([corpus]).promoted
     status = hybrid.status()
@@ -149,8 +150,8 @@ def flaky():
 
 
 @pytest.fixture
-def hybrid(flaky, corpus):
-    index = KnowledgeIndex(Settings(), flaky)
+def hybrid(flaky, corpus, client):
+    index = KnowledgeIndex(Settings(), flaky, client=client)
     index.sync(corpus)
     return index
 
@@ -183,9 +184,9 @@ def test_a_fallback_does_not_stop_the_next_search_using_the_embedding_model(hybr
     assert results[0].document_id == "default:garage/battery"
 
 
-def test_a_gateway_that_is_down_from_the_start_is_asked_once_per_search(hybrid, flaky):
+def test_a_gateway_that_is_down_from_the_start_is_asked_once_per_search(hybrid, flaky, client):
     flaky.down = True
-    restarted = KnowledgeIndex(Settings(), flaky, client=hybrid._client)
+    restarted = KnowledgeIndex(Settings(), flaky, client=client)
     flaky.query_attempts = 0
 
     results = restarted.search("ORA-00942")
@@ -194,11 +195,11 @@ def test_a_gateway_that_is_down_from_the_start_is_asked_once_per_search(hybrid, 
     assert flaky.query_attempts == 1
 
 
-def test_a_keyword_only_index_under_hybrid_settings_tells_the_caller(corpus):
-    keyword = keyword_index()
+def test_a_keyword_only_index_under_hybrid_settings_tells_the_caller(corpus, client):
+    keyword = keyword_index(client=client)
     keyword.sync(corpus)
 
-    results = reopened(keyword, NoEmbeddingModel(), retrieval=HYBRID).search("ORA-00942")
+    results = reopened(keyword, client, NoEmbeddingModel(), retrieval=HYBRID).search("ORA-00942")
 
     assert "keyword" in results.notice and "Rebuild" in results.notice
 
@@ -227,14 +228,13 @@ def test_an_unreachable_embedding_model_is_a_health_note_not_a_failure(hybrid, f
 
 # --- records that disagree with the collection ------------------------------------------
 
-def test_a_recorded_mode_that_disagrees_with_the_collection_is_reported_not_trusted(corpus):
-    keyword = keyword_index()
+def test_a_recorded_mode_that_disagrees_with_the_collection_is_reported_not_trusted(corpus, client):
+    keyword = keyword_index(client=client)
     keyword.sync(corpus)
     generation = keyword.status().generation
-    keyword._generations.record(
-        generation, IndexFormat.written_by(Settings(retrieval=HYBRID), 64))
+    record_format(client, generation, IndexFormat.written_by(Settings(retrieval=HYBRID), 64))
 
-    status = reopened(keyword, None).status()
+    status = reopened(keyword, client).status()
 
     assert status.access == Access.REFUSED
     assert any("dense" in warning for warning in status.warnings)

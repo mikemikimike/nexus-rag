@@ -9,11 +9,12 @@ from importlib import import_module
 _EXPORTS = {
     "local_rag.exclusive": ["SyncInProgress"],
     "local_rag.generations": ["CorruptIndex", "NoPreviousIndex"],
-    "local_rag.index": ["Health", "IndexStatus", "KnowledgeIndex", "Passage", "RebuildReport",
+    "local_rag.index": ["Health", "IndexStatus", "KnowledgeIndex", "RebuildReport",
                         "SearchResults", "SyncReport"],
     "local_rag.index_format": ["Access", "IncompatibleIndex", "IndexFormat", "IndexReadOnly",
                               "IndexRefused"],
     "local_rag.journal": ["LastSync"],
+    "local_rag.passage_store": ["Passage"],
     "local_rag.settings": ["Settings"],
 }
 _MODULE_OF = {name: module for module, names in _EXPORTS.items() for name in names}

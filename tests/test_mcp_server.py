@@ -125,9 +125,9 @@ def test_healthz_reports_an_unreachable_qdrant_as_unavailable(gateway):
     assert "Qdrant is unreachable" in response.text
 
 
-def test_healthz_reports_a_corrupt_index_as_unavailable(index, corpus):
+def test_healthz_reports_a_corrupt_index_as_unavailable(index, client, corpus):
     index.sync(corpus)
-    lose_the_live_collection(index)
+    lose_the_live_collection(index, client)
     with serving(index) as base_url:
         response = httpx2.get(f"{base_url}/healthz")
 
