@@ -4,32 +4,15 @@ import secrets
 
 from qdrant_client.http.exceptions import UnexpectedResponse
 
-from local_rag import acceptance_corpus
-from local_rag.acceptance_report import (
-    KEYWORD_ONLY, QDRANT_DOWN, Context, Failure, Skipped, is_keyword_only)
+from local_rag import acceptance_corpus, checks
+from local_rag.acceptance_report import Context, is_keyword_only
+from local_rag.checks import QDRANT_DOWN, Failure, Skipped, gateway_failure
 from local_rag.chunker import Chunker
 from local_rag.gateway_litellm import GatewayError
 
 PROBE_TITLE = "long-note"  # what the folder Corpus makes of lab/long-note.md
 _LIMIT_WORDS = re.compile(r"context length|too long|too many tokens|maximum|exceed|token limit",
                           re.IGNORECASE)
-
-
-def gateway_failure(error: Exception) -> Failure:
-    """A Model gateway error, with the cause its wording points to."""
-    text = str(error) or type(error).__name__
-    if "answered 401" in text or "answered 403" in text:
-        return Failure(text, cause="LITELLM_API_KEY is wrong or missing",
-                       see='section 10 (row "gateway ... answered 401")')
-    if "answered 404" in text or "answered 400" in text:
-        return Failure(text, cause="LITELLM_BASE_URL lacks /v1, or RAG_EMBED_MODEL is not a "
-                                   "LiteLLM model_name", see='section 10 (row "gateway ... answered 404")')
-    if "unreachable" in text:
-        return Failure(text, cause="the address, a firewall or DNS between this host and the "
-                                   "Model gateway (it is always contacted directly, ignoring proxy "
-                                   "variables)", see='section 10 (row "gateway ... unreachable")')
-    return Failure(text, cause="the Model gateway answered something unusable; "
-                               "read its own log", see="section 3 B (Model gateway)")
 
 
 def _require_gateway(ctx: Context):
@@ -50,18 +33,9 @@ def run_gateway(ctx: Context) -> None:
 
 
 def _embeddings(ctx: Context) -> str:
-    if is_keyword_only(ctx):
-        raise Skipped(KEYWORD_ONLY)
-    gateway = _require_gateway(ctx)
-    try:
-        vector = gateway.embed_query("acceptance probe")
-    except Exception as error:
-        raise gateway_failure(error) from None
-    if not vector:
-        raise Failure("the Model gateway answered with an empty vector",
-                      cause="RAG_EMBED_MODEL names a model that does not produce embeddings",
-                      see="section 3 B (Model gateway)")
-    return f"model {ctx.settings.embed_model!r} answers, {len(vector)} dimensions"
+    if not is_keyword_only(ctx):
+        _require_gateway(ctx)
+    return checks.embeddings(ctx.settings, ctx.gateway)
 
 
 def _dimension(ctx: Context) -> str:
@@ -113,26 +87,9 @@ def _input_limit(ctx: Context) -> str:
 
 
 def _rerank(ctx: Context) -> str:
-    model = ctx.settings.rerank_model
-    if not model:
-        raise Skipped("RAG_RERANK_MODEL is not set, so search does not rerank")
-    _require_gateway(ctx)
-    relevant = "Reset a forgotten password from the account page."
-    unrelated = "The cafeteria serves soup on Tuesdays."
-    try:
-        scores = ctx.gateway.rerank("how do I reset my password", [unrelated, relevant])
-    except Exception as error:
-        raise Failure(str(error) or type(error).__name__,
-                      cause="the Model gateway does not serve /v1/rerank for "
-                            "RAG_RERANK_MODEL; unset it to disable rerank",
-                      see='section 10 (the proxy row) and the README troubleshooting "Rerank ignored"'
-                      ) from None
-    if len(scores) != 2 or not scores[1] > scores[0]:
-        raise Failure(f"the reranker scored the relevant text {scores[1:]} against "
-                      f"{scores[:1]} for an unrelated one" if len(scores) == 2 else
-                      f"asked to score 2 texts, got {len(scores)} scores",
-                      cause="RAG_RERANK_MODEL is not a reranker", see="section 3 B (Model gateway)")
-    return f"model {model!r} ranks the relevant text first"
+    if ctx.settings.rerank_model:
+        _require_gateway(ctx)
+    return checks.rerank(ctx.settings, ctx.gateway)
 
 
 def run_qdrant(ctx: Context) -> None:

@@ -11,7 +11,8 @@ from pathlib import Path
 
 from local_rag import acceptance_corpus as corpus_files
 from local_rag.acceptance_corpus import KEYWORD_DOCUMENT, LONG_DOCUMENT, SEMANTIC_DOCUMENT
-from local_rag.acceptance_report import KEYWORD_ONLY, Context, Failure, Skipped, is_keyword_only
+from local_rag.acceptance_report import Context, is_keyword_only
+from local_rag.checks import KEYWORD_ONLY, Failure, Skipped
 from local_rag.chunker import Chunker
 from local_rag.corpus import qualified_id
 from local_rag.folder import FolderCorpus

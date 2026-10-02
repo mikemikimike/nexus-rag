@@ -52,7 +52,9 @@ def smoke():
 
 
 def line(output: str, name: str) -> str:
-    [found] = [l for l in output.splitlines() if name in l]
+    """The line of the check whose name holds ``name``."""
+    [found] = [l for l in output.splitlines()
+               if l.startswith("[") and name in l[7:].partition(": ")[0]]
     return found
 
 
@@ -306,3 +308,108 @@ def test_hybrid_retrieval_with_a_dead_embedding_model_fails_not_skips(smoke):
 
     assert code == 1
     assert line(out, "Model gateway").startswith("[FAIL]")
+
+
+# --- how it reports ----------------------------------------------------------------------
+
+def test_a_read_only_index_is_a_warning_not_a_failure(smoke):
+    client = QdrantClient(":memory:")
+    KnowledgeIndex(Settings(), FakeModelGateway(), client=client).sync(InMemoryCorpus(DOCUMENTS))
+
+    code, out, _ = smoke(client=client, RAG_CHUNK_TOKENS="200")
+
+    assert code == 0, out
+    warned = line(out, "Knowledge index")
+    assert warned.startswith("[WARN]") and "3 documents" in warned and "Rebuild" in warned
+    assert "1 warned" in out
+
+
+def test_it_ends_with_a_summary_and_a_verdict(smoke):
+    code, out, _ = smoke()
+
+    assert code == 0, out
+    assert out.splitlines()[-1] == "SMOKE CHECK PASSED"
+    assert "0 failed" in out
+
+    code, out, _ = smoke(MCP_TOKENS="")
+    assert out.splitlines()[-1] == "SMOKE CHECK FAILED: MCP_TOKENS"
+
+
+def test_a_settings_error_still_ends_with_the_verdict(smoke):
+    code, out, _ = smoke(LITELLM_BASE_URL="")
+
+    assert code == 1
+    assert out.splitlines()[-1] == "SMOKE CHECK FAILED: settings"
+
+
+def test_a_gateway_failure_says_its_likely_cause_and_where_the_guide_helps(smoke):
+    _, out, _ = smoke(gateway=DownGateway())
+
+    failed = line(out, "Model gateway")
+    assert "Likely cause:" in failed and "firewall" in failed
+    assert "docs/agents/closed-network-setup.md section 10" in failed
+
+
+def test_a_secret_inside_the_gateway_url_is_never_printed(smoke):
+    class LeakyGateway(FakeModelGateway):
+        def embed_query(self, text):
+            raise GatewayError("gateway http://svc:url-secret-pw@gateway.example.test:4000/v1 unreachable")
+
+    _, out, err = smoke(gateway=LeakyGateway(),
+                        LITELLM_BASE_URL="http://svc:url-secret-pw@gateway.example.test:4000/v1")
+
+    assert "url-secret-pw" not in out + err
+    assert line(out, "Model gateway").startswith("[FAIL]")
+
+
+def test_rerank_is_not_run_when_the_embedding_model_failed(smoke):
+    code, out, _ = smoke(gateway=DownGateway(), RAG_RERANK_MODEL="rerank-model")
+
+    assert code == 1
+    skipped = line(out, "Rerank")
+    assert skipped.startswith("[SKIP]") and "Model gateway (embeddings) did not pass" in skipped
+
+
+def test_a_reranker_that_cannot_tell_relevance_fails(smoke):
+    class Flat(FakeModelGateway):
+        def rerank(self, query, texts):
+            return [0.5 for _ in texts]
+
+    code, out, _ = smoke(gateway=Flat(), RAG_RERANK_MODEL="rerank-model")
+
+    assert code == 1
+    assert line(out, "Rerank").startswith("[FAIL]")
+
+
+def test_an_embedding_model_that_answers_with_an_empty_vector_fails(smoke):
+    class Empty(FakeModelGateway):
+        def embed_query(self, text):
+            return []
+
+    code, out, _ = smoke(gateway=Empty())
+
+    assert code == 1
+    assert line(out, "Model gateway").startswith("[FAIL]")
+
+
+@pytest.mark.parametrize("failing, name, environment", [
+    ("lit", "LiteParse", {}),
+    ("confluence", "Confluence", {"CONFLUENCE_DOMAIN": "wiki.example.test"}),
+    ("git", "GitLab", {"GITLAB_URL": "https://gitlab.example.test"}),
+])
+def test_a_failing_host_command_says_its_likely_cause(smoke, failing, name, environment):
+    _, out, _ = smoke(host=Host(failing=[failing]), **environment)
+
+    failed = line(out, name)
+    assert failed.startswith("[FAIL]") and "Likely cause:" in failed
+
+
+def test_every_failure_of_its_own_says_its_likely_cause(smoke):
+    _, out, _ = smoke("--systemd", MCP_TOKENS="", client=UnreachableQdrant(),
+                      host=Host(failing=["systemctl"]))
+
+    for name in ("MCP_TOKENS", "Knowledge index", "local-rag-mcp.service"):
+        assert "Likely cause:" in line(out, name), name
+
+    _, out, _ = smoke(LITELLM_BASE_URL="")
+    assert "Likely cause:" in line(out, "settings")

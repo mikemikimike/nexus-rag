@@ -28,11 +28,11 @@ from typing import Any, TextIO
 from urllib.parse import urlsplit, urlunsplit
 
 from local_rag.acceptance_corpus import Run
-from local_rag.acceptance_report import Context, Report, run_command
+from local_rag.acceptance_report import Context
+from local_rag.checks import Report, run_command, secrets_in
 from local_rag.environment import SettingsError, settings_from_environment
 
 GROUPS = ("gateway", "qdrant", "index", "mcp", "install", "confluence", "gitlab")
-SECRET_NAMES = ("KEY", "TOKEN", "TOKENS", "SECRET", "PASSWORD")
 
 type Connect = Callable[[str, str | None], Any]  # (Qdrant location, API key) -> a Qdrant client
 
@@ -61,7 +61,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
 
     run_id = Run.new()
     settings = replace(live, collection=run_id.collection)
-    report = Report(out, _secrets(environ, args))
+    report = Report(out, [*secrets_in(environ), *(args.token or "").split(",")], verdict="ACCEPTANCE")
     context = Context(settings=settings, environ=environ, report=report, gateway=gateway,
                       connect=connect or _connect, run=run or run_command, args=args,
                       run_id=run_id)
@@ -137,16 +137,6 @@ def _safe_url(url: str | None) -> str:
     if "@" in parts.netloc:  # credentials in the URL are a secret
         parts = parts._replace(netloc=parts.netloc.rpartition("@")[2])
     return urlunsplit(parts)
-
-
-def _secrets(environ: Mapping[str, str], args: argparse.Namespace) -> list[str]:
-    values = [value for name, value in environ.items()
-              if any(name.endswith(word) for word in SECRET_NAMES)]
-    values += [t.strip() for value in [environ.get("MCP_TOKENS", ""), args.token or ""]
-               for t in value.split(",")]
-    values += [urlsplit(value).password or "" for value in environ.values()
-               if value.startswith(("http://", "https://"))]  # credentials inside a URL
-    return [v for v in values if v]
 
 
 def _connect(location: str, api_key: str | None):

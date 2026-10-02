@@ -92,6 +92,14 @@ _Avoid_: info, stats
 Whether Qdrant and the Knowledge index can be reached, for monitoring. Whether the embedding model worked the last time it was used is noted, but an unreachable embedding model does not make Health fail, since search still answers by Keyword fallback.
 _Avoid_: liveness, ping
 
+**Smoke check**:
+A quick look, changing nothing, at whether each service the system depends on and the Live index can be reached and answer, safe to run before the first Sync.
+_Avoid_: health check (Health is another thing), self-test
+
+**Acceptance suite**:
+The end-to-end proof that an installation works, run after the first Sync, which works in its own throwaway index, never touches the Live index, and ends in one pass or fail.
+_Avoid_: integration tests, smoke test
+
 **Model gateway**:
 The network-local service (LiteLLM) through which embeddings, reranking and the chat model are reached.
 _Avoid_: LLM server, backend

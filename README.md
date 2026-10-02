@@ -144,7 +144,7 @@ Tools: `search_docs(query, top_k, space, repository, ref)` returns the best Pass
 
 ## 6. Smoke check and operations
 
-The smoke check is the manual test against the real Model gateway, Qdrant, LiteParse, Confluence CLI and (systemd route) units. It prints `[ OK ]`, `[WARN]`, `[SKIP]` or `[FAIL]` per check, never a secret, and changes nothing:
+The smoke check is the manual test against the real Model gateway, Qdrant, LiteParse, Confluence CLI and (systemd route) units. It changes nothing and is safe before the first Sync. It reports like the acceptance suite below (a `[FAIL]` line names the likely cause and the guide section to read, a `[SKIP]` says why, never a secret), plus `[WARN]` for something that works but needs acting on, such as a read-only index. It ends with a summary and `SMOKE CHECK PASSED` or `SMOKE CHECK FAILED: <checks>`:
 
 ```bash
 run_rag /opt/local-rag/venv/bin/python -m local_rag.smoke --systemd   # systemd route
@@ -273,6 +273,7 @@ Tests use an in-memory Corpus, a fake Model gateway and in-process Qdrant, plus 
 | `cli`, `mcp_server`, `environment` | adapters: `local-rag`, `local-rag-mcp`, and settings from environment variables |
 | `installer`, `container`, `binary_drop` | delivery: the Installer, the container route and Binary drop verification |
 | `smoke` | the manual smoke check |
-| `acceptance`, `acceptance_report`, `acceptance_corpus`, `acceptance_stack`, `acceptance_index`, `acceptance_mcp`, `acceptance_host` | the live acceptance suite: its entry point, how it reports, its generated Documents, and one module per check group |
+| `checks` | what the smoke check and the acceptance suite share: how a check reports, and the embedding and rerank checks |
+| `acceptance`, `acceptance_report`, `acceptance_corpus`, `acceptance_stack`, `acceptance_index`, `acceptance_mcp`, `acceptance_host` | the live acceptance suite: its entry point, what its check groups work from, its generated Documents, and one module per check group |
 
 `deploy/systemd/` and `deploy/container/` hold the unit files, the compose file and the Dockerfile; `examples/` holds the client and proxy examples. To regenerate `requirements.lock` after a dependency change, follow the comment at its top.

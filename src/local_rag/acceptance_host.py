@@ -4,12 +4,11 @@ Python packages: with ``PYTHONPATH=<unpacked code archive>/src``, as the Install
 import json
 from pathlib import Path
 
-from local_rag.acceptance_report import QDRANT_DOWN, Context, Failure, Skipped
+from local_rag.acceptance_report import Context
+from local_rag.checks import QDRANT_DOWN, SYSTEMD_UNITS, Failure, Skipped
 
 SYSTEMD_ENV_FILE = "/etc/local-rag/local-rag.env"
 CONTAINER_ENV_FILE = "/etc/local-rag/container.env"
-SYSTEMD_UNITS = ("qdrant.service", "local-rag-mcp.service",
-                 "local-rag-sync.timer", "local-rag-full.timer")
 CONTAINER_TIMERS = ("local-rag-container-sync.timer", "local-rag-container-full.timer")
 CONTAINER_SERVICES = ("qdrant", "mcp")
 COMPOSE_PROJECT = "local-rag"
