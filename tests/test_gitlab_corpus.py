@@ -8,6 +8,7 @@ from local_rag.corpus import listing_failures
 from local_rag.declaration import Declaration
 from local_rag.fakes import FakeModelGateway
 from local_rag.gitlab import GitLabCorpus, Repository
+from local_rag.settings import RetrievalMode
 
 REPOSITORY = "platform/payments"
 TOKEN = "glpat-s3cr3t-t0ken"
@@ -435,3 +436,30 @@ def test_every_indexed_file_comes_back_from_get_document_as_it_is_or_as_prose(gi
     assert stored("config/ledger.json") == data
     assert stored("config/ledger.xml") == "<a>\n  <b/>\n</a>\n"
     assert stored("config/ledger.yaml") == "a:   1\nb:\n    - 2\n"
+
+
+def test_what_the_index_stores_for_code_is_the_form_installed_indexes_already_hold(gitlab, cache):
+    # The one look past the Knowledge index's interface: these payloads are what indexes built
+    # by earlier releases hold, so a change here would re-add every code Document on upgrade.
+    gitlab.commit(REPOSITORY, {"src/ledger.py": "def post_entry(account):\n    return account\n"},
+                  branch="feature/x")
+    index = KnowledgeIndex(Settings(retrieval=RetrievalMode.KEYWORD), None)
+    index.sync(feature_corpus(gitlab, cache, name="code"))
+    document_id = f"code:{REPOSITORY}@feature/x:src/ledger.py"
+    points, _ = index._client.scroll(index._generations.live(), limit=100, with_payload=True)
+    stored = {p.payload.get("kind", "passage"): p.payload for p in points
+              if p.payload["document_id"] == document_id}
+    link = f"{gitlab.url}/{REPOSITORY}/-/blob/feature/x/src/ledger.py"
+    common = {
+        "corpus": "code", "document_id": document_id, "parent_id": None,
+        "parts": [f"{REPOSITORY}@feature/x"], "placement": f"tracked {link}",
+        "repository": REPOSITORY, "ref": "feature/x", "primary": False, "space": "platform",
+        "title": "payments/src/ledger.py", "url": link,
+        "version": gitlab.git(REPOSITORY, "rev-parse", "feature/x:src/ledger.py")}
+
+    assert stored == {
+        "document": {**common, "kind": "document",
+                     "full_text": "def post_entry(account):\n    return account\n"},
+        "passage": {**common, "path": "src/ledger.py", "start_line": 1, "end_line": 2,
+                    "symbol": "post_entry", "text": "def post_entry(account):\n    return account"},
+    }
