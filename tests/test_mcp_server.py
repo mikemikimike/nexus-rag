@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
+from dataclasses import replace
 
 import anyio
 import httpx2
@@ -19,10 +20,11 @@ from mcp import Client, StdioServerParameters
 from mcp.client.streamable_http import streamable_http_client
 
 from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import Document, InMemoryCorpus
+from local_rag.corpus import CodeFile, Document, InMemoryCorpus, TrackedRef
 from local_rag.fakes import FakeModelGateway
 from local_rag.gateway_litellm import GatewayError
-from local_rag.mcp_server import build_app, main
+from local_rag.mcp_server import _format_passages, build_app, main
+from local_rag.passage_store import Passage
 from local_rag.settings import RetrievalMode
 from test_health import UnreachableQdrant
 from test_index_state import lose_the_live_collection
@@ -105,10 +107,6 @@ def test_search_docs_lists_attachments_with_their_parent_page(index, corpus):
 
 
 def test_the_header_of_a_passage_is_one_line_in_a_fixed_order():
-    from dataclasses import replace
-    from local_rag.corpus import CodeFile, TrackedRef
-    from local_rag.mcp_server import _format_passages
-    from local_rag.passage_store import Passage
     page = Passage(document_id="wiki:10", title="T", url="https://w/10", space="OPS",
                    text="body", score=1.0)
     attachment = replace(page, document_id="wiki:10/attachments/a.pdf", parent_id="wiki:10")
