@@ -40,6 +40,7 @@ services:
       RAG_RETRIEVAL: ${RAG_RETRIEVAL:-}
       RAG_EMBED_MODEL: ${RAG_EMBED_MODEL:-}
       RAG_RERANK_MODEL: ${RAG_RERANK_MODEL:-}
+      RAG_QUERY_INSTRUCTION: ${RAG_QUERY_INSTRUCTION:-}
       # Tuning: unset means the program's default (see src/local_rag/environment.py).
       RAG_COLLECTION: ${RAG_COLLECTION:-}
       RAG_TOP_K: ${RAG_TOP_K:-}
@@ -51,6 +52,7 @@ services:
       RAG_GATEWAY_TIMEOUT: ${RAG_GATEWAY_TIMEOUT:-}
       RAG_CHUNK_TOKENS: ${RAG_CHUNK_TOKENS:-}
       RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-}
+      RAG_CODE_CHUNK_TOKENS: ${RAG_CODE_CHUNK_TOKENS:-}
       RAG_BM25_K1: ${RAG_BM25_K1:-}
       RAG_BM25_B: ${RAG_BM25_B:-}
       RAG_BM25_AVG_DL: ${RAG_BM25_AVG_DL:-}
@@ -64,6 +66,8 @@ services:
       CONFLUENCE_AUTH_TYPE: ${CONFLUENCE_AUTH_TYPE:-}
       CONFLUENCE_API_TOKEN: ${CONFLUENCE_API_TOKEN:-}
       CONFLUENCE_READ_ONLY: ${CONFLUENCE_READ_ONLY:-true}
+      GITLAB_URL: ${GITLAB_URL:-}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
     ports:
       - "${MCP_PORT:-8765}:${MCP_PORT:-8765}"
     healthcheck:
@@ -78,12 +82,12 @@ services:
   sync:
     image: local-rag:0.1.0
     profiles: [sync]
-    command: ["local-rag", "sync", "--roots-file", "/etc/local-rag/confluence_roots.txt"]
+    command: ["local-rag", "sync", "confluence"]
     depends_on: [qdrant]
     environment: *settings
     volumes:
       - rag-data:/data
-      - /etc/local-rag/confluence_roots.txt:/etc/local-rag/confluence_roots.txt:ro
+      - /etc/local-rag/corpora.toml:/etc/local-rag/corpora.toml:ro
 
 volumes:
   qdrant-storage:

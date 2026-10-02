@@ -152,19 +152,19 @@ def test_first_start_generates_the_secrets_once_into_one_env_file(host):
     assert oct(host.path("/etc/local-rag/container.env").stat().st_mode & 0o777) == "0o600"
 
 
-def test_a_second_start_never_overwrites_settings_or_the_roots_file(host):
+def test_a_second_start_never_overwrites_settings_or_the_corpora_file(host):
     host.start()
     env_file = host.path("/etc/local-rag/container.env")
-    roots_file = host.path("/etc/local-rag/confluence_roots.txt")
+    roots_file = host.path("/etc/local-rag/corpora.toml")
     env_file.write_text(env_file.read_text() + "LITELLM_BASE_URL=http://gateway.example.test/v1\n")
-    roots_file.write_text("12345\n")
+    roots_file.write_text("# mine\n")
     before = env_file.read_text()
 
     code, out, err = host.start()
 
     assert code == 0, err
     assert env_file.read_text() == before
-    assert roots_file.read_text() == "12345\n"
+    assert roots_file.read_text() == "# mine\n"
 
 
 def test_an_upgrade_leaves_the_volumes_alone(host):
@@ -188,6 +188,16 @@ def test_start_installs_the_timers_that_run_sync_through_docker_compose(host):
         assert host.path(f"/etc/systemd/system/local-rag-container-{name}.timer").exists()
     (enable,) = host.docker.ran_matching("systemctl", "enable")
     assert "local-rag-container-sync.timer" in enable and "local-rag-container-full.timer" in enable
+
+
+def test_start_installs_the_templated_timer_but_enables_no_instance(host):
+    code, out, err = host.start()
+
+    assert code == 0, err
+    for suffix in ("service", "timer"):
+        assert host.path(f"/etc/systemd/system/local-rag-container-sync@.{suffix}").exists()
+    (enable,) = host.docker.ran_matching("systemctl", "enable")
+    assert "@" not in enable  # `systemctl enable name@.timer` is an error; the operator opts in per Corpus
 
 
 def test_start_without_docker_is_refused_before_anything_is_touched(tmp_path):
@@ -230,6 +240,14 @@ def test_the_compose_file_holds_no_secret_and_takes_every_one_from_the_env_file(
     assert services["qdrant"]["environment"]["QDRANT__SERVICE__API_KEY"].startswith(
         "${QDRANT_API_KEY:?")
     assert "env_file" not in str(services)  # works in Portainer, whose host paths are not ours
+
+
+def test_the_stack_passes_the_gitlab_settings_to_the_sync_and_keeps_the_mirror_cache():
+    services = compose()["services"]
+
+    for key in ("GITLAB_URL", "GITLAB_TOKEN"):
+        assert services["sync"]["environment"][key] == "${" + key + ":-}"
+    assert "rag-data:/data" in services["sync"]["volumes"]  # HOME=/data: the default mirror cache
 
 
 def test_the_compose_file_names_no_variable_twice():
@@ -293,6 +311,16 @@ def test_the_timer_units_call_compose_run_with_the_files_the_start_command_place
         assert "-f /opt/local-rag/container/compose.yaml" in command
         assert command.endswith(" run --rm -T sync")
         assert "OnCalendar=" in (units / f"local-rag-container-{name}.timer").read_text()
+
+
+def test_the_templated_unit_syncs_the_corpus_named_by_its_instance():
+    units = fake_drop.REPO / "deploy/container"
+    service = (units / "local-rag-container-sync@.service").read_text()
+
+    (command,) = [line for line in service.splitlines() if line.startswith("ExecStart=")]
+    assert "--env-file /etc/local-rag/container.env" in command
+    assert command.endswith(" run --rm -T sync local-rag sync %i")
+    assert "OnCalendar=*:0/15" in (units / "local-rag-container-sync@.timer").read_text()
 
 
 def test_the_command_runs_on_a_machine_with_only_the_standard_library():

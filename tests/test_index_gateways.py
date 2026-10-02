@@ -31,7 +31,7 @@ def test_sync_then_exact_identifier_search(index):
     report = index.sync(InMemoryCorpus(DOCUMENTS))
 
     assert (report.added, report.failed) == (3, 0)
-    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
 
 
 def test_semantic_search_without_shared_keywords(index):
@@ -40,7 +40,7 @@ def test_semantic_search_without_shared_keywords(index):
 
     passages = index.search(query)
 
-    assert passages[0].document_id == "garage/battery"
+    assert passages[0].document_id == "default:garage/battery"
     assert not set(tokenize(query)) & set(tokenize(passages[0].text))
 
 

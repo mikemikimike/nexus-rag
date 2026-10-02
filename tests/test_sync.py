@@ -3,7 +3,7 @@ import time
 import pytest
 
 from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import Document, InMemoryCorpus
+from local_rag.corpus import Document, DocumentRef, InMemoryCorpus, Listing
 from local_rag.fakes import FakeModelGateway
 from conftest import DOCUMENTS
 
@@ -54,7 +54,7 @@ def test_a_changed_version_replaces_the_document_and_only_that_one(index):
 
     assert (report.added, report.replaced, report.unchanged) == (0, 1, 2)
     passages = index.search("ZX-9000")
-    assert passages[0].document_id == "garage/battery"
+    assert passages[0].document_id == "default:garage/battery"
     assert "ZX-9000" in passages[0].text
     assert [p for p in index.search("battery dead") if "dead more often" in p.text] == []
 
@@ -65,7 +65,7 @@ def test_a_replaced_document_leaves_no_duplicate_passages(index):
 
     passages = index.search("battery", k=10)
 
-    assert [p.document_id for p in passages].count("garage/battery") == 1
+    assert [p.document_id for p in passages].count("default:garage/battery") == 1
 
 
 def test_documents_removed_from_the_corpus_disappear_from_search(index):
@@ -74,7 +74,7 @@ def test_documents_removed_from_the_corpus_disappear_from_search(index):
     report = index.sync(InMemoryCorpus(DOCUMENTS[:2]))
 
     assert (report.removed, report.unchanged) == (1, 2)
-    assert "garage/battery" not in {p.document_id for p in index.search("car battery", k=10)}
+    assert "default:garage/battery" not in {p.document_id for p in index.search("car battery", k=10)}
 
 
 def test_a_document_added_later_is_reported_as_added(index):
@@ -114,7 +114,7 @@ def test_a_failed_fetch_of_a_changed_document_keeps_its_old_passages_searchable(
     report = index.sync(flaky)
 
     assert (report.failed, report.replaced, report.unchanged) == (1, 0, 2)
-    assert index.search("car will not start")[0].document_id == "garage/battery"
+    assert index.search("car will not start")[0].document_id == "default:garage/battery"
     assert not any("ZX-9000" in p.text for p in index.search("ZX-9000"))
 
 
@@ -154,7 +154,7 @@ def test_a_failed_embed_of_a_changed_document_keeps_its_old_passages_searchable(
 
     assert (report.failed, report.replaced) == (1, 0)
     gateway.fail = False
-    assert index.search("car battery dead")[0].document_id == "garage/battery"
+    assert index.search("car battery dead")[0].document_id == "default:garage/battery"
 
 
 def test_search_keeps_returning_results_while_a_sync_runs(index):
@@ -168,7 +168,7 @@ def test_search_keeps_returning_results_while_a_sync_runs(index):
 
     index.sync(SearchingCorpus([*DOCUMENTS[:2], revised(DOCUMENTS[2], "2")]))
 
-    assert seen and all(ids and ids[0] == "dba/ora-00942" for ids in seen)
+    assert seen and all(ids and ids[0] == "default:dba/ora-00942" for ids in seen)
 
 
 def test_a_second_sync_while_one_is_running_is_refused(index):
@@ -210,7 +210,7 @@ def test_a_failed_listing_removes_nothing(index):
     with pytest.raises(OSError):
         index.sync(BrokenListing(DOCUMENTS))
 
-    assert index.search("ORA-00942")[0].document_id == "dba/ora-00942"
+    assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
 
 
 def test_exclusive_run_is_shared_by_holders_of_the_same_qdrant():
@@ -269,3 +269,122 @@ def test_a_holder_that_was_taken_over_neither_frees_nor_stamps_over_the_new_lock
         with pytest.raises(SyncInProgress):
             with ExclusiveRun(client, "lock", stale_after=0.05).hold():
                 pytest.fail("the new holder's lock must still stand")
+
+
+class PartedCorpus(InMemoryCorpus):
+    """Lists each Document under its parts; the parts in ``failing`` could not be listed,
+    so Documents under any of them are missing from the listing."""
+
+    def __init__(self, documents, parts, failing=()):
+        super().__init__(documents)
+        self.parts = parts
+        self.failing = set(failing)
+
+    def list(self):
+        refs = [DocumentRef(r.id, r.version, self.parts.get(r.id, ()))
+                for r in super().list()]
+        listed = [r for r in refs if self.failing.isdisjoint(r.parts)]
+        return Listing(listed, {part: "no answer" for part in self.failing})
+
+
+ORA, ORA_2, BATTERY = DOCUMENTS
+PARTS = {ORA.id: ("dba",), ORA_2.id: ("dba",), BATTERY.id: ("garage",)}
+
+
+def test_an_incomplete_listing_holds_back_removals_only_in_the_failed_part(index):
+    index.sync(PartedCorpus(DOCUMENTS, PARTS))
+
+    report = index.sync(PartedCorpus([ORA, BATTERY], PARTS, failing={"garage"}))
+
+    assert (report.removed, report.failed) == (1, 1)
+    assert list(report.failures) == ["garage"]
+    assert index.get_document("default:dba/ora-12154") is None
+    assert index.get_document("default:garage/battery") is not None
+
+
+def test_a_document_that_moved_to_another_part_is_held_back_by_its_new_part(index):
+    index.sync(PartedCorpus(DOCUMENTS, PARTS))
+    moved = {**PARTS, ORA.id: ("garage",)}
+    assert index.sync(PartedCorpus(DOCUMENTS, moved)).replaced == 1  # its part is re-recorded
+
+    index.sync(PartedCorpus([ORA_2, BATTERY], moved, failing={"garage"}))
+
+    assert index.get_document("default:dba/ora-00942") is not None
+
+
+def test_a_document_in_several_parts_is_held_back_when_any_of_them_failed(index):
+    parts = {ORA.id: ("root", "attachments"), ORA_2.id: ("root",)}
+    index.sync(PartedCorpus([ORA, ORA_2], parts))
+
+    report = index.sync(PartedCorpus([], parts, failing={"attachments"}))
+
+    assert (report.removed, report.failed) == (1, 1)
+    assert index.get_document("default:dba/ora-00942") is not None
+    assert index.get_document("default:dba/ora-12154") is None
+
+
+def test_documents_listed_under_no_part_are_held_back_by_any_failure(index):
+    index.sync(PartedCorpus(DOCUMENTS, {}))
+
+    report = index.sync(PartedCorpus([], {}, failing={"anywhere"}))
+
+    assert (report.removed, report.failed) == (0, 1)
+    assert index.get_document("default:garage/battery") is not None
+
+
+def named(name, documents):
+    return InMemoryCorpus(documents, name=name)
+
+
+def test_a_sync_of_one_corpus_runs_to_completion_while_another_corpus_syncs(index):
+    outcome = []
+
+    class LongCorpus(InMemoryCorpus):
+        def fetch(self, document_id):
+            outcome.append(index.sync(named("code", DOCUMENTS[1:2])))
+            return super().fetch(document_id)
+
+    index.sync(LongCorpus(DOCUMENTS[:1], name="confluence"))
+
+    assert [r.added for r in outcome] == [1]
+    assert index.search("ORA-12154")[0].document_id == "code:dba/ora-12154"
+    assert index.search("ORA-00942")[0].document_id == "confluence:dba/ora-00942"
+
+
+def test_a_second_sync_of_the_same_corpus_is_refused_while_other_corpora_sync_freely(index):
+    from local_rag import SyncInProgress
+
+    outcome = []
+
+    class ReentrantCorpus(InMemoryCorpus):
+        def fetch(self, document_id):
+            with pytest.raises(SyncInProgress):
+                index.sync(named("confluence", DOCUMENTS))
+            outcome.append(index.sync(named("code", DOCUMENTS[1:2])).added)
+            return super().fetch(document_id)
+
+    index.sync(ReentrantCorpus(DOCUMENTS[:1], name="confluence"))
+
+    assert outcome == [1]
+
+
+def test_a_corpus_whose_sync_crashed_can_be_synced_once_its_lock_is_stale():
+    from qdrant_client import QdrantClient
+
+    from local_rag import SyncInProgress
+    from local_rag.exclusive import ExclusiveRun
+
+    client = QdrantClient(location=":memory:")
+    settings = Settings(sync_lock_stale_after=0.2)
+    index = KnowledgeIndex(settings, FakeModelGateway(), client=client)
+    crashed = ExclusiveRun(client, f"{settings.collection}.sync-lock.code",
+                           stale_after=0.2, heartbeat_every=3600)
+    holder = crashed.hold()
+    holder.__enter__()  # never exits: the process died, and no heartbeat is left
+
+    with pytest.raises(SyncInProgress):
+        index.sync(named("code", DOCUMENTS))
+    assert index.sync(named("confluence", DOCUMENTS)).added == 3  # another Corpus is unaffected
+    time.sleep(0.3)
+
+    assert index.sync(named("code", DOCUMENTS)).added == 3

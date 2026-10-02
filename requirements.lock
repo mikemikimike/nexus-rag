@@ -241,6 +241,12 @@ tqdm==4.70.1
     # via
     #   llama-index-core
     #   nltk
+tree-sitter==0.26.0
+    # via local-rag (pyproject.toml)
+tree-sitter-c==0.24.2
+    # via local-rag (pyproject.toml)
+tree-sitter-python==0.25.0
+    # via local-rag (pyproject.toml)
 truststore==0.10.4
     # via
     #   httpcore2

@@ -35,18 +35,24 @@ DEFAULT_PORT = 8765
 type Serve = Callable[..., None]  # (app, *, host, port, certfile, keyfile), blocks until stopped
 
 
+_CODE_PARAGRAPH = """Code results show the file, its line range, the enclosing symbol and their `ref`. Searches see each
+Repository's Primary ref only: pass `ref` to search another Tracked ref (a branch or tag), and
+`repository` (its path) to search one Repository."""
+
 _SEARCH_DESCRIPTION = {
-    RetrievalMode.HYBRID: """Hybrid (semantic + keyword) search over indexed pages and attachments.
-Returns the best passages with title, link, page_id and space.
+    RetrievalMode.HYBRID: f"""Hybrid (semantic + keyword) search over indexed Documents: pages, attachments and code files from GitLab Repositories.
+Returns the best Passages with title, link, page_id and space.
 Exact identifiers (error codes, hostnames, ticket ids) work well in the query.
-Optional `space` restricts the search to one space (see list_spaces).
-For the whole page use get_page with the returned page_id.""",
-    RetrievalMode.KEYWORD: """Keyword search over indexed pages and attachments. It matches the
-words you give, not their meaning: use the terms the page itself would use.
-Returns the best passages with title, link, page_id and space.
+Optional `space` restricts the search to one space (see list_spaces); spaces include GitLab groups.
+{_CODE_PARAGRAPH}
+For the whole Document use get_page with the returned page_id.""",
+    RetrievalMode.KEYWORD: f"""Keyword search over indexed Documents: pages, attachments and code files from GitLab Repositories. It matches the
+words you give, not their meaning: use the terms the Document itself would use.
+Returns the best Passages with title, link, page_id and space.
 Exact identifiers (error codes, hostnames, ticket ids) work well in the query.
-Optional `space` restricts the search to one space (see list_spaces).
-For the whole page use get_page with the returned page_id.""",
+Optional `space` restricts the search to one space (see list_spaces); spaces include GitLab groups.
+{_CODE_PARAGRAPH}
+For the whole Document use get_page with the returned page_id.""",
 }
 
 
@@ -55,22 +61,24 @@ def build_server(index: KnowledgeIndex) -> MCPServer:
         "Search the team's indexed internal documentation."))
 
     @server.tool(description=_SEARCH_DESCRIPTION[index.retrieval])
-    async def search_docs(query: str, top_k: int = 6, space: str = "") -> str:
+    async def search_docs(query: str, top_k: int = 6, space: str = "",
+                          repository: str = "", ref: str = "") -> str:
         limit = max(1, min(top_k, MAX_TOP_K))
         results = await anyio.to_thread.run_sync(
-            lambda: index.search(query, k=limit, space=space or None))
+            lambda: index.search(query, k=limit, space=space or None, repository=repository or None,
+                                ref=ref or None))
         return _format_results(results)
 
     @server.tool()
     async def list_spaces() -> str:
-        """List the spaces that are indexed (usable as the `space` filter of search_docs)."""
+        """List the spaces that are indexed, GitLab groups included (usable as the `space` filter of search_docs)."""
         spaces = await anyio.to_thread.run_sync(index.list_spaces)
         return ", ".join(spaces) or "none"
 
     @server.tool()
     async def get_page(page_id: str, max_chars: int = 20000) -> str:
-        """Return the full indexed text of a page by the page_id search_docs gave
-        (or of an attachment by its attachment id). It is a snapshot as of the last sync."""
+        """Return the full indexed text of a page or a file (a Document) by the page_id
+        search_docs gave (or of an attachment by its attachment id), as of the last Sync."""
         text = await anyio.to_thread.run_sync(index.get_document, page_id)
         if text is None:
             return f"Page {page_id} is not in the index."
@@ -190,9 +198,13 @@ def _format_passages(passages: list[Passage]) -> str:
     blocks = []
     for number, passage in enumerate(passages, 1):
         page_id = passage.parent_id or passage.document_id
-        header = f"{passage.url} | page_id: {page_id} | space: {passage.space}"
+        header = f"{passage.link} | page_id: {page_id} | space: {passage.space}"
+        if passage.ref:
+            header += f" | ref: {passage.ref}"
         if passage.parent_id:
             header += f" | attachment: {passage.document_id}"
+        for name, value in passage.code_location:
+            header += f" | {name}: {value}"
         blocks.append(f"[{number}] {passage.title}\n{header}\n{passage.text.strip()}")
     return "\n\n---\n\n".join(blocks)
 

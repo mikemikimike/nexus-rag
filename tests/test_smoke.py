@@ -192,6 +192,26 @@ def test_confluence_is_checked_only_when_it_is_configured(smoke):
     assert not any(call[0] == "confluence" for call in host.calls)
 
 
+def test_gitlab_is_checked_only_when_it_is_configured(smoke):
+    host = Host()
+    _, out, _ = smoke(host=host)
+
+    assert line(out, "GitLab").startswith("[SKIP]")
+    assert not any(call[0] == "git" for call in host.calls)
+
+
+def test_a_configured_gitlab_needs_its_tool_and_does_not_print_the_token(smoke):
+    code, out, err = smoke(host=Host(), GITLAB_URL="https://gitlab.example.test",
+                           GITLAB_TOKEN="glpat-secret")
+
+    assert code == 0, out
+    assert line(out, "GitLab").startswith("[ OK ]")
+    assert "glpat-secret" not in out + err
+
+    code, out, _ = smoke(host=Host(failing=["git"]), GITLAB_URL="https://gitlab.example.test")
+    assert code == 1 and line(out, "GitLab").startswith("[FAIL]")
+
+
 def test_a_configured_confluence_that_cannot_be_read_fails(smoke):
     code, out, _ = smoke(host=Host(failing=["confluence"]), CONFLUENCE_DOMAIN="wiki.example.test")
 

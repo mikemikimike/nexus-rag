@@ -220,23 +220,23 @@ def test_existing_data_and_documents_are_left_exactly_as_they_are(machine):
     index_file = machine.path("/var/lib/qdrant/storage/collections/live/segment.dat")
     index_file.parent.mkdir(parents=True)
     index_file.write_bytes(b"the index")
-    roots = machine.path("/etc/local-rag/confluence_roots.txt")
+    roots = machine.path("/etc/local-rag/corpora.toml")
     roots.parent.mkdir(parents=True)
-    roots.write_text("12345  # my space\n")
+    roots.write_text("# my space\n")
     before = snapshot(machine.path("/var/lib/qdrant/storage"))
 
     machine.install()
     machine.install()
 
     assert snapshot(machine.path("/var/lib/qdrant/storage")) == before
-    assert roots.read_text() == "12345  # my space\n"
+    assert roots.read_text() == "# my space\n"
     assert not any(str(index_file.parent) in " ".join(c) for c in machine.host.ran)
 
 
-def test_a_roots_file_is_provided_for_the_unit_to_read_when_there_is_none(machine):
+def test_a_corpora_file_is_provided_for_the_unit_to_read_when_there_is_none(machine):
     machine.install()
 
-    roots = machine.path("/etc/local-rag/confluence_roots.txt")
+    roots = machine.path("/etc/local-rag/corpora.toml")
     assert roots.is_file()
     assert all(line.startswith("#") or not line.strip() for line in roots.read_text().splitlines())
 
@@ -310,7 +310,8 @@ def test_an_install_that_failed_part_way_is_retried_by_the_next_run(machine):
 
 
 UNITS = ["local-rag-full.service", "local-rag-full.timer", "local-rag-mcp.service",
-         "local-rag-sync.service", "local-rag-sync.timer", "qdrant.service"]
+         "local-rag-sync.service", "local-rag-sync.timer", "local-rag-sync@.service",
+         "local-rag-sync@.timer", "qdrant.service"]
 
 
 def unit(machine, name):
@@ -327,9 +328,9 @@ def test_plain_services_and_timers_call_the_command_line(machine):
     for name in UNITS:
         assert machine.path(f"/etc/systemd/system/{name}").is_file(), name
     assert directives(unit(machine, "local-rag-sync.service"), "ExecStart") == [
-        "/opt/local-rag/venv/bin/local-rag sync --roots-file /etc/local-rag/confluence_roots.txt"]
+        "/opt/local-rag/venv/bin/local-rag sync confluence"]
     assert directives(unit(machine, "local-rag-full.service"), "ExecStart") == [
-        "/opt/local-rag/venv/bin/local-rag sync --roots-file /etc/local-rag/confluence_roots.txt"]
+        "/opt/local-rag/venv/bin/local-rag sync confluence"]
     assert directives(unit(machine, "local-rag-mcp.service"), "ExecStart") == [
         "/opt/local-rag/venv/bin/local-rag-mcp"]
     assert directives(unit(machine, "qdrant.service"), "ExecStart") == ["/opt/qdrant/qdrant"]
@@ -337,10 +338,22 @@ def test_plain_services_and_timers_call_the_command_line(machine):
     assert directives(unit(machine, "local-rag-full.timer"), "OnCalendar") == ["Sun 03:00"]
 
 
+def test_a_templated_unit_pair_syncs_any_corpus_by_name_on_its_own_timer(machine):
+    machine.install()
+
+    assert directives(unit(machine, "local-rag-sync@.service"), "ExecStart") == [
+        "/opt/local-rag/venv/bin/local-rag sync %i"]
+    assert directives(unit(machine, "local-rag-sync@.service"), "EnvironmentFile") == [
+        "/etc/local-rag/local-rag.env"]
+    assert directives(unit(machine, "local-rag-sync@.timer"), "OnCalendar") == ["*:0/15"]
+    enabled = [command for command in machine.host.ran if command[:2] == ["systemctl", "enable"]]
+    assert not [name for command in enabled for name in command if "@" in name]  # opt in per Corpus
+
+
 def test_every_service_loads_the_one_env_file_the_installer_creates(machine):
     machine.install()
 
-    for name in ("qdrant", "local-rag-mcp", "local-rag-sync", "local-rag-full"):
+    for name in ("qdrant", "local-rag-mcp", "local-rag-sync", "local-rag-sync@", "local-rag-full"):
         assert directives(unit(machine, f"{name}.service"), "EnvironmentFile") == [
             "/etc/local-rag/local-rag.env"], name
     assert machine.env()["QDRANT__STORAGE__STORAGE_PATH"] == "/var/lib/qdrant/storage"

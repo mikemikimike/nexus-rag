@@ -13,7 +13,6 @@ SYSTEMD_UNITS = ("qdrant.service", "local-rag-mcp.service",
 CONTAINER_TIMERS = ("local-rag-container-sync.timer", "local-rag-container-full.timer")
 CONTAINER_SERVICES = ("qdrant", "mcp")
 COMPOSE_PROJECT = "local-rag"
-DEFAULT_ROOTS_FILE = "/etc/local-rag/confluence_roots.txt"
 
 
 def run_install(ctx: Context) -> None:
@@ -147,6 +146,54 @@ def run_confluence(ctx: Context) -> None:
     check("confluence.roots", lambda: _roots(ctx), needs=["confluence.read"])
 
 
+def run_gitlab(ctx: Context) -> None:
+    check = ctx.report.check
+    declared: list = []
+    check("gitlab.git", lambda: _tool_runs(ctx, declared))
+    check("gitlab.repositories", lambda: _repositories(declared), needs=["gitlab.git"])
+
+
+def _declared(ctx: Context, read):
+    """What ``read`` makes of the Corpus declaration, and the file's path; the check is skipped
+    when the file cannot be used."""
+    from local_rag.declaration import DEFAULT_PATH, Declaration, DeclarationError  # not at import: the install group runs without it
+    path = Path(ctx.args.corpora or ctx.environ.get("RAG_CORPORA_FILE") or DEFAULT_PATH)
+    try:
+        return read(Declaration.read(path)), path
+    except DeclarationError as error:
+        raise Skipped(f"no usable Corpus declaration at {path} (use --corpora): {error}") from None
+
+
+def _tool_runs(ctx: Context, declared: list) -> str:
+    found, path = _declared(ctx, lambda declaration: [
+        declaration.corpus(name, ctx.environ) for name in declaration.names_of("gitlab")])
+    declared += found
+    if not declared:
+        raise Skipped(f"{path} declares no GitLab Corpus")
+    try:
+        return ctx.run(["git", "--version"]).strip() or "git runs"
+    except Exception as error:
+        raise Failure(f"git --version failed: {error}",
+                      cause="git is not installed where the Sync runs (a host prerequisite on "
+                            "the systemd route; the container image carries it)",
+                      see="section 2 (pre-flight)") from None
+
+
+def _repositories(declared: list) -> str:
+    unread, files = {}, 0
+    for corpus in declared:
+        listing = corpus.list()  # fetches each mirror; read-only
+        files += len(listing)
+        unread.update({f"{corpus.name}: {part}": why for part, why in listing.failures.items()})
+    if unread:
+        shown = "; ".join(f"{part}: {why}" for part, why in unread.items())
+        raise Failure(f"{len(unread)} Tracked refs cannot be read ({shown})",
+                      cause="the token lacks `read_repository` or cannot see the Repository, the "
+                            "path or ref is wrong, or GITLAB_URL is not reachable from this host",
+                      see='section 10 (row "Sync: `failed <repository>@<ref>`")')
+    return f"{files} files readable in {len(declared)} GitLab Corpus"
+
+
 def _command(ctx: Context) -> str:
     return ctx.environ.get("CONFLUENCE_BIN") or "confluence"
 
@@ -168,14 +215,9 @@ def _read(ctx: Context) -> str:
 
 
 def _roots(ctx: Context) -> str:
-    from local_rag.confluence import read_roots  # not at import: the install group runs without it
-    path = Path(ctx.args.roots_file or DEFAULT_ROOTS_FILE)
-    try:
-        roots = read_roots(path)
-    except (OSError, UnicodeDecodeError):
-        raise Skipped(f"no roots file at {path} (use --roots-file)") from None
+    roots, path = _declared(ctx, lambda declaration: declaration.confluence_roots())
     if not roots:
-        raise Skipped(f"{path} lists no Root")
+        raise Skipped(f"{path} declares no Confluence Root")
     command, unresolved = _command(ctx), {}
     for root in roots:
         try:

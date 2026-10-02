@@ -39,7 +39,7 @@ def test_an_unreachable_qdrant_is_reported_not_raised(gateway):
 
 def test_a_corrupt_index_is_reported_unreachable_while_qdrant_is_up(index):
     index.sync(InMemoryCorpus(DOCUMENTS))
-    index.rebuild(InMemoryCorpus(DOCUMENTS))
+    index.rebuild([InMemoryCorpus(DOCUMENTS)])
     lose_the_live_collection(index)
 
     health = index.health()

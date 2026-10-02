@@ -288,7 +288,7 @@ def test_the_live_index_is_untouched_by_a_run():
 
     assert code == 0, out
     assert snapshot(qdrant) == before
-    assert [p.document_id for p in live.search("alpha")] == ["a"]
+    assert [p.document_id for p in live.search("alpha")] == ["default:a"]
 
 
 def snapshot(qdrant):
@@ -458,7 +458,7 @@ def test_a_working_mcp_server_passes_every_check():
     assert code == 0, out
     for name in MCP_CHECKS:
         assert line(out, name).startswith("[ OK ]"), out
-    assert "page ops/guide" in line(out, "mcp.get_page")
+    assert "page default:ops/guide" in line(out, "mcp.get_page")
     assert "OPS" in line(out, "mcp.list_spaces")
 
 
@@ -664,13 +664,14 @@ CONFLUENCE = {"CONFLUENCE_DOMAIN": "wiki.example.test", "CONFLUENCE_API_TOKEN": 
 
 
 def roots_file(tmp_path, *roots):
-    path = tmp_path / "roots.txt"
-    path.write_text("# roots\n" + "\n".join(roots) + "\n")
+    path = tmp_path / "corpora.toml"
+    listed = ", ".join(f'"{root}"' for root in roots)
+    path.write_text(f'[corpus.confluence]\nkind = "confluence"\nroots = [{listed}]\n')
     return str(path)
 
 
 def confluence_only(tmp_path, *roots, host=None, environ=None):
-    return run_suite("--only", "confluence", "--roots-file", roots_file(tmp_path, *roots),
+    return run_suite("--only", "confluence", "--corpora", roots_file(tmp_path, *roots),
                      environ={**CONFLUENCE, **(environ or {})},
                      host=host or Host({"info": '{"id": "100", "title": "Home"}'}))
 
@@ -715,11 +716,11 @@ def test_a_root_that_does_not_resolve_is_named(tmp_path):
 
 
 def test_a_missing_roots_file_skips_the_roots_check_with_the_reason(tmp_path):
-    code, out, _ = run_suite("--only", "confluence", "--roots-file", str(tmp_path / "none.txt"),
+    code, out, _ = run_suite("--only", "confluence", "--corpora", str(tmp_path / "none.toml"),
                              environ=CONFLUENCE)
 
     assert code == 0, out
-    assert "no roots file" in line(out, "confluence.roots")
+    assert "no usable Corpus declaration" in line(out, "confluence.roots")
 
 
 # --- as a whole -----------------------------------------------------------------------
@@ -729,7 +730,7 @@ def test_all_groups_pass_together_and_the_summary_says_so(tmp_path):
     host.answers["info"] = '{"id": "100"}'
     with serving(served_index(PAGE), tokens=(MCP_TOKEN,)) as url:
         code, out, err = run_suite(
-            "--systemd", "--mcp-url", url, "--roots-file", roots_file(tmp_path, "100"),
+            "--systemd", "--mcp-url", url, "--corpora", roots_file(tmp_path, "100"),
             environ=CONFLUENCE, host=host)
 
     assert code == 0, out
@@ -857,6 +858,60 @@ def do_nothing_after(allowed):
     return broken
 
 
+# --- GitLab ---------------------------------------------------------------------------
+
+def gitlab_declaration(tmp_path, *repositories):
+    from fake_gitlab import FakeGitLab
+    remote = FakeGitLab(tmp_path / "remote")
+    remote.commit("platform/payments", {"ledger.py": "def post():\n    return 1\n"})
+    path = tmp_path / "corpora.toml"
+    listed = "\n".join(f'[[corpus.code.repositories]]\npath = "{r}"\nrefs = ["main"]\n'
+                       for r in repositories or ("platform/payments",))
+    path.write_text(f'[corpus.code]\nkind = "gitlab"\ncache = "{tmp_path / "mirrors"}"\n{listed}')
+    return str(path), {"GITLAB_URL": remote.url, "GITLAB_TOKEN": "glpat-secret"}
+
+
+def gitlab_only(tmp_path, *repositories, host=None):
+    path, environ = gitlab_declaration(tmp_path, *repositories)
+    return run_suite("--only", "gitlab", "--corpora", path, environ=environ, host=host)
+
+
+def test_a_declared_gitlab_corpus_is_checked_for_its_tool_and_every_repository(tmp_path):
+    host = Host({"--version": "git version 2.43.0"})
+    code, out, err = gitlab_only(tmp_path, host=host)
+
+    assert code == 0, out
+    assert "git version 2.43.0" in line(out, "gitlab.git")
+    assert "1 files" in line(out, "gitlab.repositories")
+    assert "glpat-secret" not in out + err
+
+
+def test_gitlab_is_skipped_when_no_gitlab_corpus_is_declared(tmp_path):
+    path = tmp_path / "corpora.toml"
+    path.write_text('[corpus.docs]\nkind = "folder"\npath = "."\n')
+    code, out, _ = run_suite("--only", "gitlab", "--corpora", str(path))
+
+    assert code == 0
+    assert line(out, "gitlab.git").startswith("[SKIP]")
+    assert line(out, "gitlab.repositories").startswith("[SKIP]")
+
+
+def test_a_host_without_the_tool_fails_naming_the_prerequisite(tmp_path):
+    code, out, _ = gitlab_only(tmp_path, host=Host(failing=["--version"]))
+
+    assert code == 1
+    assert "section 2" in line(out, "gitlab.git")
+    assert line(out, "gitlab.repositories").startswith("[SKIP]")
+
+
+def test_a_repository_the_token_cannot_read_fails_naming_it(tmp_path):
+    code, out, _ = gitlab_only(tmp_path, "platform/payments", "platform/missing")
+
+    failed = line(out, "gitlab.repositories")
+    assert code == 1 and failed.startswith("[FAIL]") and "platform/missing@main" in failed
+    assert "read_repository" in failed
+
+
 # --- the Retrieval mode ----------------------------------------------------------------
 
 KEYWORD_ONLY = {"RAG_RETRIEVAL": "keyword", "RAG_EMBED_MODEL": "", "LITELLM_BASE_URL": ""}
@@ -901,3 +956,12 @@ def test_the_suite_says_which_retrieval_mode_it_ran_in():
 
     assert "retrieval:        keyword" in keyword
     assert "retrieval:        hybrid" in hybrid
+
+
+def test_the_identifiers_of_a_run_are_never_split_into_parts_by_keyword_search():
+    from local_rag.acceptance_corpus import Run
+    from local_rag.sparse import tokenize
+
+    for run in (Run.new() for _ in range(200)):
+        for identifier in (run.keyword, run.replacement, run.tail):
+            assert tokenize(identifier) == [identifier]

@@ -23,6 +23,7 @@ class Settings:
     gateway_base_url: str | None = None  # LiteLLM, OpenAI-compatible root; None until an operator names it
     gateway_api_key: str | None = field(default=None, repr=False)  # bearer key for the gateway
     embed_model: str = "embed"  # model name registered in the gateway for embeddings
+    query_instruction: str = ""  # goes before a query embedding ("Instruct: ...\nQuery: ..."); empty leaves queries as they are; not part of the Index format
     rerank_model: str | None = None  # model name for /rerank; None leaves rerank off
     embed_batch_size: int = 16  # texts per /embeddings request
     embed_attempts: int = 3  # tries at one Document's embeddings in a Sync or Rebuild; search never retries
@@ -33,6 +34,7 @@ class Settings:
     ocr: bool = False  # let LiteParse run OCR (needs OCR language data installed)
     chunk_tokens: int = 400  # target Passage size
     chunk_overlap: int = 60  # tokens shared between neighbouring Passages
+    code_chunk_tokens: int = 800  # target size of a code Passage, which is split by lines
     max_passages_per_document: int = 2  # most Passages one Document may add to a result
     rerank: bool = False  # reorder results through the Model gateway's rerank
     sync_lock_stale_after: float = 120.0  # seconds without a heartbeat before a crashed Sync's lock is taken over
@@ -52,6 +54,9 @@ class Settings:
             raise ValueError(
                 f"chunk_overlap must be at least 0 and smaller than chunk_tokens "
                 f"({self.chunk_tokens}), got {self.chunk_overlap!r}")
+        if self.code_chunk_tokens < 1:
+            raise ValueError(
+                f"code_chunk_tokens must be at least 1, got {self.code_chunk_tokens!r}")
         if self.embed_attempts < 1:
             raise ValueError(f"embed_attempts must be at least 1, got {self.embed_attempts!r}")
         if self.embed_retry_backoff < 0:

@@ -78,7 +78,7 @@ def test_search_docs_finds_a_page_by_an_exact_identifier(server):
     assert "Fixing ORA-00942" in text
     assert "https://wiki.example.test/dba/ora-00942" in text
     assert "space: DBA" in text
-    assert "page_id: dba/ora-00942" in text
+    assert "page_id: default:dba/ora-00942" in text
 
 
 def test_search_docs_narrows_to_a_space(server):
@@ -100,8 +100,8 @@ def test_search_docs_lists_attachments_with_their_parent_page(index, corpus):
     with serving(index) as base_url:
         text = call(base_url, "search_docs", {"query": "frobnicator"})
 
-    assert "page_id: 10" in text
-    assert "attachment: 10/attachments/runbook.pdf" in text
+    assert "page_id: default:10" in text
+    assert "attachment: default:10/attachments/runbook.pdf" in text
 
 
 def test_search_docs_returns_no_more_passages_than_asked_for(server):
@@ -144,13 +144,13 @@ def test_list_spaces_says_so_when_the_index_is_empty(index):
 
 
 def test_get_page_returns_the_full_text(server):
-    text = call(server, "get_page", {"page_id": "dba/ora-00942"})
+    text = call(server, "get_page", {"page_id": "default:dba/ora-00942"})
 
     assert text == "ORA-00942: table or view does not exist. Check the schema owner and grants."
 
 
 def test_get_page_truncates_to_max_chars(server):
-    text = call(server, "get_page", {"page_id": "dba/ora-00942", "max_chars": 10})
+    text = call(server, "get_page", {"page_id": "default:dba/ora-00942", "max_chars": 10})
 
     assert text == "ORA-00942:\n\n[truncated]"
 
@@ -368,3 +368,59 @@ def test_a_hybrid_server_without_an_embedding_model_refuses_to_start_and_says_wh
 
     assert code != 0
     assert "RAG_EMBED_MODEL" in capsys.readouterr().err
+
+
+def test_search_docs_narrows_to_a_repository_or_a_tracked_ref_and_shows_the_ref(index):
+    from local_rag.corpus import RawDocument
+
+    def code(repository, ref, primary, text):
+        return RawDocument(
+            id=f"{repository}@{ref}:a.py", title=f"{repository}/a.py", url="https://src.example.test/a",
+            space="platform", version=text, content=text.encode(), media_type="text/x-python",
+            repository=repository, ref=ref, primary=primary)
+    index.sync(InMemoryCorpus([
+        code("platform/pay", "main", True, "def settle(): pass  # zebrafish"),
+        code("platform/pay", "feature/x", False, "def settle(): pass  # zebrafish"),
+        code("platform/other", "main", True, "def settle(): pass  # zebrafish")], name="code"))
+    with serving(index) as base_url:
+        plain = call(base_url, "search_docs", {"query": "zebrafish"})
+        feature = call(base_url, "search_docs", {"query": "zebrafish", "ref": "feature/x"})
+        other = call(base_url, "search_docs",
+                     {"query": "zebrafish", "repository": "platform/other"})
+
+    assert "ref: feature/x" not in plain and plain.count("ref: main") == 2
+    assert "ref: feature/x" in feature and "ref: main" not in feature
+    assert "platform/other/a.py" in other and "platform/pay/a.py" not in other
+
+
+# --- code search ------------------------------------------------------------------------
+
+@pytest.mark.parametrize("retrieval", [RetrievalMode.HYBRID, RetrievalMode.KEYWORD])
+def test_search_docs_explains_code_results_in_either_retrieval_mode(retrieval):
+    gateway = FakeModelGateway() if retrieval is RetrievalMode.HYBRID else None
+    index = KnowledgeIndex(Settings(retrieval=retrieval), gateway)
+    with serving(index) as base_url:
+        description = tool_descriptions(base_url)["search_docs"]
+
+    for needle in ("code files", "repositories", "`repository`", "`ref`", "gitlab groups"):
+        assert needle in description.lower(), needle
+
+
+def test_get_page_keeps_its_name_and_says_it_returns_a_page_or_a_file(server):
+    description = tool_descriptions(server)["get_page"]
+
+    assert "page or a file" in description
+
+
+def test_list_spaces_includes_the_gitlab_groups_and_not_an_empty_space(tmp_path, gateway):
+    from fake_gitlab import FakeGitLab
+    from local_rag.gitlab import GitLabCorpus, Repository
+    remote = FakeGitLab(tmp_path / "remote")
+    remote.commit("platform/payments", {"a.py": "def a():\n    return 1\n"})
+    remote.commit("toplevel", {"b.py": "def b():\n    return 2\n"})
+    code = GitLabCorpus([Repository("platform/payments", "main"), Repository("toplevel", "main")],
+                        url=remote.url, token="t", cache=tmp_path / "mirrors", name="code")
+    index = KnowledgeIndex(Settings(), gateway)
+    index.sync(code)
+    with serving(index) as base_url:
+        assert call(base_url, "list_spaces") == "platform"

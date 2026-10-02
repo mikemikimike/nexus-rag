@@ -169,3 +169,29 @@ def test_gateway_ignores_proxy_environment_variables(server, monkeypatch):
     vectors = gateway.embed(["battery is dead"])
 
     assert vectors == server.embedder.embed(["battery is dead"])
+
+
+def test_a_query_instruction_goes_in_front_of_the_query_in_the_trained_format(server):
+    gateway = make_gateway(server, query_instruction="Find the passage that answers the question")
+
+    gateway.embed_query("vehicle refuses to ignite")
+
+    [request] = server.requests
+    assert request["body"]["input"] == [
+        "Instruct: Find the passage that answers the question\nQuery: vehicle refuses to ignite"]
+
+
+def test_document_embeddings_never_get_the_query_instruction(server):
+    gateway = make_gateway(server, query_instruction="Find the passage that answers the question")
+
+    gateway.embed(["battery is dead", "car will not start"])
+
+    [request] = server.requests
+    assert request["body"]["input"] == ["battery is dead", "car will not start"]
+
+
+def test_without_a_query_instruction_the_query_is_sent_unchanged(server):
+    make_gateway(server).embed_query("vehicle refuses to ignite")
+
+    [request] = server.requests
+    assert request["body"]["input"] == ["vehicle refuses to ignite"]

@@ -43,7 +43,7 @@ from local_rag.binary_drop import (
 
 SERVICE_USER = "ragsvc"
 PREREQUISITE_COMMANDS = {"systemctl": "systemd", "useradd": "passwd / shadow-utils",
-                         "chown": "coreutils"}
+                         "chown": "coreutils", "git": "git"}
 LOCKFILE = "requirements.lock"
 UNITS_DIRECTORY = "deploy/systemd"
 
@@ -60,7 +60,7 @@ class Layout:
     service_directories = property(lambda self: [
         self.at("/var/lib/qdrant"), self.at("/var/lib/qdrant/storage"),
         self.at("/var/lib/qdrant/snapshots")])
-    roots_file = property(lambda self: self.at("/etc/local-rag/confluence_roots.txt"))
+    corpora_file = property(lambda self: self.at("/etc/local-rag/corpora.toml"))
     units_directory = property(lambda self: self.at("/etc/systemd/system"))
     venv = property(lambda self: self.at("/opt/local-rag/venv"))
     state_file = property(lambda self: self.at("/opt/local-rag/installed.json"))
@@ -159,8 +159,8 @@ class _Install:
         else:
             self.done("unchanged", layout.qdrant_binary)
         self._env_file()
-        if create_text(layout.roots_file, ROOTS_FILE):
-            self.done("created", layout.roots_file)
+        if create_text(layout.corpora_file, CORPORA_FILE):
+            self.done("created", layout.corpora_file)
         if self._python_environment(archive, source):
             restart.append("local-rag-mcp.service")
         self._systemd(source / UNITS_DIRECTORY, restart)
@@ -310,6 +310,9 @@ MCP_PORT=8765
 # LITELLM_API_KEY=
 # RAG_EMBED_MODEL=YOUR-EMBEDDING-MODEL-NAME
 # RAG_RERANK_MODEL=
+# Qwen3-Embedding wants an instruction in front of each query (not of documents), so a
+# suggested one is below; unset leaves queries as they are. Needs no Rebuild.
+# RAG_QUERY_INSTRUCTION=Given a question, retrieve the passages that answer it
 
 # Confluence (read by confluence-cli during a Sync)
 # CONFLUENCE_DOMAIN=confluence.example.test
@@ -317,12 +320,27 @@ MCP_PORT=8765
 # CONFLUENCE_AUTH_TYPE=bearer
 # CONFLUENCE_API_TOKEN=
 # CONFLUENCE_READ_ONLY=true
+
+# GitLab (read by a `kind = "gitlab"` Corpus; a read-only token that can see only code
+# suitable for every user of this server; the URL is the base, without a project path)
+# GITLAB_URL=https://gitlab.example.test
+# GITLAB_TOKEN=
 """
 
 
-ROOTS_FILE = """\
-# Confluence roots for the scheduled Sync: one page id or URL per line.
-# A Space's home page as a root covers the whole Space. Never overwritten by the Installer.
+CORPORA_FILE = """\
+# The Corpora this system indexes, each declared by name (never overwritten by the Installer).
+# The scheduled Syncs run `local-rag sync confluence`, so name the Confluence Corpus that.
+#
+# [corpus.confluence]
+# kind = "confluence"
+# roots = ["12345", "https://wiki.example.test/pages/viewpage.action?pageId=67890"]
+# # A Space's home page as a Root covers the whole Space.
+# # Optional: max_depth = 0, attachments = true, exclude_attachments = ["*.png"]
+#
+# [corpus.docs]
+# kind = "folder"
+# path = "/srv/docs"
 """
 
 

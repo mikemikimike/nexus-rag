@@ -2,7 +2,7 @@
 
     python -m local_rag.acceptance [--only GROUP ...] [--skip GROUP ...]
                                    [--systemd | --container]
-                                   [--mcp-url URL] [--token TOKEN] [--roots-file FILE]
+                                   [--mcp-url URL] [--token TOKEN] [--corpora FILE]
 
 Run it with the settings the services run with (``run_rag ...`` / ``compose run --rm -T sync
 ...``, like the smoke check). It checks, in groups: ``gateway`` (the Model gateway embeds, and
@@ -10,7 +10,8 @@ a long text is split into Passages the model accepts), ``qdrant`` (reachable, a 
 refused), ``index`` (a round trip on a throwaway collection and temp folder), ``mcp`` (the
 running MCP server over HTTP), ``install`` (units or containers, env file mode, timers; needs
 ``--systemd`` or ``--container``, else it fails, and ``--skip install`` leaves it out) and
-``confluence`` (only when ``CONFLUENCE_DOMAIN`` is set).
+``confluence`` (only when ``CONFLUENCE_DOMAIN`` is set) and ``gitlab`` (only when the
+declaration holds a GitLab Corpus: the tool runs and every Tracked ref can be read).
 
 It never touches the live index: the index group works in its own collection, named
 ``acceptance-<random>``, and removes it and its temp folder at the end, also after a failure.
@@ -30,7 +31,7 @@ from local_rag.acceptance_corpus import Run
 from local_rag.acceptance_report import Context, Report, run_command
 from local_rag.environment import SettingsError, settings_from_environment
 
-GROUPS = ("gateway", "qdrant", "index", "mcp", "install", "confluence")
+GROUPS = ("gateway", "qdrant", "index", "mcp", "install", "confluence", "gitlab")
 SECRET_NAMES = ("KEY", "TOKEN", "TOKENS", "SECRET", "PASSWORD")
 
 type Connect = Callable[[str, str | None], Any]  # (Qdrant location, API key) -> a Qdrant client
@@ -122,6 +123,7 @@ def _describe(report: Report, live, environ: Mapping[str, str], run_id: Run,
     report.say(f"  passages:         {live.chunk_tokens} tokens, overlap {live.chunk_overlap}")
     report.say(f"  mcp tokens:       {len(tokens)}")
     report.say(f"  confluence:       {environ.get('CONFLUENCE_DOMAIN') or 'not set'}")
+    report.say(f"  gitlab:           {_safe_url(environ.get('GITLAB_URL'))}")
     report.say(f"  live collection:  {live.collection} (not touched)")
     if "index" in groups:
         report.say(f"  throwaway:        {run_id.collection} (removed at the end)")
@@ -173,8 +175,9 @@ def _parser() -> argparse.ArgumentParser:
                         help="where the MCP server listens (default: MCP_HOST and MCP_PORT)")
     parser.add_argument("--token", metavar="TOKEN",
                         help="the MCP token to use (default: the first of MCP_TOKENS)")
-    parser.add_argument("--roots-file", metavar="FILE",
-                        help="the Confluence roots file (default: /etc/local-rag/confluence_roots.txt)")
+    parser.add_argument("--corpora", metavar="FILE",
+                        help="the Corpus declaration file whose Confluence Roots and GitLab Corpora are checked "
+                             "(default: RAG_CORPORA_FILE, else /etc/local-rag/corpora.toml)")
     return parser
 
 

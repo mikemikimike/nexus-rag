@@ -18,7 +18,7 @@ FOREIGN_VARIABLES = {"NODE_EXTRA_CA_CERTS", "NO_PROXY", "HTTP_PROXY", "HTTPS_PRO
                      "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"}
 FOREIGN_FLAGS = {"--transport", "--header"}  # `claude mcp add`
 # Shell variables the guide sets for itself, and names it mentions only to rule them out.
-SHELL_VARIABLES = {"ENV_FILE", "ROOTS_FILE", "RAG_VALUE", "RAG_APPEND", "MIRROR_URL",
+SHELL_VARIABLES = {"ENV_FILE", "CORPORA_FILE", "RAG_VALUE", "RAG_APPEND", "MIRROR_URL",
                    "NO_PROXY_LIST", "CA_PEM"}
 NOT_SETTINGS = {"CONFLUENCE_URL", "CONFLUENCE_TOKEN"}
 
@@ -44,7 +44,7 @@ def test_every_variable_the_guide_names_is_read_by_the_code_or_shipped_in_a_file
 
 def test_the_guide_asks_for_every_input_the_ticket_lists():
     asked = ["LITELLM_BASE_URL", "LITELLM_API_KEY", "RAG_EMBED_MODEL", "RAG_RERANK_MODEL",
-             "CONFLUENCE_DOMAIN", "CONFLUENCE_API_TOKEN", "confluence_roots.txt", "--folder",
+             "CONFLUENCE_DOMAIN", "CONFLUENCE_API_TOKEN", "corpora.toml", "kind = \"folder\"",
              "MCP_HOST", "MCP_PORT", "MCP_TLS_CERT", "MCP_TLS_KEY", "NODE_EXTRA_CA_CERTS",
              "NO_PROXY", "MCP_TOKENS"]
 
@@ -103,11 +103,11 @@ def flags_of(parser: argparse.ArgumentParser) -> set[str]:
 
 def test_every_local_rag_command_and_flag_in_the_guide_exists():
     known = parsers()
-    commands = set(re.findall(r"local-rag (sync|rebuild|switch-back|search|status)\b", GUIDE))
+    commands = set(re.findall(r"local-rag (sync|rebuild|forget|switch-back|search|status)\b", GUIDE))
     assert commands == {name.split()[1] for name in known if name.startswith("local-rag")}
 
     for line in "\n".join(code_spans()).splitlines():
-        for name in ("sync", "rebuild", "search", "status", "switch-back"):
+        for name in ("sync", "rebuild", "forget", "search", "status", "switch-back"):
             if re.search(rf"local-rag {name}\b", line):
                 unknown = set(re.findall(r"(?<![\w-])--?[a-z][\w-]*", line.split(f"local-rag {name}")[1]))
                 allowed = flags_of(known[f"local-rag {name}"]) | {"-m"}
@@ -127,8 +127,8 @@ def test_every_flag_of_the_installer_container_and_smoke_commands_exists():
 
 
 def test_the_acceptance_groups_and_check_names_the_guide_gives_exist():
-    groups = set(re.findall(r"`(gateway|qdrant|index|mcp|install|confluence)`", GUIDE))
-    names = set(re.findall(r"`((?:gateway|qdrant|index|mcp|install|confluence)\.[\w-]+)`", GUIDE))
+    groups = set(re.findall(r"`(gateway|qdrant|index|mcp|install|confluence|gitlab)`", GUIDE))
+    names = set(re.findall(r"`((?:gateway|qdrant|index|mcp|install|confluence|gitlab)\.[\w-]+)`", GUIDE))
     source = "\n".join((REPO / "src/local_rag" / f"acceptance_{m}.py").read_text()
                        for m in ("stack", "index", "mcp", "host"))
 
