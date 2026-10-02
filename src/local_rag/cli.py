@@ -19,7 +19,7 @@ from qdrant_client import QdrantClient
 
 from local_rag.corpus import Corpus
 from local_rag.declaration import DEFAULT_PATH, Declaration, DeclarationError
-from local_rag.environment import settings_from_environment
+from local_rag.environment import Environment, environment_from, settings_from_environment
 from local_rag.gateway import ModelGateway
 from local_rag.gateway_litellm import gateway_from_settings
 from local_rag.index import IndexStatus, KnowledgeIndex, Passage, RebuildReport, SyncReport
@@ -33,7 +33,7 @@ class _Session:
     how to read the Corpus declaration, which only the commands that need it do."""
 
     index: KnowledgeIndex
-    environ: Mapping[str, str]
+    environment: Environment
     out: TextIO
     read_declaration: Callable[[], Declaration]
 
@@ -62,10 +62,11 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
     except SystemExit as stop:  # argparse: --help, or a command line it rejected
         return int(stop.code or 0)
     try:
-        settings = settings_from_environment(environ)
+        settings, environment = settings_from_environment(environ), environment_from(environ)
         index = KnowledgeIndex(settings, gateway or gateway_from_settings(settings),
                                client=client)
-        return args.run(args, _Session(index, environ, out, _declaration_reader(args, environ)))
+        return args.run(args, _Session(index, environment, out,
+                                       _declaration_reader(args, environment)))
     except UsageError as error:
         print(f"error: {error}", file=err)
         return 2
@@ -119,21 +120,21 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _declaration_reader(args: argparse.Namespace,
-                        environ: Mapping[str, str]) -> Callable[[], Declaration]:
+                        environment: Environment) -> Callable[[], Declaration]:
     """Reads the declaration when called: search and status never read the file."""
-    path = getattr(args, "corpora", None) or environ.get("RAG_CORPORA_FILE") or DEFAULT_PATH
+    path = getattr(args, "corpora", None) or environment.corpora_file
     return lambda: Declaration.read(path)
 
 
 def _sync(args, session: _Session) -> int:
-    corpus = session.declared(lambda d: d.corpus(args.corpus, session.environ))
+    corpus = session.declared(lambda d: d.corpus(args.corpus, session.environment))
     report = session.index.sync(corpus)
     _print_sync(report, session.out)
     return 1 if report.failed else 0
 
 
 def _rebuild(args, session: _Session) -> int:
-    corpora = session.declared(lambda d: d.corpora(session.environ))
+    corpora = session.declared(lambda d: d.corpora(session.environment))
     report = session.index.rebuild(corpora)
     _print_rebuild(report, session.out)
     return 0 if report.promoted else 1

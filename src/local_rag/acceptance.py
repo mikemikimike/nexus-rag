@@ -30,7 +30,8 @@ from urllib.parse import urlsplit, urlunsplit
 from local_rag.acceptance_corpus import Run
 from local_rag.acceptance_report import Context
 from local_rag.checks import Report, run_command, secrets_in
-from local_rag.environment import SettingsError, settings_from_environment
+from local_rag.environment import (
+    Environment, SettingsError, environment_from, settings_from_environment)
 
 GROUPS = ("gateway", "qdrant", "index", "mcp", "install", "confluence", "gitlab")
 
@@ -55,6 +56,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
     try:
         live = settings_from_environment(
             environ, gateway_required=bool({"gateway", "index"} & set(groups)))
+        environment = environment_from(environ)
     except SettingsError as error:
         print(f"error: {error}", file=err)
         return 2
@@ -62,10 +64,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
     run_id = Run.new()
     settings = replace(live, collection=run_id.collection)
     report = Report(out, [*secrets_in(environ), *(args.token or "").split(",")], verdict="ACCEPTANCE")
-    context = Context(settings=settings, environ=environ, report=report, gateway=gateway,
+    context = Context(settings=settings, environment=environment, report=report, gateway=gateway,
                       connect=connect or _connect, run=run or run_command, args=args,
                       run_id=run_id)
-    _describe(report, live, environ, run_id, groups)
+    _describe(report, live, environment, environ, run_id, groups)
     try:
         _prepare(context, groups)
         for group in groups:
@@ -106,13 +108,12 @@ def _clean_up(ctx: Context) -> None:
         ctx.report.check(f"cleanup.{name}", undo)
 
 
-def _describe(report: Report, live, environ: Mapping[str, str], run_id: Run,
-              groups: Sequence[str]) -> None:
+def _describe(report: Report, live, environment: Environment, environ: Mapping[str, str],
+              run_id: Run, groups: Sequence[str]) -> None:
     """Which settings the run uses; a secret is only said to be set."""
     def secret(name: str) -> str:
         return "set" if environ.get(name) else "not set"
 
-    tokens = [t for t in environ.get("MCP_TOKENS", "").split(",") if t.strip()]
     report.say("local-rag acceptance suite")
     report.say(f"  groups:           {', '.join(groups)}")
     report.say(f"  model gateway:    {_safe_url(live.gateway_base_url)}"
@@ -121,9 +122,9 @@ def _describe(report: Report, live, environ: Mapping[str, str], run_id: Run,
     report.say(f"  retrieval:        {live.retrieval}")
     report.say(f"  qdrant:           {_safe_url(live.qdrant_location)}, key {secret('QDRANT_API_KEY')}")
     report.say(f"  passages:         {live.chunk_tokens} tokens, overlap {live.chunk_overlap}")
-    report.say(f"  mcp tokens:       {len(tokens)}")
-    report.say(f"  confluence:       {environ.get('CONFLUENCE_DOMAIN') or 'not set'}")
-    report.say(f"  gitlab:           {_safe_url(environ.get('GITLAB_URL'))}")
+    report.say(f"  mcp tokens:       {len(environment.mcp_tokens)}")
+    report.say(f"  confluence:       {environment.confluence_domain or 'not set'}")
+    report.say(f"  gitlab:           {_safe_url(environment.gitlab_url)}")
     report.say(f"  live collection:  {live.collection} (not touched)")
     if "index" in groups:
         report.say(f"  throwaway:        {run_id.collection} (removed at the end)")

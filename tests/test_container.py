@@ -274,6 +274,7 @@ def test_every_setting_the_programs_read_can_be_set_from_the_env_file():
 
     read = set(re.findall(r'"(RAG_[A-Z_]+|LITELLM_[A-Z_]+|LIT_BIN)"',
                           Path(environment.__file__).read_text()))
+    read -= {"RAG_CORPORA_FILE"}  # the stack mounts the declaration at its default path
     services = compose()["services"]
 
     assert read
@@ -332,3 +333,19 @@ def test_the_command_runs_on_a_machine_with_only_the_standard_library():
     result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
 
     assert result.returncode == 0, result.stderr
+
+
+def test_both_routes_offer_the_same_settings_after_their_own_qdrant_and_mcp_parts(host, tmp_path):
+    # What follows the route's own Qdrant and MCP server parts (retrieval, the Model gateway,
+    # Confluence, GitLab) is one text, so a setting added for one route is offered on both.
+    from test_installer import Machine
+
+    machine = Machine(tmp_path / "systemd")
+    assert host.start()[0] == 0 and machine.install()[0] == 0
+
+    def shared(text: str) -> str:
+        return text[text.index("# Retrieval mode"):]
+
+    container = shared(host.path("/etc/local-rag/container.env").read_text())
+    assert container == shared(machine.path("/etc/local-rag/local-rag.env").read_text())
+    assert "RAG_REBUILD_FAILURE_THRESHOLD" in container and "GITLAB_TOKEN" in container

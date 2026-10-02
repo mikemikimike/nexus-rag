@@ -20,7 +20,7 @@ from qdrant_client import QdrantClient
 
 from local_rag import checks
 from local_rag.checks import QDRANT_DOWN, SYSTEMD_UNITS, Failure, Report, Skipped, Warned, run_command
-from local_rag.environment import SettingsError, settings_from_environment
+from local_rag.environment import Environment, SettingsError, environment_from, settings_from_environment
 from local_rag.gateway import ModelGateway
 from local_rag.gateway_litellm import gateway_from_settings
 from local_rag.index import KnowledgeIndex
@@ -48,7 +48,13 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
     report = Report(stdout or sys.stdout, checks.secrets_in(environ), verdict="SMOKE CHECK")
     check = report.check
 
-    check("MCP_TOKENS", lambda: _tokens(environ))
+    try:
+        environment = environment_from(environ)
+    except SettingsError as error:
+        check("settings", lambda: _settings_error(error))
+        report.summary()
+        return 1
+    check("MCP_TOKENS", lambda: _tokens(environment.mcp_tokens))
     try:
         settings = settings_from_environment(environ)
     except SettingsError as error:
@@ -63,8 +69,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
           needs=[] if settings.retrieval is RetrievalMode.KEYWORD else [EMBEDDINGS])
     check("Knowledge index", lambda: _index(settings, gateway, client))
     check("LiteParse", lambda: _liteparse(run, settings.liteparse_bin))
-    check("Confluence CLI", lambda: _confluence(environ, run))
-    check("GitLab (git)", lambda: _gitlab(environ, run))
+    check("Confluence CLI", lambda: _confluence(environment, run))
+    check("GitLab (git)", lambda: _gitlab(environment, run))
     if args.systemd:
         for unit in SYSTEMD_UNITS:
             check(unit, lambda unit=unit: _unit_active(run, unit))
@@ -72,8 +78,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
     return 1 if report.failed else 0
 
 
-def _tokens(environ: Mapping[str, str]) -> str:
-    tokens = [t.strip() for t in environ.get("MCP_TOKENS", "").split(",") if t.strip()]
+def _tokens(tokens: Sequence[str]) -> str:
     if not tokens:
         raise Failure("MCP_TOKENS is empty; the MCP server refuses to start without a token",
                       cause="no token was generated into the env file, or this is not the "
@@ -105,10 +110,10 @@ def _index(settings, gateway: ModelGateway | None, client: QdrantClient | None) 
     return summary
 
 
-def _confluence(environ: Mapping[str, str], run: Run) -> str:
-    if not environ.get("CONFLUENCE_DOMAIN"):
+def _confluence(environment: Environment, run: Run) -> str:
+    if not environment.confluence_domain:
         raise Skipped("CONFLUENCE_DOMAIN is not set")
-    command = environ.get("CONFLUENCE_BIN") or "confluence"
+    command = environment.confluence_bin
     try:
         run([command, "spaces"])  # one authenticated, read-only call
     except Exception as error:
@@ -117,11 +122,11 @@ def _confluence(environ: Mapping[str, str], run: Run) -> str:
                             "domain, token or auth type is wrong",
                       see='section 10 (rows "Sync: `confluence not found`" and "Sync: '
                           '`confluence ... failed`")') from None
-    return f"{command} reads {environ['CONFLUENCE_DOMAIN']}"
+    return f"{command} reads {environment.confluence_domain}"
 
 
-def _gitlab(environ: Mapping[str, str], run: Run) -> str:
-    if not environ.get("GITLAB_URL"):
+def _gitlab(environment: Environment, run: Run) -> str:
+    if not environment.gitlab_url:
         raise Skipped("GITLAB_URL is not set")
     try:
         return run(["git", "--version"]).strip() or "git runs"

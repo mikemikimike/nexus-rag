@@ -90,7 +90,7 @@ max_depth = 2
 ''')
 
     assert declaration.names == ["docs", "wiki"]
-    assert [c.name for c in declaration.corpora({})] == ["docs", "wiki"]
+    assert [c.name for c in declaration.corpora()] == ["docs", "wiki"]
 
 
 @pytest.mark.parametrize("text, message", [
@@ -113,7 +113,7 @@ max_depth = 2
 def test_a_wrong_declaration_is_rejected_when_it_is_read(tmp_path, text, message):
     with pytest.raises(DeclarationError, match=message):
         declaration = read(tmp_path, text)
-        declaration.corpora({})  # a wrong value is found at the latest when it is built
+        declaration.corpora()  # a wrong value is found at the latest when it is built
 
 
 def test_a_folder_that_is_not_there_is_not_an_empty_corpus(tmp_path):
