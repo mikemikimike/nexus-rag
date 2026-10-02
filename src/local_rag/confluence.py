@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from local_rag.corpus import DocumentRef, Listing, RawDocument, check_corpus_name
+from local_rag.errors import describe
 from local_rag.extraction import MEDIA_TYPES
 
 _MAX_ERROR_LENGTH = 400
@@ -74,7 +75,7 @@ class ConfluenceCorpus:
             try:
                 entries = self._list_root(root, failures)
             except Exception as error:  # a bad answer from the CLI fails the root, not the Sync
-                failures[f"root {root}"] = _describe(error)
+                failures[f"root {root}"] = describe(error)
             else:
                 self._entries.update((e.id, e) for e in entries)
         return Listing([DocumentRef(e.id, e.version, e.parts) for e in self._entries.values()],
@@ -126,7 +127,7 @@ class ConfluenceCorpus:
                 try:
                     entries += self._list_attachments(entry)
                 except Exception as error:
-                    failures[_attachments_part(entry.id)] = _describe(error)
+                    failures[_attachments_part(entry.id)] = describe(error)
         return entries
 
     def _list_attachments(self, page: _Entry) -> Sequence[_Entry]:
@@ -186,7 +187,3 @@ def read_roots(path: Path | str) -> list[str]:
         if line and not line.startswith("#"):
             roots.append(line.split(" #")[0].strip())
     return roots
-
-
-def _describe(error: Exception) -> str:
-    return str(error) or type(error).__name__

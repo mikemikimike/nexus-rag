@@ -7,6 +7,7 @@ from pathlib import Path
 from local_rag.acceptance_report import Context
 from local_rag.checks import QDRANT_DOWN, SYSTEMD_UNITS, Failure, Skipped
 from local_rag.container import ContainerLayout
+from local_rag.errors import describe
 from local_rag.installer import Layout
 
 SYSTEMD_ENV_FILE = str(Layout(Path("/")).env_file)
@@ -225,7 +226,7 @@ def _roots(ctx: Context) -> str:
             if "id" not in json.loads(ctx.run([command, "info", root, "--json"])):
                 raise ValueError("the answer has no page id")
         except Exception as error:
-            unresolved[root] = str(error) or type(error).__name__
+            unresolved[root] = describe(error)
     if unresolved:
         shown = "; ".join(f"{root}: {why}" for root, why in unresolved.items())
         raise Failure(f"{len(unresolved)} of {len(roots)} Roots do not resolve ({shown})",
