@@ -18,12 +18,14 @@ def check_corpus_name(name: str) -> str:
     return name
 
 
-_PROSE_MEDIA_TYPES = frozenset({"text/plain", "text/markdown", "text/x-rst", "text/html"})
+# The one list of prose Media types: every other text type is code. Whatever decides by
+# prose or code asks ``is_code`` rather than keeping a list of its own.
+PROSE_MEDIA_TYPES = frozenset({"text/plain", "text/markdown", "text/x-rst", "text/html"})
 
 
 def is_code(media_type: str) -> bool:
     """Whether a Media type is source code, which is read by lines: text that is not prose."""
-    return media_type.startswith("text/") and media_type not in _PROSE_MEDIA_TYPES
+    return media_type.startswith("text/") and media_type not in PROSE_MEDIA_TYPES
 
 
 def qualified_id(corpus: str, document_id: str) -> str:
