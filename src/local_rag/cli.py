@@ -262,5 +262,3 @@ def _print_status(status: IndexStatus, out: TextIO) -> None:
                                f"{last.at.isoformat(timespec='seconds')}: {last.detail}")
     for warning in status.warnings:
         print(f"warning: {warning}", file=out)
-
-

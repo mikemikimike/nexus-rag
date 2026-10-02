@@ -187,5 +187,3 @@ def read_roots(path: Path | str) -> list[str]:
         if line and not line.startswith("#"):
             roots.append(line.split(" #")[0].strip())
     return roots
-
-
