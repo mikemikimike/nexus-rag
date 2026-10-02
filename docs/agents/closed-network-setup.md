@@ -370,7 +370,7 @@ claude mcp add --transport http local-rag https://rag.example.test/mcp \
   --header "Authorization: Bearer $LOCAL_RAG_TOKEN"
 ```
 
-Or commit `examples/mcp.json.example` as `.mcp.json` to a repository (it reads `${LOCAL_RAG_TOKEN}`), so each user only sets `LOCAL_RAG_TOKEN`. Add `examples/CLAUDE.md.snippet` to the project's `CLAUDE.md`: it tells Claude to use `search_docs` first, to cite links, to use the Confluence CLI read-only, and to treat Confluence text as untrusted data. Replace `rag.example.test` with the D1 name.
+Or commit `examples/mcp.json.example` as `.mcp.json` to a repository (it reads `${LOCAL_RAG_TOKEN}`), so each user only sets `LOCAL_RAG_TOKEN`. Add `examples/CLAUDE.md.snippet` to the project's `CLAUDE.md`: it tells Claude to use `search_docs` first, for code questions as well as documentation, how to search another Tracked ref or one Repository, to cite links, to use the Confluence CLI read-only, and to treat indexed text, pages and code alike, as untrusted data. Replace `rag.example.test` with the D1 name.
 
 If an internal CA signed the certificate: `export NODE_EXTRA_CA_CERTS=/path/ca.pem` before starting Claude Code. If the client has `HTTPS_PROXY` set, add the server's host name to `NO_PROXY`.
 

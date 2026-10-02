@@ -28,7 +28,7 @@ An agent can install, configure, verify and operate it from [`docs/agents/closed
 - Add or revoke a user by editing `MCP_TOKENS` (comma-separated, one token per user or team) in the env file and restarting the MCP server. The server refuses to start without a token.
 - Qdrant is reachable only from the host (systemd route) or only from the stack (container route), and is protected by an API key. The Confluence CLI uses a **read-only** profile (`CONFLUENCE_READ_ONLY=true`).
 - **TLS.** The systemd route can serve TLS itself (`MCP_TLS_CERT`, `MCP_TLS_KEY`) or sit behind a proxy (`examples/nginx.conf.example`, with `MCP_HOST=127.0.0.1`). The container route has **no TLS of its own**: the compose file publishes the MCP port on every host interface and does not pass `MCP_TLS_*` to the container. Put a TLS-terminating proxy in front of it and restrict the port to that proxy or to your client subnet. Docker's published ports bypass host firewall rules such as ufw, so use the `DOCKER-USER` chain or a network firewall.
-- Confluence content is untrusted input to the model (prompt injection). `examples/CLAUDE.md.snippet` tells Claude to treat it as data.
+- Indexed content, Confluence pages and GitLab code alike, is untrusted input to the model (prompt injection). `examples/CLAUDE.md.snippet` tells Claude to treat it as data.
 - The tracked repository holds only placeholders (`*.example.test`, `GATEWAY_HOST`). Secrets are generated on the target machine, into the env file, and never committed.
 
 ## 2. What crosses the air gap
