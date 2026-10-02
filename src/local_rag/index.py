@@ -211,7 +211,13 @@ class KnowledgeIndex:
                 unchanged += 1
                 continue
             try:
-                document = self._extract(corpus, corpus.fetch(ref.id), ref)
+                raw = corpus.fetch(ref.id)
+                # A listing may not know the version (an unversioned Confluence page), but
+                # what was fetched does: if that is what is stored, nothing changed.
+                if stored_as is not None and stored_as.is_current(ref, raw.version):
+                    unchanged += 1
+                    continue
+                document = self._extract(corpus, raw, ref)
                 if live is None:  # a Sync of another Corpus may have made an index live meanwhile
                     live = self._generations.live()
                     if live is not None:
@@ -806,11 +812,11 @@ class _Stored:
         else:
             self.parts.update(payload["parts"])
 
-    def is_current(self, ref: DocumentRef) -> bool:
-        """Unchanged: one stored version, the listed one, and the part and placement it was
-        listed under (a Document that moved to another part, or whose Primary ref mark or link
-        changed, is re-added so what is stored stays true)."""
-        return self.versions == {ref.version} and self.placements == {ref.placement} and (
+    def is_current(self, ref: DocumentRef, version: str | None = None) -> bool:
+        """Unchanged: one stored version, the listed one (or ``version``, the one fetched),
+        and the part and placement it was listed under (a Document that moved to another part,
+        or whose Primary ref mark or link changed, is re-added so what is stored stays true)."""
+        return self.versions == {version or ref.version} and self.placements == {ref.placement} and (
             not self.recorded or self.parts == set(ref.parts))
 
     def held_back_by(self, failures: Mapping[str, str]) -> bool:
