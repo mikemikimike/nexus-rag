@@ -235,7 +235,7 @@ def rerank(settings: Settings, gateway: ModelGateway | None) -> str:
             describe(error),
             cause="the Model gateway does not serve /v1/rerank for "
             "RAG_RERANK_MODEL; unset it to disable rerank",
-            see='section 10 (the proxy row) and the README troubleshooting "Rerank ignored"',
+            see='section 10 (the proxy row) and docs/operations.md troubleshooting "Rerank ignored"',
         ) from None
     if len(scores) != 2 or not scores[1] > scores[0]:
         raise Failure(

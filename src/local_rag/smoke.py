@@ -8,7 +8,7 @@ per check, ``[ OK ]``, ``[WARN]``, ``[SKIP]`` or ``[FAIL]``, never a secret, the
 ending ``SMOKE CHECK PASSED`` or ``SMOKE CHECK FAILED: <checks>``, and exits 0 unless a
 check failed (1), or the command line cannot be used (2). It changes nothing: it embeds one
 sentence, reranks two texts, reads the Knowledge index's status and runs ``--version`` style
-commands. The README says how to run it on each route.
+commands. docs/operations.md says how to run it on each route.
 """
 
 import argparse
