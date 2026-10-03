@@ -72,7 +72,7 @@ class SyntaxSplitter:
                 lines.pop()
             if not lines:
                 return []
-            items = self._items(lines, root, 0, len(lines) - 1, None)
+            items = self._items(lines, list(root.named_children), 0, len(lines) - 1, None)
             return self._pack(lines, items)
         except Exception:  # a file the parser cannot handle must not fail its Document
             return self._fallback.split(text)
@@ -80,18 +80,10 @@ class SyntaxSplitter:
     # -- building items ---------------------------------------------------------------
 
     def _items(
-        self,
-        lines,
-        node: Node | None,
-        start: int,
-        end: int,
-        symbol: str | None,
-        children: list[Node] | None = None,
+        self, lines, children: list[Node], start: int, end: int, symbol: str | None
     ) -> list[_Item]:
         """The items covering rows start..end, one per child of the container (plus a head
         before the first child). Items that do not fit are expanded in place."""
-        if children is None:
-            children = list(node.named_children)
         starts = self._starts(children)
         items = []
         if not starts or starts[0][0] > start:
@@ -103,10 +95,11 @@ class SyntaxSplitter:
             items[0].start = start
         return items
 
-    def _starts(self, children: list[Node]) -> list[tuple[int, Node]]:
+    def _starts(self, children: list[Node]) -> list[tuple[int, Node | None]]:
         """(first row, node) per child; comments directly above a child join it, and a
         child that starts on a row an earlier one ended on (a trailing comment) is absorbed."""
-        starts, pending, covered = [], None, -1
+        starts: list[tuple[int, Node | None]] = []
+        pending, covered = None, -1
         for child in children:
             first, last = child.start_point.row, _last_row(child)
             if pending is None and first <= covered:
@@ -144,14 +137,14 @@ class SyntaxSplitter:
                 declarator = declarator.child_by_field_name("declarator") or _first_identifier(
                     declarator
                 )
-            return None if declarator is None else declarator.text.decode("utf-8")
+            return None if declarator is None else _text(declarator)
         if node.type == "type_definition":
             declarator = node.child_by_field_name("declarator")
-            return None if declarator is None else declarator.text.decode("utf-8")
+            return None if declarator is None else _text(declarator)
         if node.type.endswith("_specifier") and node.child_by_field_name("body") is None:
             return None  # a forward declaration or a use, not a definition
         name = node.child_by_field_name("name")
-        return None if name is None else name.text.decode("utf-8")
+        return None if name is None else _text(name)
 
     def _expand(self, lines, item: _Item, node: Node | None) -> list[_Item]:
         """The item itself if it fits, else the items of its children, else its lines cut."""
@@ -171,7 +164,7 @@ class SyntaxSplitter:
                 or children[0].start_point.row > item.start
                 or _last_row(children[0]) < item.end
             ):
-                sub = self._items(lines, None, item.start, item.end, item.symbol, children)
+                sub = self._items(lines, children, item.start, item.end, item.symbol)
                 if len(sub) > 1 or sub[0].start != item.start or sub[0].end != item.end:
                     return sub
         return [dataclasses.replace(item, pieces=self._cut(lines, item))]
@@ -235,6 +228,10 @@ def _first_identifier(node: Node) -> Node | None:
         if found is not None:
             return found
     return None
+
+
+def _text(node: Node) -> str:
+    return (node.text or b"").decode("utf-8")
 
 
 def splitter_for(media_type: str, count_tokens, *, size: int, fallback) -> SyntaxSplitter | None:

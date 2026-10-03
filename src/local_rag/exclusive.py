@@ -129,7 +129,7 @@ class ExclusiveRun:
         points = self._client.retrieve(self._name, ids=[_HEARTBEAT_POINT])
         if points:
             self._unstamped_since = None
-            return time.time() - points[0].payload["heartbeat"]
+            return time.time() - (points[0].payload or {})["heartbeat"]
         # Created but not yet stamped: the creator is starting up, or died in between.
         if self._unstamped_since is None:
             self._unstamped_since = time.monotonic()
@@ -147,7 +147,7 @@ class ExclusiveRun:
         if not self._client.collection_exists(self._name):
             return False
         points = self._client.retrieve(self._name, ids=[_HEARTBEAT_POINT])
-        return bool(points) and points[0].payload["owner"] == owner
+        return bool(points) and (points[0].payload or {})["owner"] == owner
 
     def _release(self, owner: str) -> None:
         try:

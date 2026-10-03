@@ -237,7 +237,9 @@ def test_the_guide_is_reachable_from_claude_md_and_the_readme():
 
 def set_env_script(env_file, calls: list[str]) -> str:
     """The guide's set_env, defined and called on ``env_file``, with a stand-in for sudo."""
-    shell = re.search(r"^```bash\n(set_env\(\).*?)^```", GUIDE, re.DOTALL | re.MULTILINE).group(1)
+    found = re.search(r"^```bash\n(set_env\(\).*?)^```", GUIDE, re.DOTALL | re.MULTILINE)
+    assert found, "the guide defines set_env"
+    shell = found.group(1)
     return 'sudo() { shift; "$@"; }\n' + shell + f"\nENV_FILE={env_file}\n" + "\n".join(calls)
 
 

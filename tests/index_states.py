@@ -46,7 +46,7 @@ def record_format(client: QdrantClient, generation: str, index_format: IndexForm
 
 
 def registry_payload(client: QdrantClient) -> dict:
-    return client.retrieve(NAMES.registry, ids=[1])[0].payload
+    return client.retrieve(NAMES.registry, ids=[1])[0].payload or {}
 
 
 def overwrite_registry(client: QdrantClient, payload: dict) -> None:

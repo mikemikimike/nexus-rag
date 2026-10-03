@@ -97,7 +97,7 @@ def main(
     check("GitLab (git)", lambda: _gitlab(environment, run))
     if args.systemd:
         for unit in SYSTEMD_UNITS:
-            check(unit, lambda unit=unit: _unit_active(run, unit))
+            check(unit, functools.partial(_unit_active, run, unit))
     report.summary()
     return 1 if report.failed else 0
 

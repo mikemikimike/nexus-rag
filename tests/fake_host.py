@@ -1,7 +1,7 @@
 """A stand-in for the machine the Installer runs on: records the commands it would run."""
 
 import sys
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 
 from local_rag.installer import CommandFailed
@@ -11,7 +11,7 @@ class FakeHost:
     def __init__(
         self,
         *,
-        users: set[str] = frozenset(),
+        users: Collection[str] = (),
         commands: set[str] | None = None,
         root: bool = True,
         machine: str = "x86_64",

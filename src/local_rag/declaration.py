@@ -156,7 +156,7 @@ def _repository(table: _Table) -> Repository:
     entries = table.items("refs")
     if not entries:
         raise DeclarationError(f"corpus {table.name!r}: refs must name at least one ref")
-    refs = []
+    refs: list[tuple[str, bool | None, tuple[str, ...]]] = []
     for entry in entries:
         if isinstance(entry, str):
             if not entry:
@@ -190,8 +190,8 @@ def _repository(table: _Table) -> Repository:
 def _gitlab(name: str, table: _Table, environment: Environment) -> Corpus:
     repositories = [_repository(t) for t in table.tables("repositories")]
     url, token = environment.gitlab_url, environment.gitlab_token
-    missing = [v for v, value in (("GITLAB_URL", url), ("GITLAB_TOKEN", token)) if not value]
-    if missing:
+    if not url or not token:
+        missing = [v for v, value in (("GITLAB_URL", url), ("GITLAB_TOKEN", token)) if not value]
         raise DeclarationError(
             f"corpus {name!r}: {' and '.join(missing)} must be set in the environment"
         )
@@ -228,12 +228,12 @@ class Declaration:
             if not isinstance(table, Mapping):
                 raise DeclarationError(f"corpus {name!r} must be a table with a kind")
             kind = table.get("kind")
-            builder = _KINDS.get(kind) if isinstance(kind, str) else None
-            if builder is None:
+            if not isinstance(kind, str) or kind not in _KINDS:
                 raise DeclarationError(
                     f"corpus {name!r}: kind must be one of {', '.join(sorted(_KINDS))}, "
                     f"got {kind!r}"
                 )
+            builder = _KINDS[kind]
             unknown = sorted(set(table) - builder.parameters - {"kind"})
             if unknown:
                 raise DeclarationError(

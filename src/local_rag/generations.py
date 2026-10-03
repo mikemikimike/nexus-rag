@@ -112,7 +112,7 @@ class Generations:
         """Make the generation the Live index, keep the one it replaces as previous."""
         aliases = self._aliases()
         live, previous = self._resolve(aliases, strict=False)
-        changes = []
+        changes: list[models.AliasOperations] = []
         if live is not None:
             if live == self._name:
                 self.record(live)  # the plain collection of earlier versions becomes cleanable
@@ -232,7 +232,7 @@ class Generations:
         points = self._client.retrieve(self._registry, ids=[_REGISTRY_POINT])
         if not points:
             return _Registry()
-        payload = points[0].payload
+        payload = points[0].payload or {}
         generations = payload.get("generations")
         # Registries written before formats were recorded only have the names.
         formats, live = payload.get("formats", {}), payload.get("live")

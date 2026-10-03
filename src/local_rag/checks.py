@@ -206,6 +206,7 @@ def embeddings(settings: Settings, gateway: ModelGateway | None) -> str:
     """The embedding model answers a query with a vector (skipped in Keyword-only retrieval)."""
     if settings.retrieval is RetrievalMode.KEYWORD:
         raise Skipped(KEYWORD_ONLY)
+    assert gateway is not None, "settings that embed need a Model gateway"
     try:
         vector = gateway.embed_query("a probe sentence")
     except Exception as error:
@@ -224,6 +225,7 @@ def rerank(settings: Settings, gateway: ModelGateway | None) -> str:
     model = settings.rerank_model
     if not model:
         raise Skipped("RAG_RERANK_MODEL is not set, so search does not rerank")
+    assert gateway is not None, "settings that rerank need a Model gateway"
     relevant = "Reset a forgotten password from the account page."
     unrelated = "The cafeteria serves soup on Tuesdays."
     try:

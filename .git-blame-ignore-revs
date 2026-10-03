@@ -1,0 +1,3 @@
+# Layout-only commits, skipped by git blame (git config blame.ignoreRevsFile .git-blame-ignore-revs).
+# Format with Ruff and sort imports
+b1cad1cccae7904b5d57fee4654e1c0681c2aee4

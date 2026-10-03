@@ -185,7 +185,7 @@ class PassageStore:
         document_point = _document_point(document)
         points = []
         for number, written in enumerate(passages):
-            vectors = {
+            vectors: dict[str, models.Vector] = {
                 "bm25": models.SparseVector(
                     indices=written.sparse.indices, values=written.sparse.values
                 )
@@ -278,25 +278,23 @@ class PassageStore:
         found: dict[str, Stored] = {}
         with self._reading(collection):
             for point in points:
-                found.setdefault(point.payload["document_id"], Stored()).add(point.payload)
+                payload = point.payload or {}
+                found.setdefault(payload["document_id"], Stored()).add(payload)
         return found
 
     def corpora(self, collection: str) -> set[str]:
         """The names of the Corpora that own at least one Document in ``collection``."""
-        return {
-            p.payload["corpus"]
-            for p in self._scroll(
-                collection, models.Filter(must=[_match("kind", _DOCUMENT_KIND)]), ["corpus"]
-            )
-            if p.payload.get("corpus")
-        }
+        points = self._scroll(
+            collection, models.Filter(must=[_match("kind", _DOCUMENT_KIND)]), ["corpus"]
+        )
+        return {corpus for p in points if (corpus := (p.payload or {}).get("corpus"))}
 
     def spaces(self, collection: str) -> list[str]:
         """The named Spaces that have at least one Document, sorted."""
         points = self._scroll(collection, None, ["space"])
         with self._reading(collection):
             # A Document outside any named Space (a top-level project) has an empty one.
-            return sorted({p.payload["space"] for p in points if p.payload["space"]})
+            return sorted({space for p in points if (space := (p.payload or {})["space"])})
 
     def document_text(self, collection: str, document_id: str) -> str | None:
         """The full text of a Document, or None if it is not there."""
@@ -311,7 +309,7 @@ class PassageStore:
         if not records:
             return None
         with self._reading(collection):
-            return records[0].payload["full_text"]
+            return (records[0].payload or {})["full_text"]
 
     def search(
         self,
@@ -325,7 +323,7 @@ class PassageStore:
     ) -> list[Passage]:
         """The Passages the dense and sparse vectors find, fused by rank, best first. With
         neither vector there is nothing to look for, and nothing is found."""
-        must = [
+        must: list[models.Condition] = [
             _match(key, value)
             for key, value in (
                 ("space", narrowing.space),
@@ -335,7 +333,9 @@ class PassageStore:
             if value is not None
         ]
         # Only a Passage marked non-primary is left out: other Corpora's carry no mark.
-        not_primary = [] if narrowing.ref is not None else [_match("primary", False)]
+        not_primary: list[models.Condition] = (
+            [] if narrowing.ref is not None else [_match("primary", False)]
+        )
         narrowed = models.Filter(must=must, must_not=not_primary)
         prefetch = []
         if dense is not None:
@@ -361,23 +361,7 @@ class PassageStore:
             with_payload=True,
         ).points
         with self._reading(collection):
-            return [
-                Passage(
-                    document_id=p.payload["document_id"],
-                    title=p.payload["title"],
-                    url=p.payload["url"],
-                    space=p.payload["space"],
-                    text=p.payload["text"],
-                    score=float(p.score),
-                    parent_id=p.payload.get("parent_id"),
-                    corpus=p.payload.get("corpus"),
-                    code=_code_file(p.payload),
-                    start_line=p.payload.get("start_line"),
-                    end_line=p.payload.get("end_line"),
-                    symbol=p.payload.get("symbol"),
-                )
-                for p in points
-            ]
+            return [_passage(p) for p in points]
 
     def _scroll(
         self, collection: str, where: models.Filter | None, fields: list[str]
@@ -404,6 +388,24 @@ class PassageStore:
             yield
         except (KeyError, TypeError, ValueError) as error:
             raise CorruptIndex(f"a point in {collection} is unreadable ({error!r})") from error
+
+
+def _passage(point: models.ScoredPoint) -> Passage:
+    payload = point.payload or {}
+    return Passage(
+        document_id=payload["document_id"],
+        title=payload["title"],
+        url=payload["url"],
+        space=payload["space"],
+        text=payload["text"],
+        score=float(point.score),
+        parent_id=payload.get("parent_id"),
+        corpus=payload.get("corpus"),
+        code=_code_file(payload),
+        start_line=payload.get("start_line"),
+        end_line=payload.get("end_line"),
+        symbol=payload.get("symbol"),
+    )
 
 
 def _match(key: str, value: str | bool) -> models.FieldCondition:

@@ -375,18 +375,7 @@ class KnowledgeIndex:
         except Exception as error:
             self._note(kind, "failed", describe(error), corpus)
             raise
-        if isinstance(report, SyncReport):
-            outcome = "completed with failures" if report.failed else "completed"
-            detail = (
-                f"{report.added} added, {report.replaced} replaced, "
-                f"{report.removed} removed, {report.unchanged} unchanged, "
-                f"{report.failed} failed"
-            )
-        elif report.promoted:
-            outcome, detail = "promoted", f"{report.indexed} indexed, {report.failed} failed"
-            detail = "; ".join([detail, *report.warnings])
-        else:
-            outcome, detail = "refused", report.reason
+        outcome, detail = _outcome(report)
         self._note(kind, outcome, detail, corpus)
         return report
 
@@ -462,15 +451,21 @@ class KnowledgeIndex:
         )
         passages = cap_per_document(passages, settings.max_passages_per_document)
         if settings.rerank:
-            passages = rerank(self._gateway, query, passages)
+            passages = rerank(self._model_gateway, query, passages)
         return SearchResults(passages[:limit], notice)
+
+    @property
+    def _model_gateway(self) -> ModelGateway:
+        """The Model gateway, for work only settings that need one do (checked when made)."""
+        assert self._gateway is not None
+        return self._gateway
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
         """Embed a Document's texts, trying again after a failure that could be transient."""
         settings = self._settings
         for attempt in range(1, settings.embed_attempts + 1):
             try:
-                vectors = self._gateway.embed(texts)
+                vectors = self._model_gateway.embed(texts)
             except Exception as error:
                 self._embedding_failure = describe(error)
                 # Only an error that says another try could help is tried again: a bug, or a
@@ -494,7 +489,7 @@ class KnowledgeIndex:
     def _embed_query(self, query: str) -> list[float] | None:
         """The query's vector, or None, noting why, if the embedding model cannot be reached."""
         try:
-            vector = self._gateway.embed_query(query)
+            vector = self._model_gateway.embed_query(query)
         except Exception as error:
             self._embedding_failure = describe(error)
             log.warning("the embedding model could not be reached: %s", self._embedding_failure)
@@ -663,6 +658,7 @@ class KnowledgeIndex:
         # A Document with no text is still found by its title: it gets one empty Passage.
         pieces = self._chunker.pieces(document.text, document.media_type) or [Piece("")]
         contents = [f"{_context(document, piece)}\n\n{piece.text}" for piece in pieces]
+        dense: Sequence[list[float] | None]
         if self._settings.retrieval is RetrievalMode.HYBRID:
             dense = self._embed(contents)
             if len(dense) != len(contents):
@@ -708,6 +704,21 @@ class KnowledgeIndex:
 
 def _explain(what: str, assessment: Assessment) -> str:
     return f"{what}: {'; '.join(assessment.warnings)}"
+
+
+def _outcome(report: SyncReport | RebuildReport) -> tuple[str, str]:
+    """The outcome and detail ``status`` shows for a finished Sync or Rebuild."""
+    if isinstance(report, SyncReport):
+        outcome = "completed with failures" if report.failed else "completed"
+        return outcome, (
+            f"{report.added} added, {report.replaced} replaced, "
+            f"{report.removed} removed, {report.unchanged} unchanged, "
+            f"{report.failed} failed"
+        )
+    if not report.promoted:
+        return "refused", report.reason or ""
+    detail = f"{report.indexed} indexed, {report.failed} failed"
+    return "promoted", "; ".join([detail, *report.warnings])
 
 
 def _context(document: Document, piece: Piece) -> str:

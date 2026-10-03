@@ -4,6 +4,7 @@ These are read-only against the live Knowledge index the server serves: a search
 Spaces and a page lookup. Tokens come from ``MCP_TOKENS`` or ``--token``; they are never printed.
 """
 
+import functools
 import re
 import secrets
 import ssl
@@ -60,7 +61,7 @@ def run_mcp(ctx: Context) -> None:
         ("mcp.list_spaces", _spaces),
         ("mcp.get_page", _page),
     ):
-        check(name, lambda tool=tool: tool(ctx, url), needs=["mcp.healthz", "mcp.wrong-token"])
+        check(name, functools.partial(tool, ctx, url), needs=["mcp.healthz", "mcp.wrong-token"])
 
 
 def _request(url: str, token: str | None, method: str = "GET") -> tuple[int, str]:

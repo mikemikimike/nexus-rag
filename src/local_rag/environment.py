@@ -53,11 +53,11 @@ def environment_from(environ: Mapping[str, str]) -> Environment:
     def text(name: str) -> str | None:
         return environ.get(name, "").strip() or None
 
-    port = text("MCP_PORT")
+    given_port = text("MCP_PORT")
     try:
-        port = int(port) if port else None
+        port = int(given_port) if given_port else None
     except ValueError:
-        raise SettingsError(f"MCP_PORT must be a number, got {port!r}") from None
+        raise SettingsError(f"MCP_PORT must be a number, got {given_port!r}") from None
     corpora_file = text("RAG_CORPORA_FILE")
     home = text("HOME")
     return Environment(

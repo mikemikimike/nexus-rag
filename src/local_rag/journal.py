@@ -48,7 +48,7 @@ class Journal:
         points = self._client.retrieve(self._name, ids=[_POINT])
         if not points:
             return None
-        return _read(points[0].payload)
+        return _read(points[0].payload or {})
 
     def last_of_each_corpus(self) -> dict[str, LastSync]:
         """The last Sync of each Corpus that has had one. Raises ValueError if one is unreadable."""
@@ -60,7 +60,9 @@ class Journal:
             points, offset = self._client.scroll(self._name, limit=256, offset=offset)
             for point in points:
                 if point.id != _POINT:
-                    found[point.payload.get("corpus")] = _read(point.payload)
+                    last = _read(point.payload or {})
+                    if last.corpus is not None:
+                        found[last.corpus] = last
             if offset is None:
                 return found
 

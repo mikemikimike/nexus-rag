@@ -21,6 +21,7 @@ nothing failed; 1: a check failed; 2: the command line or settings cannot be use
 """
 
 import argparse
+import importlib
 import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -112,15 +113,10 @@ def _prepare(ctx: Context, groups: Sequence[str]) -> None:
 
 
 def _runner(group: str) -> Callable[[Context], None]:
-    if group in ("gateway", "qdrant"):
-        from local_rag import acceptance_stack as module
-    elif group == "index":
-        from local_rag import acceptance_index as module
-    elif group == "mcp":
-        from local_rag import acceptance_mcp as module
-    else:
-        from local_rag import acceptance_host as module
-    return getattr(module, f"run_{group}")
+    part = {"gateway": "stack", "qdrant": "stack", "index": "index", "mcp": "mcp"}.get(
+        group, "host"
+    )
+    return getattr(importlib.import_module(f"local_rag.acceptance_{part}"), f"run_{group}")
 
 
 def _clean_up(ctx: Context) -> None:

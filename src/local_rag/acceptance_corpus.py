@@ -112,7 +112,7 @@ def long_text(
             f"the {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)} of item {number}."
         )
 
-    paragraphs = []
+    paragraphs: list[str] = []
     while count_tokens("\n\n".join(paragraphs)) < LONG_FACTOR * chunk_tokens:
         paragraphs.append(" ".join(sentence() for _ in range(5)))
     padding: list[str] = []

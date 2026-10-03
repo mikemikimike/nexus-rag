@@ -144,7 +144,7 @@ class Chunker:
         punkt = PunktSentenceTokenizer()  # rule-based: needs no downloaded model
         self._count, self._code_size = count_tokens, code_size
         self._code = LineSplitter(count_tokens, size=code_size)
-        self._syntax = {}  # Media type -> its splitter, made when first needed
+        self._syntax: dict[str, Splitter] = {}  # Media type -> its splitter, made when first needed
         self._prose = _ProseSplitter(
             SentenceSplitter(
                 chunk_size=size,
