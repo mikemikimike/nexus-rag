@@ -1,6 +1,6 @@
 # Closed-network setup (agent guide)
 
-Install, configure, verify and operate local-rag on an air-gapped network, interviewing the operator for the inputs only they hold. Use the terms of `CONTEXT.md`: **Knowledge index**, **Corpus**, **Model gateway**, **Mirror**, **Binary drop**, **Installer**, **Sync**, **Rebuild**, **Live index**, and for code **Repository**, **Tracked ref**, **Primary ref**. The README is the reference for what the system is; this guide is the procedure. Every command below exists in this repository's code at the time of writing; anything that needs a real host to confirm is listed in section 11.
+Install, configure, verify and operate local-rag on an air-gapped network, interviewing the operator for the inputs only they hold. Use the terms of `CONTEXT.md`: **Knowledge index**, **Corpus**, **Model gateway**, **Mirror**, **Binary drop**, **Installer**, **Sync**, **Rebuild**, **Live index**, and for code **Repository**, **Tracked ref**, **Primary ref**. The README and the docs it links are the reference for what the system is; this guide is the procedure. Every command below exists in this repository's code at the time of writing; anything that needs a real host to confirm is listed in section 11.
 
 Work the sections in order. Each ends with a **Gate**: do not start the next section until the gate holds, and tell the operator which gate you passed.
 
@@ -12,7 +12,7 @@ Work the sections in order. Each ends with a **Gate**: do not start the next sec
 - **Existing state is never overwritten.** The Installer and `local_rag.container start` create the env file, the Corpus declaration file, the volumes and the Knowledge index once and never touch them again. Do not delete or regenerate them, do not clear Qdrant's storage, and do not run a **Rebuild** unless the operator asked for one: a Rebuild is never automatic, and the weekly timer runs the same `local-rag sync` as the hourly one.
 - **Every MCP token sees every indexed Document.** Page permissions in Confluence and Repository permissions in GitLab are not enforced: every MCP token can read every listed Repository, whoever the GitLab token's owner is. Say this to the operator in section 3 and get an explicit yes.
 - **Stop and ask** when: a command fails and the troubleshooting table (section 10) does not name the cause; the Installer or `container start` refuses (it changes nothing when it refuses, so read the message to the operator and ask); an answer cannot pass its validation after one retry; you would need to leave the paths this guide uses.
-- **Where commands run.** Everything runs on the target host, as a user with `sudo`, except section 8 (the operators' clients) and the connected-machine build, which is not part of this guide (the README, sections 3 and 4, has it, and its ship-from-a-clean-checkout rule: `container save` builds from the working tree but archives `HEAD`).
+- **Where commands run.** Everything runs on the target host, as a user with `sudo`, except section 8 (the operators' clients) and the connected-machine build, which is not part of this guide (step 1 of `docs/install-systemd.md` and `docs/install-container.md` has it, and its ship-from-a-clean-checkout rule: `container save` builds from the working tree but archives `HEAD`).
 
 ## 1. Route and helpers
 
@@ -27,7 +27,7 @@ Ask the first question group now (A1 to A3 in section 3) so that you know the ro
 | Apply an env file edit | `sudo systemctl restart local-rag-mcp` | `compose up -d` |
 | TLS | the MCP server can serve it (`MCP_TLS_CERT`, `MCP_TLS_KEY`) or sit behind a proxy | none: plain HTTP, no TLS pass-through; a TLS proxy in front is required |
 
-Define the helpers for your route. `run_rag` and `compose` are the README's (section 3 and 4), kept equal by a test; `set_env` edits one setting idempotently and never prints the value.
+Define the helpers for your route. `run_rag` and `compose` are the install guides' (`docs/install-systemd.md`, `docs/install-container.md`), kept equal by a test; `set_env` edits one setting idempotently and never prints the value.
 
 ```bash
 ENV_FILE=/etc/local-rag/local-rag.env     # container route: /etc/local-rag/container.env

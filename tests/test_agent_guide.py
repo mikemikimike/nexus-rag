@@ -13,6 +13,10 @@ from local_rag import acceptance, cli, container, installer, smoke
 GUIDE_PATH = REPO / "docs/agents/closed-network-setup.md"
 GUIDE = GUIDE_PATH.read_text()
 README = (REPO / "README.md").read_text()
+INSTALL_GUIDES = {
+    "systemd": (REPO / "docs/install-systemd.md").read_text(),
+    "container": (REPO / "docs/install-container.md").read_text(),
+}
 
 # Names the guide uses that belong to other programs, not to this repository.
 FOREIGN_VARIABLES = {
@@ -204,9 +208,9 @@ def helper(text: str, name: str) -> str:
     return " ".join(found.group(0).replace("\\\n", " ").split())
 
 
-@pytest.mark.parametrize("name", ["run_rag", "compose"])
-def test_the_helpers_are_the_readmes(name):
-    assert helper(GUIDE, name) == helper(README, name)
+@pytest.mark.parametrize(("name", "route"), [("run_rag", "systemd"), ("compose", "container")])
+def test_the_helpers_are_the_install_guides(name, route):
+    assert helper(GUIDE, name) == helper(INSTALL_GUIDES[route], name)
 
 
 def test_the_guide_states_what_it_must_not_contradict():
@@ -306,11 +310,9 @@ def test_set_env_refuses_a_value_the_env_file_syntax_would_misread(tmp_path):
         assert env_file.read_text() == fresh
 
 
-def test_both_install_sections_of_the_readme_send_the_operator_to_the_acceptance_suite():
-    for heading, next_heading in (
-        ("## 3. Install, systemd route", "## 4."),
-        ("## 4. Install, container route", "## 5."),
-    ):
-        section = README.split(heading)[1].split(next_heading)[0]
+@pytest.mark.parametrize("route", sorted(INSTALL_GUIDES))
+def test_both_install_guides_send_the_operator_to_the_acceptance_suite(route):
+    guide = INSTALL_GUIDES[route]
 
-        assert "local_rag.acceptance" in section and "ACCEPTANCE PASSED" in section, heading
+    assert "local_rag.acceptance" in guide and "ACCEPTANCE PASSED" in guide, route
+    assert f"docs/install-{route}.md" in README

@@ -1,11 +1,14 @@
 """The repository after the restructure: nothing of the old layout is left, and the README
-points only at things that exist."""
+and the docs it links point only at things that exist."""
 
 import re
+
+import pytest
 
 from fake_drop import REPO
 
 README = (REPO / "README.md").read_text()
+DOCS = [path for path in (REPO / "docs").glob("*.md")]
 
 
 def tracked_files():
@@ -26,12 +29,19 @@ def test_no_legacy_module_script_or_requirements_file_remains():
     assert not [name for name in names if name.startswith("scripts/")]
 
 
-def test_the_readme_names_only_files_that_exist():
-    paths = set(re.findall(r"`((?:src|deploy|examples|docs|tests)/[\w./-]+?)`", README))
-    paths |= set(re.findall(r"\]\(([\w./-]+\.md)\)", README))
+@pytest.mark.parametrize(
+    "document", ["README.md", *sorted(p.relative_to(REPO).as_posix() for p in DOCS)]
+)
+def test_the_readme_and_the_docs_name_only_files_that_exist(document):
+    text = (REPO / document).read_text()
+    here = (REPO / document).parent
+    paths = {
+        REPO / path
+        for path in re.findall(r"`((?:src|deploy|examples|docs|tests)/[\w./-]+?)`", text)
+    }
+    paths |= {here / link for link in re.findall(r"\]\(([\w./-]+)(?:#[\w-]*)?\)", text)}
 
-    assert paths
-    assert [path for path in sorted(paths) if not (REPO / path).exists()] == []
+    assert [str(path) for path in sorted(paths) if not path.exists()] == []
 
 
 def test_the_readme_documents_both_delivery_routes_and_the_access_limit():
