@@ -1,4 +1,5 @@
 """The Knowledge index behaves the same over the fake gateway and the LiteLLM adapter."""
+
 import pytest
 
 from conftest import DOCUMENTS, SYNONYMS
@@ -17,8 +18,9 @@ def gateway(request):
         yield fake
         return
     server = FakeLiteLLM(fake).start()
-    yield LiteLLMGateway.from_settings(Settings(
-        gateway_base_url=server.base_url, gateway_api_key=server.api_key))
+    yield LiteLLMGateway.from_settings(
+        Settings(gateway_base_url=server.base_url, gateway_api_key=server.api_key)
+    )
     server.stop()
 
 

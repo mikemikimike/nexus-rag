@@ -4,6 +4,7 @@ PDF, Office and image files go through LiteParse (its `lit` command), HTML becom
 Markdown, a draw.io diagram yields its labels, plain text is read as it is. Anything that cannot be turned into text raises
 ExtractionError, which a Sync counts as a failed Document.
 """
+
 import re
 import subprocess
 import tempfile
@@ -40,8 +41,10 @@ MEDIA_TYPES = {
 # Everything that is not text, HTML or a draw.io diagram goes through LiteParse, which
 # picks its parser by file suffix.
 _LITEPARSE_SUFFIX = {
-    media_type: suffix for suffix, media_type in MEDIA_TYPES.items()
-    if not media_type.startswith("text/") and media_type != drawio.MEDIA_TYPE}
+    media_type: suffix
+    for suffix, media_type in MEDIA_TYPES.items()
+    if not media_type.startswith("text/") and media_type != drawio.MEDIA_TYPE
+}
 _MAX_ERROR_LENGTH = 500
 
 
@@ -54,16 +57,18 @@ class EmptyExtraction(ExtractionError):
 
 
 class Extractor:
-    def __init__(self, *, liteparse_bin: str = "lit", ocr: bool = False,
-                 timeout: float = 300.0):
+    def __init__(self, *, liteparse_bin: str = "lit", ocr: bool = False, timeout: float = 300.0):
         self._liteparse_bin = liteparse_bin
         self._ocr = ocr
         self._timeout = timeout
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "Extractor":
-        return cls(liteparse_bin=settings.liteparse_bin, ocr=settings.ocr,
-                   timeout=settings.liteparse_timeout)
+        return cls(
+            liteparse_bin=settings.liteparse_bin,
+            ocr=settings.ocr,
+            timeout=settings.liteparse_timeout,
+        )
 
     def extract(self, document: RawDocument) -> str:
         """The Document's text; raises ExtractionError if it has none or cannot be read."""
@@ -79,8 +84,10 @@ class Extractor:
             text = document.content.decode("utf-8-sig", errors="replace")
         elif media_type in _LITEPARSE_SUFFIX:
             text = self._liteparse(
-                document.content, _LITEPARSE_SUFFIX[media_type],
-                ocr=self._ocr or media_type.startswith("image/"))
+                document.content,
+                _LITEPARSE_SUFFIX[media_type],
+                ocr=self._ocr or media_type.startswith("image/"),
+            )
         else:
             raise ExtractionError(f"unsupported media type {media_type}")
         if is_code(media_type):
@@ -103,18 +110,19 @@ class Extractor:
                 command.append("--no-ocr")
             try:
                 result = subprocess.run(
-                    command, capture_output=True, text=True, errors="replace",
-                    timeout=self._timeout)
+                    command, capture_output=True, text=True, errors="replace", timeout=self._timeout
+                )
             except FileNotFoundError:
                 raise ExtractionError(
-                    f"LiteParse not found (looked for {self._liteparse_bin!r})") from None
+                    f"LiteParse not found (looked for {self._liteparse_bin!r})"
+                ) from None
             except subprocess.TimeoutExpired:
-                raise ExtractionError(
-                    f"LiteParse timed out after {self._timeout:g}s") from None
+                raise ExtractionError(f"LiteParse timed out after {self._timeout:g}s") from None
         if result.returncode != 0:
             raise ExtractionError(
                 f"LiteParse failed ({result.returncode}): "
-                f"{result.stderr.strip()[:_MAX_ERROR_LENGTH]}")
+                f"{result.stderr.strip()[:_MAX_ERROR_LENGTH]}"
+            )
         return result.stdout
 
 

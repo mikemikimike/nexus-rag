@@ -33,8 +33,7 @@ def test_sync_reports_how_many_documents_were_added(index, corpus):
     assert report.added == 3
 
 
-def test_index_ignores_environment_and_working_directory(
-        gateway, corpus, tmp_path, monkeypatch):
+def test_index_ignores_environment_and_working_directory(gateway, corpus, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("QDRANT_URL", "http://unreachable.invalid:6333")
     monkeypatch.setenv("RAG_BM25_K1", "not-a-number")

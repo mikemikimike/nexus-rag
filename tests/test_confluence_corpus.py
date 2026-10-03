@@ -2,9 +2,9 @@ import pytest
 
 import fake_confluence
 import fake_lit
+from conftest import DOCUMENTS
 from local_rag import KnowledgeIndex, Settings
 from local_rag.confluence import ConfluenceCorpus, read_roots
-from conftest import DOCUMENTS
 from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from test_sync import CountingGateway
@@ -22,8 +22,12 @@ def site(tmp_path_factory):
     """A space with a home page, two child pages and a grandchild, plus an unrelated page."""
     site = fake_confluence.FakeSite(tmp_path_factory.mktemp("confluence"))
     site.page("100", "ENG home", body="# ENG home\n\nStart here.\n")
-    site.page("101", "Fixing ORA-00942", parent="100",
-              body="# Fixing ORA-00942\n\nTable or view does not exist. Check the grants.\n")
+    site.page(
+        "101",
+        "Fixing ORA-00942",
+        parent="100",
+        body="# Fixing ORA-00942\n\nTable or view does not exist. Check the grants.\n",
+    )
     site.page("102", "Failover runbook", parent="100", body="Promote the standby database.\n")
     site.page("103", "Failover drill", parent="102", body="Rehearse the ZX-9000 failover.\n")
     site.page("200", "Elsewhere", space="OPS", body="Not under any root.\n")
@@ -34,6 +38,7 @@ def site(tmp_path_factory):
 def make_index(lit):
     def make(**settings):
         return KnowledgeIndex(Settings(liteparse_bin=str(lit), **settings), FakeModelGateway())
+
     return make
 
 
@@ -51,7 +56,11 @@ def test_a_root_page_and_all_its_descendants_are_synced_and_searched(index, site
 
     assert (report.added, report.failed) == (4, 0)
     found = index.search("ORA-00942")[0]
-    assert (found.document_id, found.title, found.space) == ("confluence:101", "Fixing ORA-00942", "ENG")
+    assert (found.document_id, found.title, found.space) == (
+        "confluence:101",
+        "Fixing ORA-00942",
+        "ENG",
+    )
     assert found.url == "https://wiki.example.test/pages/viewpage.action?pageId=101"
     assert index.search("ZX-9000")[0].document_id == "confluence:103"
     assert index.get_document("confluence:200") is None
@@ -63,8 +72,11 @@ def downloads(site):
 
 
 def test_an_attachment_is_its_own_document_citing_its_parent_page(index, site):
-    site.attach("101", "grants.pdf",
-                fake_lit.pdf("Grant the SELECT privilege to the REPORTING role.").decode())
+    site.attach(
+        "101",
+        "grants.pdf",
+        fake_lit.pdf("Grant the SELECT privilege to the REPORTING role.").decode(),
+    )
     site.attach("101", "notes.txt", "Escalate to the DBA on call.")
 
     report = index.sync(corpus(site))
@@ -76,7 +88,9 @@ def test_an_attachment_is_its_own_document_citing_its_parent_page(index, site):
     assert found.title == "Fixing ORA-00942 / grants.pdf"
     assert found.url == "https://wiki.example.test/pages/viewpage.action?pageId=101"
     assert found.space == "ENG"
-    assert index.get_document("confluence:101/attachments/notes.txt") == "Escalate to the DBA on call."
+    assert (
+        index.get_document("confluence:101/attachments/notes.txt") == "Escalate to the DBA on call."
+    )
     page = next(p for p in index.search("ORA-00942") if p.document_id == "confluence:101")
     assert page.parent_id is None
 
@@ -94,8 +108,13 @@ def test_an_unchanged_page_version_is_neither_exported_nor_embedded_again(index,
 
 def test_a_new_page_version_replaces_only_that_page(index, site):
     index.sync(corpus(site))
-    site.page("102", "Failover runbook", parent="100", version=2,
-              body="Promote the standby, then verify with the QX-5 check.\n")
+    site.page(
+        "102",
+        "Failover runbook",
+        parent="100",
+        version=2,
+        body="Promote the standby, then verify with the QX-5 check.\n",
+    )
 
     report = index.sync(corpus(site))
 
@@ -113,7 +132,10 @@ def test_an_attachment_is_replaced_when_its_own_version_changes(index, site):
     report = index.sync(corpus(site))
 
     assert (report.replaced, report.unchanged) == (1, 4)
-    assert index.get_document("confluence:101/attachments/notes.txt") == "Escalate to the platform team."
+    assert (
+        index.get_document("confluence:101/attachments/notes.txt")
+        == "Escalate to the platform team."
+    )
 
 
 def test_a_new_page_version_does_not_replace_an_attachment_that_did_not_change(index, site):
@@ -152,8 +174,7 @@ def test_a_deleted_attachment_is_removed_and_its_page_kept(index, site):
     assert index.get_document("confluence:101/attachments/notes.txt") is None
 
 
-def test_a_failed_root_listing_reports_a_failure_and_the_other_roots_are_still_synced(
-        index, site):
+def test_a_failed_root_listing_reports_a_failure_and_the_other_roots_are_still_synced(index, site):
     index.sync(corpus(site, "101", "200"))
     site.fail("200", "info")
     site.page("101", "Fixing ORA-00942", parent="100", version=2, body="Rewritten ORA.\n")
@@ -349,10 +370,13 @@ def test_roots_are_read_from_a_file_of_ids_and_urls_with_comments(tmp_path):
     roots = tmp_path / "roots.txt"
     roots.write_text(
         "# one root per line\n\n123456789   # ENG home\n"
-        "https://wiki.example.test/pages/viewpage.action?pageId=987654321 # Ops\n")
+        "https://wiki.example.test/pages/viewpage.action?pageId=987654321 # Ops\n"
+    )
 
     assert read_roots(roots) == [
-        "123456789", "https://wiki.example.test/pages/viewpage.action?pageId=987654321"]
+        "123456789",
+        "https://wiki.example.test/pages/viewpage.action?pageId=987654321",
+    ]
 
 
 def test_a_malformed_listing_is_a_root_failure_not_a_crash(index, site):
@@ -386,7 +410,8 @@ def counted(lit, gateway):
 
 
 def test_an_unversioned_page_is_fetched_but_not_embedded_again_when_its_content_is_unchanged(
-        counted, site, gateway):
+    counted, site, gateway
+):
     unversioned(counted, site, gateway)
     fetches = len(site.calls("export")) + len(downloads(site))
 
@@ -416,12 +441,15 @@ def test_an_unversioned_attachment_whose_content_changed_is_replaced(counted, si
     report = counted.sync(corpus(site, "300"))
 
     assert (report.replaced, report.unchanged, report.failed) == (1, 1, 0)
-    assert counted.get_document(
-        "confluence:300/attachments/notes.txt") == "Escalate to the platform team."
+    assert (
+        counted.get_document("confluence:300/attachments/notes.txt")
+        == "Escalate to the platform team."
+    )
 
 
 def test_an_unchanged_unversioned_page_listed_under_another_root_is_still_re_added(
-        counted, site, gateway):
+    counted, site, gateway
+):
     site.page("301", "Unversioned child", parent="300", version=None, body="Child text.\n")
     unversioned(counted, site, gateway)
 

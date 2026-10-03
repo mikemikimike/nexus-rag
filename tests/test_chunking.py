@@ -2,13 +2,13 @@ import dataclasses
 
 from qdrant_client import QdrantClient, models
 
+from conftest import DOCUMENTS
+from index_states import NAMES
 from local_rag import KnowledgeIndex, Settings
 from local_rag.chunker import Chunker
 from local_rag.corpus import Document, InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
-from conftest import DOCUMENTS
-from index_states import NAMES
-from test_sync import CountingGateway, revised
+from test_sync import CountingGateway
 
 SMALL = Settings(chunk_tokens=40, chunk_overlap=5)
 
@@ -17,22 +17,34 @@ def long_text(sentences: int, marker: dict[int, str] | None = None) -> str:
     """Sentences of ~8 tokens each; ``marker`` replaces the filler of chosen sentences."""
     return " ".join(
         (marker or {}).get(i, f"Filler sentence number {i} says nothing useful.")
-        for i in range(sentences))
+        for i in range(sentences)
+    )
 
 
 def manual(text: str, *, id: str = "wiki/manual", version: str = "1") -> Document:
-    return Document(id=id, title="Operations manual", url=f"https://wiki.example.test/{id}",
-                    space="OPS", version=version, text=text)
+    return Document(
+        id=id,
+        title="Operations manual",
+        url=f"https://wiki.example.test/{id}",
+        space="OPS",
+        version=version,
+        text=text,
+    )
 
 
 def passages_of(client: QdrantClient, document_id: str) -> list:
     """Every Passage of one Document in the Live index, read from Qdrant directly."""
     records, _ = client.scroll(
-        NAMES.live, scroll_filter=models.Filter(must=[
-            models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))],
-            must_not=[models.FieldCondition(
-                key="kind", match=models.MatchValue(value="document"))]),
-        limit=1000, with_payload=True)
+        NAMES.live,
+        scroll_filter=models.Filter(
+            must=[
+                models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))
+            ],
+            must_not=[models.FieldCondition(key="kind", match=models.MatchValue(value="document"))],
+        ),
+        limit=1000,
+        with_payload=True,
+    )
     return records
 
 
@@ -66,12 +78,16 @@ def test_a_query_matching_only_the_tail_of_a_long_document_finds_it():
     assert "ZX-9000" in found[0].text
     assert len(found[0].text) < len(text) / 2  # the Passage, not the whole Document
     assert (found[0].title, found[0].space, found[0].url) == (
-        "Operations manual", "OPS", "https://wiki.example.test/wiki/manual")
+        "Operations manual",
+        "OPS",
+        "https://wiki.example.test/wiki/manual",
+    )
 
 
 def test_a_semantic_query_finds_the_tail_of_a_long_document_too():
     gateway = FakeModelGateway(
-        dimension=1024, synonyms={"vehicle": {"vehicle", "car", "automobile"}})
+        dimension=1024, synonyms={"vehicle": {"vehicle", "car", "automobile"}}
+    )
     index = KnowledgeIndex(SMALL, gateway)
     text = long_text(40, {39: "Every automobile needs fuel."})
     index.sync(InMemoryCorpus([manual(text), *DOCUMENTS[:2]]))
@@ -107,8 +123,9 @@ def test_replacing_a_document_replaces_all_its_old_passages():
     index = indexed([manual(long_text(30, {2: "Old marker QQ-1111 here."}))])
     before = index.status().passages
 
-    report = index.sync(InMemoryCorpus([
-        manual(long_text(30, {2: "New marker QQ-2222 here."}), version="2")]))
+    report = index.sync(
+        InMemoryCorpus([manual(long_text(30, {2: "New marker QQ-2222 here."}), version="2")])
+    )
 
     assert (report.replaced, report.failed) == (1, 0)
     assert index.status().passages == before
@@ -196,14 +213,16 @@ def test_a_crash_after_writing_the_new_passages_never_hides_the_document(client,
 
     with monkeypatch.context() as crashing:
         crashing.setattr(client, "delete", crash)
-        report = index.sync(InMemoryCorpus([manual(long_text(10, {9: "New marker QQ-2222."}),
-                                                   version="2")]))
+        report = index.sync(
+            InMemoryCorpus([manual(long_text(10, {9: "New marker QQ-2222."}), version="2")])
+        )
 
     assert report.failed == 1
     assert index.search("QQ-2222")[0].document_id == "default:wiki/manual"  # new text already live
     assert index.search("QQ-1111")[0].document_id == "default:wiki/manual"  # nothing went missing
-    again = index.sync(InMemoryCorpus([manual(long_text(10, {9: "New marker QQ-2222."}),
-                                              version="2")]))
+    again = index.sync(
+        InMemoryCorpus([manual(long_text(10, {9: "New marker QQ-2222."}), version="2")])
+    )
     assert again.replaced == 1  # the interrupted replace is finished by the next Sync
     assert not [p for p in index.search("QQ-1111", k=10) if "QQ-1111" in p.text]
     assert "QQ-2222" in index.search("QQ-2222")[0].text

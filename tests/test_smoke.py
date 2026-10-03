@@ -1,17 +1,18 @@
 """The manual smoke check: what an operator runs on the installed host to see that the real
 Model gateway, Qdrant, LiteParse, Confluence CLI and (on the systemd route) units work."""
+
 import io
 import os
 
 import pytest
 from qdrant_client import QdrantClient
 
-from local_rag.fakes import FakeModelGateway
-from local_rag.gateway_litellm import GatewayError
-from local_rag.smoke import main
 from conftest import DOCUMENTS
 from local_rag import KnowledgeIndex, Settings
 from local_rag.corpus import InMemoryCorpus
+from local_rag.fakes import FakeModelGateway
+from local_rag.gateway_litellm import GatewayError
+from local_rag.smoke import main
 from test_health import UnreachableQdrant
 
 ENVIRONMENT = {
@@ -44,17 +45,25 @@ class DownGateway(FakeModelGateway):
 def smoke():
     def run(*argv, gateway=None, client=None, host=None, **environment):
         out, err = io.StringIO(), io.StringIO()
-        code = main(list(argv), {**ENVIRONMENT, **environment},
-                    gateway=gateway or FakeModelGateway(), client=client or QdrantClient(":memory:"),
-                    run=host or Host(), stdout=out, stderr=err)
+        code = main(
+            list(argv),
+            {**ENVIRONMENT, **environment},
+            gateway=gateway or FakeModelGateway(),
+            client=client or QdrantClient(":memory:"),
+            run=host or Host(),
+            stdout=out,
+            stderr=err,
+        )
         return code, out.getvalue(), err.getvalue()
+
     return run
 
 
 def line(output: str, name: str) -> str:
     """The line of the check whose name holds ``name``."""
-    [found] = [l for l in output.splitlines()
-               if l.startswith("[") and name in l[7:].partition(": ")[0]]
+    [found] = [
+        l for l in output.splitlines() if l.startswith("[") and name in l[7:].partition(": ")[0]
+    ]
     return found
 
 
@@ -142,8 +151,12 @@ def test_a_rerank_model_the_gateway_cannot_serve_fails(smoke):
 
 def test_a_rerank_model_without_a_named_gateway_is_refused_as_a_settings_error():
     out = io.StringIO()
-    environment = {**ENVIRONMENT, "LITELLM_BASE_URL": "", "RAG_RETRIEVAL": "keyword",
-                   "RAG_RERANK_MODEL": "rerank-model"}
+    environment = {
+        **ENVIRONMENT,
+        "LITELLM_BASE_URL": "",
+        "RAG_RETRIEVAL": "keyword",
+        "RAG_RERANK_MODEL": "rerank-model",
+    }
 
     code = main([], environment, client=QdrantClient(":memory:"), run=Host(), stdout=out)
 
@@ -203,8 +216,9 @@ def test_gitlab_is_checked_only_when_it_is_configured(smoke):
 
 
 def test_a_configured_gitlab_needs_its_tool_and_does_not_print_the_token(smoke):
-    code, out, err = smoke(host=Host(), GITLAB_URL="https://gitlab.example.test",
-                           GITLAB_TOKEN="glpat-secret")
+    code, out, err = smoke(
+        host=Host(), GITLAB_URL="https://gitlab.example.test", GITLAB_TOKEN="glpat-secret"
+    )
 
     assert code == 0, out
     assert line(out, "GitLab").startswith("[ OK ]")
@@ -224,8 +238,9 @@ def test_a_configured_confluence_that_cannot_be_read_fails(smoke):
 def test_a_configured_confluence_is_asked_through_the_named_command(smoke):
     host = Host()
 
-    code, out, _ = smoke(host=host, CONFLUENCE_DOMAIN="wiki.example.test",
-                         CONFLUENCE_BIN="/usr/local/bin/confluence")
+    code, out, _ = smoke(
+        host=host, CONFLUENCE_DOMAIN="wiki.example.test", CONFLUENCE_BIN="/usr/local/bin/confluence"
+    )
 
     assert code == 0, out
     assert any(call[0] == "/usr/local/bin/confluence" for call in host.calls)
@@ -246,8 +261,12 @@ def test_each_systemd_unit_must_be_active(smoke):
 
     assert code == 0, out
     asked = {call[-1] for call in host.calls if call[0] == "systemctl"}
-    assert asked == {"qdrant.service", "local-rag-mcp.service",
-                     "local-rag-sync.timer", "local-rag-full.timer"}
+    assert asked == {
+        "qdrant.service",
+        "local-rag-mcp.service",
+        "local-rag-sync.timer",
+        "local-rag-full.timer",
+    }
 
 
 def test_an_inactive_systemd_unit_fails(smoke):
@@ -277,8 +296,14 @@ KEYWORD_ONLY = {"RAG_RETRIEVAL": "keyword", "RAG_EMBED_MODEL": "", "LITELLM_BASE
 
 def smoke_without_a_gateway(gateway=None, **environment):
     out = io.StringIO()
-    code = main([], {**ENVIRONMENT, **KEYWORD_ONLY, **environment}, gateway=gateway,
-                client=QdrantClient(":memory:"), run=Host(), stdout=out)
+    code = main(
+        [],
+        {**ENVIRONMENT, **KEYWORD_ONLY, **environment},
+        gateway=gateway,
+        client=QdrantClient(":memory:"),
+        run=Host(),
+        stdout=out,
+    )
     return code, out.getvalue()
 
 
@@ -295,8 +320,10 @@ def test_a_keyword_only_installation_passes_with_no_gateway_at_all():
 
 def test_a_keyword_only_installation_with_a_reranker_still_checks_the_gateway_for_it():
     code, out = smoke_without_a_gateway(
-        FakeModelGateway(), LITELLM_BASE_URL="http://gateway.example.test:4000/v1",
-        RAG_RERANK_MODEL="rerank-model")
+        FakeModelGateway(),
+        LITELLM_BASE_URL="http://gateway.example.test:4000/v1",
+        RAG_RERANK_MODEL="rerank-model",
+    )
 
     assert code == 0, out
     assert line(out, "Model gateway").startswith("[SKIP]")
@@ -311,6 +338,7 @@ def test_hybrid_retrieval_with_a_dead_embedding_model_fails_not_skips(smoke):
 
 
 # --- how it reports ----------------------------------------------------------------------
+
 
 def test_a_read_only_index_is_a_warning_not_a_failure(smoke):
     client = QdrantClient(":memory:")
@@ -353,10 +381,14 @@ def test_a_gateway_failure_says_its_likely_cause_and_where_the_guide_helps(smoke
 def test_a_secret_inside_the_gateway_url_is_never_printed(smoke):
     class LeakyGateway(FakeModelGateway):
         def embed_query(self, text):
-            raise GatewayError("gateway http://svc:url-secret-pw@gateway.example.test:4000/v1 unreachable")
+            raise GatewayError(
+                "gateway http://svc:url-secret-pw@gateway.example.test:4000/v1 unreachable"
+            )
 
-    _, out, err = smoke(gateway=LeakyGateway(),
-                        LITELLM_BASE_URL="http://svc:url-secret-pw@gateway.example.test:4000/v1")
+    _, out, err = smoke(
+        gateway=LeakyGateway(),
+        LITELLM_BASE_URL="http://svc:url-secret-pw@gateway.example.test:4000/v1",
+    )
 
     assert "url-secret-pw" not in out + err
     assert line(out, "Model gateway").startswith("[FAIL]")
@@ -392,11 +424,14 @@ def test_an_embedding_model_that_answers_with_an_empty_vector_fails(smoke):
     assert line(out, "Model gateway").startswith("[FAIL]")
 
 
-@pytest.mark.parametrize("failing, name, environment", [
-    ("lit", "LiteParse", {}),
-    ("confluence", "Confluence", {"CONFLUENCE_DOMAIN": "wiki.example.test"}),
-    ("git", "GitLab", {"GITLAB_URL": "https://gitlab.example.test"}),
-])
+@pytest.mark.parametrize(
+    "failing, name, environment",
+    [
+        ("lit", "LiteParse", {}),
+        ("confluence", "Confluence", {"CONFLUENCE_DOMAIN": "wiki.example.test"}),
+        ("git", "GitLab", {"GITLAB_URL": "https://gitlab.example.test"}),
+    ],
+)
 def test_a_failing_host_command_says_its_likely_cause(smoke, failing, name, environment):
     _, out, _ = smoke(host=Host(failing=[failing]), **environment)
 
@@ -405,8 +440,9 @@ def test_a_failing_host_command_says_its_likely_cause(smoke, failing, name, envi
 
 
 def test_every_failure_of_its_own_says_its_likely_cause(smoke):
-    _, out, _ = smoke("--systemd", MCP_TOKENS="", client=UnreachableQdrant(),
-                      host=Host(failing=["systemctl"]))
+    _, out, _ = smoke(
+        "--systemd", MCP_TOKENS="", client=UnreachableQdrant(), host=Host(failing=["systemctl"])
+    )
 
     for name in ("MCP_TOKENS", "Knowledge index", "local-rag-mcp.service"):
         assert "Likely cause:" in line(out, name), name

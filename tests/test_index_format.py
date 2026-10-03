@@ -2,12 +2,20 @@ import dataclasses
 
 import pytest
 
-from local_rag import Access, IndexFormat, IndexReadOnly, IndexRefused, KnowledgeIndex, Settings, index_format
+from conftest import DOCUMENTS
+from index_states import NAMES, collections, generations_in, legacy_index
+from local_rag import (
+    Access,
+    IndexFormat,
+    IndexReadOnly,
+    IndexRefused,
+    KnowledgeIndex,
+    Settings,
+    index_format,
+)
 from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from local_rag.sparse import SparseParams
-from conftest import DOCUMENTS
-from index_states import NAMES, collections, generations_in, legacy_index
 from test_sync import CountingGateway, revised
 
 
@@ -26,14 +34,18 @@ def test_an_index_written_with_the_same_format_is_served_and_synced_as_usual(ind
     assert same.sync(InMemoryCorpus(DOCUMENTS)).unchanged == 3
 
 
-@pytest.mark.parametrize("changed, difference", [
-    ({"embed_model": "embed-v2"}, "embedding model"),
-    ({"sparse": SparseParams(k1=1.5)}, "sparse encoder"),
-    ({"chunk_tokens": 200}, "chunk size"),
-    ({"chunk_overlap": 20}, "chunk overlap"),
-])
+@pytest.mark.parametrize(
+    "changed, difference",
+    [
+        ({"embed_model": "embed-v2"}, "embedding model"),
+        ({"sparse": SparseParams(k1=1.5)}, "sparse encoder"),
+        ({"chunk_tokens": 200}, "chunk size"),
+        ({"chunk_overlap": 20}, "chunk overlap"),
+    ],
+)
 def test_a_differing_but_searchable_index_is_served_read_only_with_a_warning(
-        index, changed, difference, client):
+    index, changed, difference, client
+):
     index.sync(InMemoryCorpus(DOCUMENTS))
     upgraded = after_an_upgrade(index, client, **changed)
 
@@ -93,15 +105,19 @@ def test_a_rebuild_makes_a_read_only_index_current_again(index, client):
 def test_an_index_of_another_embedding_dimension_is_refused(index, client):
     index.sync(InMemoryCorpus(DOCUMENTS))
     upgraded = after_an_upgrade(
-        index, client, FakeModelGateway(dimension=32), embed_model="embed-v2")
+        index, client, FakeModelGateway(dimension=32), embed_model="embed-v2"
+    )
 
     status = upgraded.status()
 
     assert status.access == Access.REFUSED
     assert any("dimension" in warning and "64" in warning for warning in status.warnings)
-    for use in (lambda: upgraded.search("ORA-00942"), upgraded.list_spaces,
-                lambda: upgraded.get_document("default:dba/ora-00942"),
-                lambda: upgraded.sync(InMemoryCorpus(DOCUMENTS))):
+    for use in (
+        lambda: upgraded.search("ORA-00942"),
+        upgraded.list_spaces,
+        lambda: upgraded.get_document("default:dba/ora-00942"),
+        lambda: upgraded.sync(InMemoryCorpus(DOCUMENTS)),
+    ):
         with pytest.raises(IndexRefused, match="dimension"):
             use()
 
@@ -173,7 +189,8 @@ def test_an_unreachable_gateway_does_not_hide_a_differing_index_from_status(inde
 
 
 def test_an_index_built_before_chunks_were_recorded_is_served_read_only_until_a_rebuild(
-        index, monkeypatch, client):
+    index, monkeypatch, client
+):
     real = IndexFormat.to_payload
 
     def without_chunks(self):  # what an earlier version wrote
@@ -224,14 +241,21 @@ def test_a_rebuild_records_the_chunk_settings_it_used(index, client):
 
 def test_an_unreadable_recorded_chunk_size_is_reported_as_an_unreadable_format():
     with pytest.raises(ValueError, match="unreadable index format"):
-        IndexFormat.from_payload({
-            "schema_version": 1, "embed_model": "embed", "dimension": 64,
-            "sparse": {"k1": 1.2, "b": 0.75, "avg_doc_length": 250.0},
-            "chunk_tokens": "lots", "chunk_overlap": 60})
+        IndexFormat.from_payload(
+            {
+                "schema_version": 1,
+                "embed_model": "embed",
+                "dimension": 64,
+                "sparse": {"k1": 1.2, "b": 0.75, "avg_doc_length": 250.0},
+                "chunk_tokens": "lots",
+                "chunk_overlap": 60,
+            }
+        )
 
 
 def test_an_index_built_before_corpus_ownership_was_recorded_is_served_read_only_until_a_rebuild(
-        index, monkeypatch, client):
+    index, monkeypatch, client
+):
     real = IndexFormat.to_payload
 
     def without_ownership(self):  # what an earlier version wrote
@@ -254,7 +278,9 @@ def test_an_index_built_before_corpus_ownership_was_recorded_is_served_read_only
 
 
 def test_a_changed_query_instruction_leaves_the_index_current_and_needs_no_rebuild(index, client):
-    upgraded = after_an_upgrade(index, client, query_instruction="Find the passage that answers the question")
+    upgraded = after_an_upgrade(
+        index, client, query_instruction="Find the passage that answers the question"
+    )
 
     assert upgraded.status().access == Access.READ_WRITE
     upgraded.sync(InMemoryCorpus(DOCUMENTS))

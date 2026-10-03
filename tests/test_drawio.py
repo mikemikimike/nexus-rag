@@ -25,8 +25,9 @@ def compressed(model: str) -> str:
 
 
 def file(*pages: tuple[str, str]) -> str:
-    diagrams = "".join(f'<diagram id="d{n}" name="{name}">{body}</diagram>'
-                       for n, (name, body) in enumerate(pages))
+    diagrams = "".join(
+        f'<diagram id="d{n}" name="{name}">{body}</diagram>' for n, (name, body) in enumerate(pages)
+    )
     return f'<mxfile host="app.diagrams.net">{diagrams}</mxfile>'
 
 
@@ -58,8 +59,12 @@ def test_a_compressed_diagram_is_read_too(index, tmp_path):
 
 def test_every_page_is_read_under_its_name(index, tmp_path):
     other = MODEL.replace("Primary database", "Load balancer")
-    sync(index, tmp_path, "topology.drawio",
-         file(("Overview", MODEL), ("Network", compressed(other))))
+    sync(
+        index,
+        tmp_path,
+        "topology.drawio",
+        file(("Overview", MODEL), ("Network", compressed(other))),
+    )
 
     text = index.get_document("folder:dba/topology.drawio")
     assert "Overview" in text and "Network" in text

@@ -19,8 +19,10 @@ def test_every_package_in_the_lockfile_is_pinned_to_one_version():
 def test_the_lockfile_covers_every_runtime_dependency_and_the_build_tool():
     pinned = {line.split("==")[0].lower().replace("_", "-") for line in lock_entries()}
     project = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]
-    wanted = {re.split(r"[<>=~!\s;\[]", dependency)[0].lower().replace("_", "-")
-              for dependency in project["dependencies"]}
+    wanted = {
+        re.split(r"[<>=~!\s;\[]", dependency)[0].lower().replace("_", "-")
+        for dependency in project["dependencies"]
+    }
 
     assert wanted <= pinned, wanted - pinned
     assert "setuptools" in pinned  # the installer builds the code without build isolation

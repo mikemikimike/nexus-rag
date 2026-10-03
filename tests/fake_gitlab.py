@@ -1,4 +1,5 @@
 """A GitLab stand-in for tests: real git repositories in a temporary directory, served as file:// remotes."""
+
 import subprocess
 from pathlib import Path
 
@@ -6,8 +7,9 @@ _IDENTITY = ["-c", "user.name=Test", "-c", "user.email=test@example.test"]
 
 
 def _git(directory: Path, *args: str) -> str:
-    return subprocess.run(["git", *_IDENTITY, "-C", str(directory), *args], check=True,
-                          capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        ["git", *_IDENTITY, "-C", str(directory), *args], check=True, capture_output=True, text=True
+    ).stdout.strip()
 
 
 class FakeGitLab:
@@ -22,8 +24,14 @@ class FakeGitLab:
         """Runs git in the Repository's remote."""
         return _git(self.directory / f"{path}.git", *args)
 
-    def commit(self, path: str, files: dict[str, str | bytes | None], *, branch: str = "main",
-               message: str = "change") -> str:
+    def commit(
+        self,
+        path: str,
+        files: dict[str, str | bytes | None],
+        *,
+        branch: str = "main",
+        message: str = "change",
+    ) -> str:
         """Commits ``files`` (a None value deletes the file) to ``branch`` of the Repository,
         creating both if needed; returns the commit."""
         remote = self.directory / f"{path}.git"

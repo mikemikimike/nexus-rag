@@ -1,4 +1,5 @@
 """A local HTTP server speaking the OpenAI-compatible /embeddings and LiteLLM /rerank endpoints."""
+
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,7 +25,9 @@ class FakeLiteLLM:
         self.garbage = False
         self.rerank_results: list[dict] | None = None  # overrides the computed results
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
-        self._thread = threading.Thread(target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+        self._thread = threading.Thread(
+            target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
 
     @property
     def base_url(self) -> str:
@@ -51,8 +54,9 @@ class FakeLiteLLM:
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                fake.requests.append({"path": self.path, "body": body,
-                                      "auth": self.headers.get("Authorization")})
+                fake.requests.append(
+                    {"path": self.path, "body": body, "auth": self.headers.get("Authorization")}
+                )
                 if fake.fail_with:
                     status, text = fake.fail_with
                     if fake.fail_for is not None:
@@ -85,15 +89,16 @@ class FakeLiteLLM:
         inputs = body["input"]
         vectors = self.embedder.embed(inputs)
         # Answer out of order, as a real server is allowed to: clients must use "index".
-        data = [{"object": "embedding", "index": i, "embedding": v}
-                for i, v in enumerate(vectors)]
+        data = [{"object": "embedding", "index": i, "embedding": v} for i, v in enumerate(vectors)]
         return {"object": "list", "model": body["model"], "data": data[::-1]}
 
     def _rerank(self, body):
         if self.rerank_results is not None:
             return {"results": self.rerank_results}
         query = set(tokenize(body["query"]))
-        results = [{"index": i, "relevance_score": float(len(query & set(tokenize(doc))))}
-                   for i, doc in enumerate(body["documents"])]
+        results = [
+            {"index": i, "relevance_score": float(len(query & set(tokenize(doc))))}
+            for i, doc in enumerate(body["documents"])
+        ]
         results.sort(key=lambda r: -r["relevance_score"])  # best first, like Cohere
         return {"results": results}

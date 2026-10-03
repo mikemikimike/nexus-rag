@@ -4,14 +4,15 @@ on the Document, which counts as failed. Search never retries (see test_keyword_
 The index is driven with the real gateway adapter against a local HTTP server that answers
 as scripted, so which failures count as transient is observed in the requests it receives.
 """
+
 import pytest
 
-from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import Document, InMemoryCorpus
-from local_rag.fakes import FakeModelGateway
-from local_rag.gateway_litellm import GatewayError, LiteLLMGateway
 from conftest import DOCUMENTS
 from fake_litellm_server import FakeLiteLLM
+from local_rag import KnowledgeIndex, Settings
+from local_rag.corpus import InMemoryCorpus
+from local_rag.fakes import FakeModelGateway
+from local_rag.gateway_litellm import GatewayError, LiteLLMGateway
 
 ONE = InMemoryCorpus(DOCUMENTS[:1])
 
@@ -24,8 +25,12 @@ def server():
 
 
 def index_over(server, **settings):
-    settings = Settings(gateway_base_url=server.base_url, gateway_api_key=server.api_key,
-                        embed_retry_backoff=0.0, **settings)
+    settings = Settings(
+        gateway_base_url=server.base_url,
+        gateway_api_key=server.api_key,
+        embed_retry_backoff=0.0,
+        **settings,
+    )
     return KnowledgeIndex(settings, LiteLLMGateway.from_settings(settings))
 
 
@@ -84,11 +89,14 @@ def test_one_attempt_means_no_retry(server):
     assert len(embedding_requests(server)) == 1
 
 
-@pytest.mark.parametrize("error, calls", [
-    (ValueError("a bug, not a gateway"), 1),  # nothing says another try could help
-    (GatewayError("unreachable"), 2),
-    (GatewayError("wrong key", retryable=False), 1),
-])
+@pytest.mark.parametrize(
+    "error, calls",
+    [
+        (ValueError("a bug, not a gateway"), 1),  # nothing says another try could help
+        (GatewayError("unreachable"), 2),
+        (GatewayError("wrong key", retryable=False), 1),
+    ],
+)
 def test_only_an_error_that_says_it_may_pass_is_retried(error, calls):
     gateway = CountingFailure(error)
     index = KnowledgeIndex(Settings(embed_attempts=2, embed_retry_backoff=0.0), gateway)
@@ -128,7 +136,9 @@ def test_a_rebuild_whose_embedding_keeps_failing_is_refused_by_the_threshold(ser
 
     assert not report.promoted and report.failed == 1
     assert "503" in report.failures["default:dba/ora-00942"]
-    assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"  # the Live index stays
+    assert (
+        index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
+    )  # the Live index stays
 
 
 def test_failed_attempts_are_a_health_note_and_a_success_clears_it(server):

@@ -1,4 +1,5 @@
 """Pins what a Media type is: prose or code, and the language a code type is split as."""
+
 from local_rag.corpus import PROSE_MEDIA_TYPES, is_code
 from local_rag.extraction import MEDIA_TYPES
 from local_rag.gitlab import _NAMES, _SUFFIXES
@@ -26,7 +27,12 @@ def test_gitlab_never_yields_html_as_a_page():
 def test_a_folder_suffix_keeps_its_prose_decision():
     assert not any(is_code(t) for t in MEDIA_TYPES.values())
     assert {s for s, t in MEDIA_TYPES.items() if t in PROSE_MEDIA_TYPES} == {
-        ".md", ".txt", ".rst", ".html", ".htm"}
+        ".md",
+        ".txt",
+        ".rst",
+        ".html",
+        ".htm",
+    }
 
 
 def test_only_code_types_are_split_by_syntax():

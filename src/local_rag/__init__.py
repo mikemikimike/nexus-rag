@@ -4,15 +4,27 @@ The names are imported on first use (PEP 562), so that importing a sibling modul
 only the standard library, the Installer, works on a machine where the package's
 dependencies are not installed yet.
 """
+
 from importlib import import_module
 
 _EXPORTS = {
     "local_rag.exclusive": ["SyncInProgress"],
     "local_rag.generations": ["CorruptIndex", "NoPreviousIndex"],
-    "local_rag.index": ["Health", "IndexStatus", "KnowledgeIndex", "RebuildReport",
-                        "SearchResults", "SyncReport"],
-    "local_rag.index_format": ["Access", "IncompatibleIndex", "IndexFormat", "IndexReadOnly",
-                              "IndexRefused"],
+    "local_rag.index": [
+        "Health",
+        "IndexStatus",
+        "KnowledgeIndex",
+        "RebuildReport",
+        "SearchResults",
+        "SyncReport",
+    ],
+    "local_rag.index_format": [
+        "Access",
+        "IncompatibleIndex",
+        "IndexFormat",
+        "IndexReadOnly",
+        "IndexRefused",
+    ],
     "local_rag.journal": ["LastSync"],
     "local_rag.passage_store": ["Passage"],
     "local_rag.settings": ["Settings"],

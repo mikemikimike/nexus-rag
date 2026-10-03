@@ -101,8 +101,11 @@ def test_chunking_neither_needs_nor_touches_global_llamaindex_settings():
 
     Chunker(words, size=30, overlap=5).split(sentences(20))
 
-    assert (LlamaSettings._tokenizer, LlamaSettings._node_parser,
-            LlamaSettings._embed_model) == before == (None, None, None)
+    assert (
+        (LlamaSettings._tokenizer, LlamaSettings._node_parser, LlamaSettings._embed_model)
+        == before
+        == (None, None, None)
+    )
 
 
 def test_every_prose_or_binary_media_type_is_split_as_prose():

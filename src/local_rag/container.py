@@ -22,6 +22,7 @@ replaced; data and the index live in Docker volumes, which an upgrade does not t
 
 Standard library only (see ``installer``): it runs before anything else is installed.
 """
+
 import argparse
 import json
 import os
@@ -37,10 +38,25 @@ from pathlib import Path
 from typing import TextIO
 
 from local_rag.binary_drop import (
-    QDRANT, SYSTEM_VERSION, Artifact, DropRefused, parse_reported_version, require_version,
-    sha256_of, unpack_code, verified_code_archive, verify_against_sums)
+    QDRANT,
+    SYSTEM_VERSION,
+    Artifact,
+    DropRefused,
+    parse_reported_version,
+    require_version,
+    sha256_of,
+    unpack_code,
+    verified_code_archive,
+    verify_against_sums,
+)
 from local_rag.installer import (
-    CORPORA_FILE, SHARED_SETTINGS, CommandFailed, Layout, SystemHost, create_text)
+    CORPORA_FILE,
+    SHARED_SETTINGS,
+    CommandFailed,
+    Layout,
+    SystemHost,
+    create_text,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SYSTEM_REPOSITORY = "local-rag"
@@ -86,8 +102,14 @@ def qdrant_image(record: Artifact = QDRANT) -> str:
     return f"{QDRANT_REPOSITORY}:v{record.version}"
 
 
-def main(argv: Sequence[str], *, host=None, qdrant: Artifact = QDRANT,
-         stdout: TextIO | None = None, stderr: TextIO | None = None) -> int:
+def main(
+    argv: Sequence[str],
+    *,
+    host=None,
+    qdrant: Artifact = QDRANT,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+) -> int:
     """Run one command; returns the process exit code (0 done, 1 refused or failed)."""
     out, err = stdout or sys.stdout, stderr or sys.stderr
     host = host or ContainerHost()
@@ -113,21 +135,44 @@ def _save(host, out_directory: Path, repository: Path, qdrant: Artifact, out: Te
     system, official = system_image(), qdrant_image(qdrant)
     if out_directory.exists():
         raise DropRefused(f"{out_directory} exists already; save into a new directory")
-    host.run(["docker", "build", "-f", str(repository / "deploy/container/Dockerfile"),
-              "-t", system, str(repository)])
+    host.run(
+        [
+            "docker",
+            "build",
+            "-f",
+            str(repository / "deploy/container/Dockerfile"),
+            "-t",
+            system,
+            str(repository),
+        ]
+    )
     host.run(["docker", "pull", official])
     _check_versions(host, qdrant)
     out_directory.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{out_directory.name}.", dir=out_directory.parent))
     try:
-        files = [staging / qdrant_tarball(qdrant), staging / system_tarball(),
-                 staging / f"local-rag-{SYSTEM_VERSION}.tar.gz"]
+        files = [
+            staging / qdrant_tarball(qdrant),
+            staging / system_tarball(),
+            staging / f"local-rag-{SYSTEM_VERSION}.tar.gz",
+        ]
         host.run(["docker", "save", "-o", str(files[0]), official])
         host.run(["docker", "save", "-o", str(files[1]), system])
-        host.run(["git", "-C", str(repository), "archive", "--prefix=local-rag/", "-o",
-                  str(files[2]), "HEAD"])
+        host.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "archive",
+                "--prefix=local-rag/",
+                "-o",
+                str(files[2]),
+                "HEAD",
+            ]
+        )
         (staging / "SHA256SUMS").write_text(
-            "".join(f"{sha256_of(file)}  {file.name}\n" for file in files), encoding="utf-8")
+            "".join(f"{sha256_of(file)}  {file.name}\n" for file in files), encoding="utf-8"
+        )
         staging.rename(out_directory)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
@@ -148,8 +193,10 @@ def _start(host, drop: Path, layout: ContainerLayout, qdrant: Artifact, out: Tex
     """Verify the drop, load its images, and bring the stack up; touches the machine only once
     everything the drop holds is known to be what the repository records."""
     archive = verified_code_archive(drop)
-    tarballs = {qdrant_image(qdrant): drop / qdrant_tarball(qdrant),
-                system_image(): drop / system_tarball()}
+    tarballs = {
+        qdrant_image(qdrant): drop / qdrant_tarball(qdrant),
+        system_image(): drop / system_tarball(),
+    }
     for ref, tarball in tarballs.items():
         verify_against_sums(tarball, drop / "SHA256SUMS")
         _require_tag(tarball, ref)
@@ -180,12 +227,16 @@ def _require_tag(tarball: Path, ref: str) -> None:
 def _require_images_in(compose_file: Path, tarballs: dict[str, Path]) -> None:
     """Refuse a compose file that would run other images than the ones the drop carries."""
     wanted = set(tarballs)
-    named = set(re.findall(r"^\s*image:\s*(\S+)\s*$", compose_file.read_text(encoding="utf-8"),
-                           re.MULTILINE))
+    named = set(
+        re.findall(
+            r"^\s*image:\s*(\S+)\s*$", compose_file.read_text(encoding="utf-8"), re.MULTILINE
+        )
+    )
     if named != wanted:
         raise DropRefused(
             f"the compose file runs {', '.join(sorted(named))}, the drop carries "
-            f"{', '.join(sorted(wanted))}")
+            f"{', '.join(sorted(wanted))}"
+        )
 
 
 class _Stack:
@@ -199,25 +250,46 @@ class _Stack:
 
     def bring_up(self, source: Path) -> None:
         layout = self.layout
-        if create_text(layout.env_file, ENV_FILE.format(
-                qdrant_key=secrets.token_hex(24), mcp_token=secrets.token_hex(24)), mode=0o600):
+        if create_text(
+            layout.env_file,
+            ENV_FILE.format(qdrant_key=secrets.token_hex(24), mcp_token=secrets.token_hex(24)),
+            mode=0o600,
+        ):
             self.done("created", f"{layout.env_file} (new secrets)")
         else:
             self.done("kept", layout.env_file)
         if create_text(layout.corpora_file, CORPORA_FILE):
             self.done("created", layout.corpora_file)
         _replace_if_different(source / COMPOSE_FILE, layout.compose_file, self.done)
-        units = sorted(path for path in (source / UNITS_DIRECTORY).iterdir()
-                       if path.suffix in (".service", ".timer"))
-        changed = [_replace_if_different(unit, layout.units_directory / unit.name, self.done)
-                   for unit in units]
-        self.host.run(["docker", "compose", "--project-name", "local-rag", "--env-file",
-                       str(layout.env_file), "-f", str(layout.compose_file), "up", "-d"])
+        units = sorted(
+            path
+            for path in (source / UNITS_DIRECTORY).iterdir()
+            if path.suffix in (".service", ".timer")
+        )
+        changed = [
+            _replace_if_different(unit, layout.units_directory / unit.name, self.done)
+            for unit in units
+        ]
+        self.host.run(
+            [
+                "docker",
+                "compose",
+                "--project-name",
+                "local-rag",
+                "--env-file",
+                str(layout.env_file),
+                "-f",
+                str(layout.compose_file),
+                "up",
+                "-d",
+            ]
+        )
         if any(changed):
             self.host.run(["systemctl", "daemon-reload"])
         timers = [unit.name for unit in units if unit.suffix == ".timer"]
-        self.host.run(["systemctl", "enable", "--now",
-                       *(name for name in timers if "@" not in name)])  # a template is opted into per Corpus
+        self.host.run(
+            ["systemctl", "enable", "--now", *(name for name in timers if "@" not in name)]
+        )  # a template is opted into per Corpus
 
 
 def _replace_if_different(source: Path, destination: Path, done) -> bool:
@@ -232,7 +304,8 @@ def _replace_if_different(source: Path, destination: Path, done) -> bool:
     return True
 
 
-ENV_FILE = """\
+ENV_FILE = (
+    """\
 # local-rag settings and secrets for the container stack (docker compose --env-file).
 # Written once by `local_rag.container start`; an upgrade never touches it. Apply an edit with:
 #   docker compose --project-name local-rag --env-file THIS_FILE -f /opt/local-rag/container/compose.yaml up -d
@@ -245,28 +318,62 @@ QDRANT_API_KEY={qdrant_key}
 MCP_TOKENS={mcp_token}
 MCP_PORT=8765
 
-""" + SHARED_SETTINGS
+"""
+    + SHARED_SETTINGS
+)
 
 
 def _check_versions(host, qdrant: Artifact) -> None:
     """Ask each image what it is: it must be the version the repository records."""
-    require_version("Qdrant", qdrant.version, parse_reported_version(host.output(
-        ["docker", "run", "--rm", "--entrypoint", QDRANT_BINARY, qdrant_image(qdrant),
-         "--version"])), source=f"the image {qdrant_image(qdrant)}")
-    require_version("local-rag", SYSTEM_VERSION, parse_reported_version(host.output(
-        ["docker", "run", "--rm", "--entrypoint", "python", system_image(), "-c",
-         "import importlib.metadata as m; print(m.version('local-rag'))"])),
-        source=f"the image {system_image()}")
+    require_version(
+        "Qdrant",
+        qdrant.version,
+        parse_reported_version(
+            host.output(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--entrypoint",
+                    QDRANT_BINARY,
+                    qdrant_image(qdrant),
+                    "--version",
+                ]
+            )
+        ),
+        source=f"the image {qdrant_image(qdrant)}",
+    )
+    require_version(
+        "local-rag",
+        SYSTEM_VERSION,
+        parse_reported_version(
+            host.output(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--entrypoint",
+                    "python",
+                    system_image(),
+                    "-c",
+                    "import importlib.metadata as m; print(m.version('local-rag'))",
+                ]
+            )
+        ),
+        source=f"the image {system_image()}",
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python3.12 -m local_rag.container",
-                                     description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(
+        prog="python3.12 -m local_rag.container", description=__doc__.split("\n\n")[0]
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     save = commands.add_parser("save", help="build and save the images (connected machine)")
     save.add_argument("--out", type=Path, required=True, help="the Binary drop directory to write")
-    save.add_argument("--repo", type=Path, default=REPOSITORY_ROOT,
-                      help="the repository to build from")
+    save.add_argument(
+        "--repo", type=Path, default=REPOSITORY_ROOT, help="the repository to build from"
+    )
     start = commands.add_parser("start", help="verify the drop, load the images, start the stack")
     start.add_argument("--drop", type=Path, required=True, help="the Binary drop directory")
     start.add_argument("--root", type=Path, default=Path("/"), help="install below this directory")

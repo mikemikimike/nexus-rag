@@ -1,4 +1,5 @@
 """Stand-ins for the infrastructure the acceptance suite is run against, and how to run it."""
+
 import io
 
 from qdrant_client import QdrantClient
@@ -25,8 +26,9 @@ ENVIRONMENT = {
 
 def probe_synonyms() -> dict[str, set[str]]:
     """What a real embedding model knows: each probe's paraphrase means its Document."""
-    return {f"concept-{number}": set(words)
-            for number, words in enumerate(acceptance_corpus.MEANINGS)}
+    return {
+        f"concept-{number}": set(words) for number, words in enumerate(acceptance_corpus.MEANINGS)
+    }
 
 
 def good_gateway() -> FakeModelGateway:
@@ -39,6 +41,7 @@ class RefusingQdrant:
     def __getattr__(self, name):
         def refuse(*args, **kwargs):
             raise UnexpectedResponse(403, "Forbidden", b"Invalid api-key", {})
+
         return refuse
 
 
@@ -87,9 +90,14 @@ def run_suite(*argv, environ=None, gateway=None, qdrant=None, host=None, no_gate
     out, err = io.StringIO(), io.StringIO()
     qdrant = qdrant or Qdrant()
     code = acceptance.main(
-        list(argv), {**ENVIRONMENT, **(environ or {})},
-        gateway=None if no_gateway else gateway or good_gateway(), connect=qdrant.connect,
-        run=host or Host(), stdout=out, stderr=err)
+        list(argv),
+        {**ENVIRONMENT, **(environ or {})},
+        gateway=None if no_gateway else gateway or good_gateway(),
+        connect=qdrant.connect,
+        run=host or Host(),
+        stdout=out,
+        stderr=err,
+    )
     return code, out.getvalue(), err.getvalue()
 
 
@@ -100,19 +108,30 @@ def line(output: str, name: str) -> str:
     return found[0]
 
 
-TIMERS = ("Thu 2026-10-01 13:00:00 UTC  40min left Thu 2026-10-01 12:00:01 UTC  19min ago {sync}.timer {sync}.service\n"
-          "Sun 2026-10-04 03:00:00 UTC  2 days left n/a                          n/a      {full}.timer {full}.service\n")
+TIMERS = (
+    "Thu 2026-10-01 13:00:00 UTC  40min left Thu 2026-10-01 12:00:01 UTC  19min ago {sync}.timer {sync}.service\n"
+    "Sun 2026-10-04 03:00:00 UTC  2 days left n/a                          n/a      {full}.timer {full}.service\n"
+)
 
 
 def systemd_host(**kwargs) -> Host:
-    return Host({"stat -c %a": "640\n",
-                 "list-timers": TIMERS.format(sync="local-rag-sync", full="local-rag-full")},
-                **kwargs)
+    return Host(
+        {
+            "stat -c %a": "640\n",
+            "list-timers": TIMERS.format(sync="local-rag-sync", full="local-rag-full"),
+        },
+        **kwargs,
+    )
 
 
 def container_host(**kwargs) -> Host:
-    return Host({"stat -c %a": "600\n",
-                 "docker ps": "mcp Up 3 hours (healthy)\nqdrant Up 3 hours\n",
-                 "list-timers": TIMERS.format(sync="local-rag-container-sync",
-                                              full="local-rag-container-full")},
-                **kwargs)
+    return Host(
+        {
+            "stat -c %a": "600\n",
+            "docker ps": "mcp Up 3 hours (healthy)\nqdrant Up 3 hours\n",
+            "list-timers": TIMERS.format(
+                sync="local-rag-container-sync", full="local-rag-container-full"
+            ),
+        },
+        **kwargs,
+    )

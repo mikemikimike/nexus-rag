@@ -6,6 +6,7 @@ function between its statements); what cannot be split further is cut by lines. 
 of a definition names it (``LedgerClient.post_entry``). Source that does not parse is left to
 the line splitter.
 """
+
 import dataclasses
 import threading
 from collections.abc import Callable
@@ -34,8 +35,13 @@ def _parser(language: str) -> Parser:
 # Node types that define a symbol, and the type that holds the children of one that is too big.
 _DEFINITIONS = {
     "python": {"function_definition", "class_definition"},
-    "c": {"function_definition", "struct_specifier", "union_specifier", "enum_specifier",
-          "type_definition"},
+    "c": {
+        "function_definition",
+        "struct_specifier",
+        "union_specifier",
+        "enum_specifier",
+        "type_definition",
+    },
 }
 
 
@@ -50,8 +56,7 @@ class _Item:
 class SyntaxSplitter:
     """Splits one language's code. ``fallback`` splits (Piece-wise) what is not parsed."""
 
-    def __init__(self, language: str, count_tokens: Callable[[str], int], *, size: int,
-                 fallback):
+    def __init__(self, language: str, count_tokens: Callable[[str], int], *, size: int, fallback):
         self._language = language
         self._count = count_tokens
         self._size = size
@@ -67,19 +72,18 @@ class SyntaxSplitter:
                 lines.pop()
             if not lines:
                 return []
-            items = self._items(lines, root, 0, len(lines) - 1, None)
+            items = self._items(lines, list(root.named_children), 0, len(lines) - 1, None)
             return self._pack(lines, items)
         except Exception:  # a file the parser cannot handle must not fail its Document
             return self._fallback.split(text)
 
     # -- building items ---------------------------------------------------------------
 
-    def _items(self, lines, node: Node | None, start: int, end: int,
-               symbol: str | None, children: list[Node] | None = None) -> list[_Item]:
+    def _items(
+        self, lines, children: list[Node], start: int, end: int, symbol: str | None
+    ) -> list[_Item]:
         """The items covering rows start..end, one per child of the container (plus a head
         before the first child). Items that do not fit are expanded in place."""
-        if children is None:
-            children = list(node.named_children)
         starts = self._starts(children)
         items = []
         if not starts or starts[0][0] > start:
@@ -91,10 +95,11 @@ class SyntaxSplitter:
             items[0].start = start
         return items
 
-    def _starts(self, children: list[Node]) -> list[tuple[int, Node]]:
+    def _starts(self, children: list[Node]) -> list[tuple[int, Node | None]]:
         """(first row, node) per child; comments directly above a child join it, and a
         child that starts on a row an earlier one ended on (a trailing comment) is absorbed."""
-        starts, pending, covered = [], None, -1
+        starts: list[tuple[int, Node | None]] = []
+        pending, covered = None, -1
         for child in children:
             first, last = child.start_point.row, _last_row(child)
             if pending is None and first <= covered:
@@ -115,8 +120,9 @@ class SyntaxSplitter:
     def _symbol(self, node: Node | None, parent: str | None) -> str | None:
         if node is None:
             return parent
-        target = node.child_by_field_name("definition") if node.type == "decorated_definition" \
-            else node
+        target = (
+            node.child_by_field_name("definition") if node.type == "decorated_definition" else node
+        )
         if target is None or target.type not in _DEFINITIONS[self._language]:
             return parent
         name = self._name(target)
@@ -128,16 +134,17 @@ class SyntaxSplitter:
         if node.type == "function_definition" and self._language == "c":
             declarator = node.child_by_field_name("declarator")
             while declarator is not None and declarator.type != "identifier":
-                declarator = declarator.child_by_field_name("declarator") \
-                    or _first_identifier(declarator)
-            return None if declarator is None else declarator.text.decode("utf-8")
+                declarator = declarator.child_by_field_name("declarator") or _first_identifier(
+                    declarator
+                )
+            return None if declarator is None else _text(declarator)
         if node.type == "type_definition":
             declarator = node.child_by_field_name("declarator")
-            return None if declarator is None else declarator.text.decode("utf-8")
+            return None if declarator is None else _text(declarator)
         if node.type.endswith("_specifier") and node.child_by_field_name("body") is None:
             return None  # a forward declaration or a use, not a definition
         name = node.child_by_field_name("name")
-        return None if name is None else name.text.decode("utf-8")
+        return None if name is None else _text(name)
 
     def _expand(self, lines, item: _Item, node: Node | None) -> list[_Item]:
         """The item itself if it fits, else the items of its children, else its lines cut."""
@@ -152,23 +159,30 @@ class SyntaxSplitter:
             container = body if body is not None else inner
             children = list(container.named_children)
             # Rows before the first child are the definition's head (decorators included).
-            if children and (len(children) > 1 or children[0].start_point.row > item.start
-                             or _last_row(children[0]) < item.end):
-                sub = self._items(lines, None, item.start, item.end, item.symbol, children)
+            if children and (
+                len(children) > 1
+                or children[0].start_point.row > item.start
+                or _last_row(children[0]) < item.end
+            ):
+                sub = self._items(lines, children, item.start, item.end, item.symbol)
                 if len(sub) > 1 or sub[0].start != item.start or sub[0].end != item.end:
                     return sub
         return [dataclasses.replace(item, pieces=self._cut(lines, item))]
 
     def _cut(self, lines, item: _Item) -> list:
         from local_rag.chunker import Piece
-        parts = self._fallback.split("\n".join(lines[item.start:item.end + 1]))
-        return [Piece(p.text, p.start_line + item.start, p.end_line + item.start, item.symbol)
-                for p in parts]
+
+        parts = self._fallback.split("\n".join(lines[item.start : item.end + 1]))
+        return [
+            Piece(p.text, p.start_line + item.start, p.end_line + item.start, item.symbol)
+            for p in parts
+        ]
 
     # -- packing items into pieces ------------------------------------------------------
 
     def _pack(self, lines, items: list[_Item]) -> list:
         from local_rag.chunker import Piece, _trimmed
+
         pieces, group = [], None  # group: the run of fitting items being joined
 
         def flush():
@@ -176,16 +190,18 @@ class SyntaxSplitter:
             if group is not None:
                 piece = _trimmed(lines, group.start, group.end + 1)
                 if piece.text:
-                    pieces.append(Piece(piece.text, piece.start_line, piece.end_line,
-                                        group.symbol))
+                    pieces.append(Piece(piece.text, piece.start_line, piece.end_line, group.symbol))
                 group = None
 
         for item in items:
             if item.pieces is not None:
                 flush()
                 pieces += item.pieces
-            elif (group is not None and group.symbol == item.symbol and self._count(
-                    _trimmed_text(lines, group.start, item.end)) <= self._size):
+            elif (
+                group is not None
+                and group.symbol == item.symbol
+                and self._count(_trimmed_text(lines, group.start, item.end)) <= self._size
+            ):
                 group.end = item.end
             else:
                 flush()
@@ -195,7 +211,7 @@ class SyntaxSplitter:
 
 
 def _trimmed_text(lines, start: int, end: int) -> str:
-    return "\n".join(lines[start:end + 1]).strip("\n")
+    return "\n".join(lines[start : end + 1]).strip("\n")
 
 
 def _last_row(node: Node) -> int:
@@ -212,6 +228,10 @@ def _first_identifier(node: Node) -> Node | None:
         if found is not None:
             return found
     return None
+
+
+def _text(node: Node) -> str:
+    return (node.text or b"").decode("utf-8")
 
 
 def splitter_for(media_type: str, count_tokens, *, size: int, fallback) -> SyntaxSplitter | None:

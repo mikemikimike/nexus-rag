@@ -36,7 +36,8 @@ def test_save_writes_both_images_and_the_code_with_versions_and_checksums(tmp_pa
 
     assert code == 0, err
     assert sorted(path.name for path in drop.iterdir()) == sorted(
-        [QDRANT_TAR, SYSTEM_TAR, f"local-rag-{SYSTEM_VERSION}.tar.gz", "SHA256SUMS"])
+        [QDRANT_TAR, SYSTEM_TAR, f"local-rag-{SYSTEM_VERSION}.tar.gz", "SHA256SUMS"]
+    )
     listed = checksums(drop)
     for name in (QDRANT_TAR, SYSTEM_TAR, f"local-rag-{SYSTEM_VERSION}.tar.gz"):
         assert listed[name] == sha256_of(drop / name)
@@ -69,14 +70,20 @@ class Host:
 
     def seal(self) -> None:
         """Make SHA256SUMS agree with the files, as if the drop had been made that way."""
-        lines = (f"{sha256_of(file)}  {file.name}\n" for file in sorted(self.drop.iterdir())
-                 if file.name != "SHA256SUMS")
+        lines = (
+            f"{sha256_of(file)}  {file.name}\n"
+            for file in sorted(self.drop.iterdir())
+            if file.name != "SHA256SUMS"
+        )
         (self.drop / "SHA256SUMS").write_text("".join(lines))
 
     def env(self) -> dict[str, str]:
         text = self.path("/etc/local-rag/container.env").read_text()
-        pairs = (line.split("=", 1) for line in text.splitlines()
-                 if line.strip() and not line.startswith("#"))
+        pairs = (
+            line.split("=", 1)
+            for line in text.splitlines()
+            if line.strip() and not line.startswith("#")
+        )
         return {key: value for key, value in pairs}
 
 
@@ -197,7 +204,9 @@ def test_start_installs_the_templated_timer_but_enables_no_instance(host):
     for suffix in ("service", "timer"):
         assert host.path(f"/etc/systemd/system/local-rag-container-sync@.{suffix}").exists()
     (enable,) = host.docker.ran_matching("systemctl", "enable")
-    assert "@" not in enable  # `systemctl enable name@.timer` is an error; the operator opts in per Corpus
+    assert (
+        "@" not in enable
+    )  # `systemctl enable name@.timer` is an error; the operator opts in per Corpus
 
 
 def test_start_without_docker_is_refused_before_anything_is_touched(tmp_path):
@@ -225,8 +234,12 @@ def test_the_compose_file_runs_the_recorded_versions_of_both_images():
 
 def test_the_compose_file_keeps_data_and_the_index_in_named_volumes():
     stack = compose()
-    mounted = {mount.split(":")[0] for service in stack["services"].values()
-               for mount in service.get("volumes", []) if not mount.startswith("/")}
+    mounted = {
+        mount.split(":")[0]
+        for service in stack["services"].values()
+        for mount in service.get("volumes", [])
+        if not mount.startswith("/")
+    }
 
     assert {"qdrant-storage", "qdrant-snapshots", "rag-data"} <= mounted
     assert set(stack["volumes"]) >= mounted
@@ -238,7 +251,8 @@ def test_the_compose_file_holds_no_secret_and_takes_every_one_from_the_env_file(
     for key in ("QDRANT_API_KEY", "MCP_TOKENS"):
         assert services["mcp"]["environment"][key].startswith("${" + key + ":?")
     assert services["qdrant"]["environment"]["QDRANT__SERVICE__API_KEY"].startswith(
-        "${QDRANT_API_KEY:?")
+        "${QDRANT_API_KEY:?"
+    )
     assert "env_file" not in str(services)  # works in Portainer, whose host paths are not ours
 
 
@@ -272,8 +286,11 @@ def test_every_setting_the_programs_read_can_be_set_from_the_env_file():
     # here could never be changed in the env file (the Rebuild threshold, chunking, ...).
     import local_rag.environment as environment
 
-    read = set(re.findall(r'"(RAG_[A-Z_]+|LITELLM_[A-Z_]+|LIT_BIN)"',
-                          Path(environment.__file__).read_text()))
+    read = set(
+        re.findall(
+            r'"(RAG_[A-Z_]+|LITELLM_[A-Z_]+|LIT_BIN)"', Path(environment.__file__).read_text()
+        )
+    )
     read -= {"RAG_CORPORA_FILE"}  # the stack mounts the declaration at its default path
     services = compose()["services"]
 
@@ -329,7 +346,8 @@ def test_the_command_runs_on_a_machine_with_only_the_standard_library():
         "import sys\n"
         "for blocked in ('qdrant_client', 'mcp', 'llama_index', 'bs4'):\n"
         "    sys.modules[blocked] = None\n"
-        "import local_rag.container\n")
+        "import local_rag.container\n"
+    )
     result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
 
     assert result.returncode == 0, result.stderr
@@ -344,7 +362,7 @@ def test_both_routes_offer_the_same_settings_after_their_own_qdrant_and_mcp_part
     assert host.start()[0] == 0 and machine.install()[0] == 0
 
     def shared(text: str) -> str:
-        return text[text.index("# Retrieval mode"):]
+        return text[text.index("# Retrieval mode") :]
 
     container = shared(host.path("/etc/local-rag/container.env").read_text())
     assert container == shared(machine.path("/etc/local-rag/local-rag.env").read_text())

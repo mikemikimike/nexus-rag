@@ -2,14 +2,15 @@
 
 Driven through the Knowledge index with the fake Model gateway, like the other index tests.
 """
+
 import pytest
 
+from conftest import SYNONYMS
+from index_states import record_format
 from local_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
 from local_rag.fakes import FakeModelGateway
 from local_rag.gateway_litellm import GatewayError
 from local_rag.settings import RetrievalMode
-from conftest import SYNONYMS
-from index_states import record_format
 from test_index_format import after_an_upgrade
 
 KEYWORD = RetrievalMode.KEYWORD
@@ -60,13 +61,15 @@ def test_a_keyword_only_index_never_asks_the_gateway_to_embed(corpus):
 
 # --- a mode that disagrees with the index ----------------------------------------------
 
+
 def reopened(index, client, gateway=None, **changed):
     """The same Qdrant, opened by code whose settings differ from what wrote the index."""
     return after_an_upgrade(index, client, gateway, **changed)
 
 
 def test_a_keyword_only_index_under_hybrid_settings_is_read_only_and_searched_by_keywords(
-        corpus, client):
+    corpus, client
+):
     keyword = keyword_index(client=client)
     keyword.sync(corpus)
     gateway = NoEmbeddingModel()
@@ -83,7 +86,8 @@ def test_a_keyword_only_index_under_hybrid_settings_is_read_only_and_searched_by
 
 
 def test_a_hybrid_index_under_keyword_settings_is_read_only_and_searched_by_keywords(
-        index, corpus, client):
+    index, corpus, client
+):
     index.sync(corpus)
 
     keyword = reopened(index, client, None, retrieval=KEYWORD)
@@ -129,6 +133,7 @@ def test_a_hybrid_index_records_its_mode_and_a_keyword_only_one_no_model(index, 
 
 # --- the Keyword fallback --------------------------------------------------------------
 
+
 class FlakyGateway(FakeModelGateway):
     """Embeds until `down` is set, then fails the way an unreachable gateway does."""
 
@@ -160,8 +165,7 @@ def test_a_search_with_the_embedding_model_up_carries_no_notice(hybrid):
     assert hybrid.search("ORA-00942").notice is None
 
 
-def test_a_search_falls_back_to_keywords_and_says_so_when_the_embedding_call_fails(
-        hybrid, flaky):
+def test_a_search_falls_back_to_keywords_and_says_so_when_the_embedding_call_fails(hybrid, flaky):
     hybrid.search("ORA-00942")  # the dimension check passes while the gateway is up
     flaky.down = True
 
@@ -228,6 +232,7 @@ def test_an_unreachable_embedding_model_is_a_health_note_not_a_failure(hybrid, f
 
 # --- records that disagree with the collection ------------------------------------------
 
+
 def test_a_recorded_mode_that_disagrees_with_the_collection_is_reported_not_trusted(corpus, client):
     keyword = keyword_index(client=client)
     keyword.sync(corpus)
@@ -238,4 +243,3 @@ def test_a_recorded_mode_that_disagrees_with_the_collection_is_reported_not_trus
 
     assert status.access == Access.REFUSED
     assert any("dense" in warning for warning in status.warnings)
-

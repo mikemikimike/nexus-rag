@@ -4,7 +4,13 @@ import tarfile
 import pytest
 
 import fake_drop
-from local_rag.binary_drop import Artifact, DropRefused, QDRANT, install_qdrant_binary, verify_against_sums
+from local_rag.binary_drop import (
+    QDRANT,
+    Artifact,
+    DropRefused,
+    install_qdrant_binary,
+    verify_against_sums,
+)
 
 
 def test_a_qdrant_tarball_that_is_not_the_recorded_release_is_refused(tmp_path):
@@ -34,7 +40,9 @@ def test_the_recorded_release_is_unpacked_as_an_executable(tmp_path):
 
 def test_a_binary_that_reports_another_version_than_recorded_is_refused(tmp_path):
     tarball = tmp_path / fake_drop.QDRANT_TARBALL
-    record = fake_drop.qdrant_tarball(tarball, version="1.18.0")  # checksum matches, version does not
+    record = fake_drop.qdrant_tarball(
+        tarball, version="1.18.0"
+    )  # checksum matches, version does not
     expected = Artifact(record.name, "1.19.1", record.filename, record.sha256)
 
     with pytest.raises(DropRefused, match="version"):

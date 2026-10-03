@@ -1,4 +1,5 @@
 """Builds Binary drops for tests: a fake Qdrant tarball and a code archive."""
+
 import io
 import tarfile
 from pathlib import Path
@@ -27,10 +28,12 @@ def write_sums(directory: Path) -> None:
     (directory / "SHA256SUMS").write_text(f"{sha256(archive)}  {archive.name}\n")
 
 
-def code_archive(path: Path, *, lock: str = "pytest==9.0.0\n",
-                 extra: dict[str, bytes] | None = None) -> None:
+def code_archive(
+    path: Path, *, lock: str = "pytest==9.0.0\n", extra: dict[str, bytes] | None = None
+) -> None:
     """An archive of a tiny source tree carrying the real deployment files (systemd units, container compose file) and a lockfile."""
     with tarfile.open(path, "w:gz") as archive:
+
         def add(name: str, data: bytes, mode: int = 0o644) -> None:
             info = tarfile.TarInfo(f"local-rag/{name}")
             info.size, info.mode = len(data), mode
@@ -45,8 +48,9 @@ def code_archive(path: Path, *, lock: str = "pytest==9.0.0\n",
                 add(deployed.relative_to(REPO).as_posix(), deployed.read_bytes())
 
 
-def drop(directory: Path, *, qdrant_version: str = "1.19.1", lock: str = "pytest==9.0.0\n"
-         ) -> Artifact:
+def drop(
+    directory: Path, *, qdrant_version: str = "1.19.1", lock: str = "pytest==9.0.0\n"
+) -> Artifact:
     """A complete Binary drop in ``directory``; returns the Qdrant record that matches it."""
     directory.mkdir(parents=True, exist_ok=True)
     record = qdrant_tarball(directory / QDRANT_TARBALL, qdrant_version)

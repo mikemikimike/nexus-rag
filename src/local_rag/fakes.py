@@ -1,4 +1,5 @@
 """Deterministic stand-ins for external services, for tests and local experiments."""
+
 import math
 import zlib
 from collections.abc import Iterable, Mapping, Sequence
@@ -14,8 +15,7 @@ class FakeModelGateway:
     queries with no words in common can still be close.
     """
 
-    def __init__(self, dimension: int = 64,
-                 synonyms: Mapping[str, Iterable[str]] | None = None):
+    def __init__(self, dimension: int = 64, synonyms: Mapping[str, Iterable[str]] | None = None):
         self.dimension = dimension
         self._canonical = {
             word: concept for concept, words in (synonyms or {}).items() for word in words

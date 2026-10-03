@@ -3,6 +3,7 @@
 Hybrid retrieval needs it, and so does a named rerank model; Keyword-only retrieval without a
 reranker needs none. An unnamed gateway is a settings error, never a guessed address.
 """
+
 import itertools
 
 import pytest
@@ -18,9 +19,12 @@ ADDRESS = "http://gateway.example.test:4000/v1"
 
 
 def environment(mode: str, rerank: bool, named: bool) -> dict[str, str]:
-    return {"RAG_RETRIEVAL": mode, "RAG_EMBED_MODEL": "embed",
-            "RAG_RERANK_MODEL": "rerank-model" if rerank else "",
-            "LITELLM_BASE_URL": ADDRESS if named else ""}
+    return {
+        "RAG_RETRIEVAL": mode,
+        "RAG_EMBED_MODEL": "embed",
+        "RAG_RERANK_MODEL": "rerank-model" if rerank else "",
+        "LITELLM_BASE_URL": ADDRESS if named else "",
+    }
 
 
 ROWS = list(itertools.product(["hybrid", "keyword"], [False, True], [False, True]))
@@ -75,8 +79,9 @@ def test_an_empty_address_counts_as_not_named():
 
 
 def test_a_gateway_on_the_same_host_is_named_explicitly():
-    settings = settings_from_environment({
-        "RAG_EMBED_MODEL": "embed", "LITELLM_BASE_URL": "http://localhost:4000/v1"})
+    settings = settings_from_environment(
+        {"RAG_EMBED_MODEL": "embed", "LITELLM_BASE_URL": "http://localhost:4000/v1"}
+    )
 
     assert settings.gateway_base_url == "http://localhost:4000/v1"
 

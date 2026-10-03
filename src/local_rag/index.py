@@ -8,15 +8,27 @@ from qdrant_client import QdrantClient
 
 from local_rag.chunker import Chunker, Piece
 from local_rag.corpus import (
-    Corpus, Document, DocumentRef, RawDocument, check_corpus_name, listing_failures,
-    qualified_id)
+    Corpus,
+    Document,
+    DocumentRef,
+    RawDocument,
+    check_corpus_name,
+    listing_failures,
+    qualified_id,
+)
 from local_rag.errors import describe
 from local_rag.exclusive import ExclusiveRun, Lease, SyncInProgress
 from local_rag.extraction import Extractor
 from local_rag.gateway import ModelGateway
 from local_rag.generations import CorruptIndex, Generations
 from local_rag.index_format import (
-    Access, Assessment, IndexFormat, IndexReadOnly, IndexRefused, assess)
+    Access,
+    Assessment,
+    IndexFormat,
+    IndexReadOnly,
+    IndexRefused,
+    assess,
+)
 from local_rag.index_names import IndexNames
 from local_rag.journal import Journal, LastSync
 from local_rag.passage_store import Narrowing, Passage, PassageStore, Written
@@ -36,10 +48,14 @@ class SearchResults(list[Passage]):
         self.notice = notice
 
 
-_FALLBACK_NOTICE = ("Results are keyword-only: the embedding model could not be reached for "
-                    "this search, so matches by meaning are missing.")
-_NO_EMBEDDINGS_NOTICE = ("Results are keyword-only: this index was built without an embedding "
-                         "model; an operator must run a Rebuild to add one.")
+_FALLBACK_NOTICE = (
+    "Results are keyword-only: the embedding model could not be reached for "
+    "this search, so matches by meaning are missing."
+)
+_NO_EMBEDDINGS_NOTICE = (
+    "Results are keyword-only: this index was built without an embedding "
+    "model; an operator must run a Rebuild to add one."
+)
 
 
 @dataclass(frozen=True)
@@ -91,8 +107,13 @@ class Health:
 class KnowledgeIndex:
     """The searchable body of indexed Documents: accepts a Corpus, answers searches."""
 
-    def __init__(self, settings: Settings, gateway: ModelGateway | None, *,
-                 client: QdrantClient | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        gateway: ModelGateway | None,
+        *,
+        client: QdrantClient | None = None,
+    ):
         """``client`` lets several instances (processes, in effect) share one Qdrant.
 
         ``gateway`` may be None for Keyword-only retrieval without a reranker: nothing then
@@ -107,7 +128,8 @@ class KnowledgeIndex:
         self._chunker = Chunker.from_settings(settings, gateway)
         self._client = client or _connect(settings)
         self._store = PassageStore(
-            self._client, payload_indexes=settings.qdrant_location != ":memory:")
+            self._client, payload_indexes=settings.qdrant_location != ":memory:"
+        )
         # By generation: a generation's format, once written, does not change.
         self._assessments: dict[str, Assessment] = {}
         # Why the embedding model failed the last time it was used; None if it worked.
@@ -119,8 +141,7 @@ class KnowledgeIndex:
         self._exclusive = self._lock(self._names.lock)
 
     def _lock(self, name: str) -> ExclusiveRun:
-        return ExclusiveRun(
-            self._client, name, stale_after=self._settings.sync_lock_stale_after)
+        return ExclusiveRun(self._client, name, stale_after=self._settings.sync_lock_stale_after)
 
     @contextmanager
     def _syncing(self, corpus: str) -> Iterator[Lease]:
@@ -153,8 +174,7 @@ class KnowledgeIndex:
         """
         check_corpus_name(corpus.name)
         with self._syncing(corpus.name) as lease:
-            return self._journaled(
-                "Sync", lambda: self._sync(corpus, lease), corpus=corpus.name)
+            return self._journaled("Sync", lambda: self._sync(corpus, lease), corpus=corpus.name)
 
     def _sync(self, corpus: Corpus, lease: Lease) -> SyncReport:
         live = self._generations.live()
@@ -205,8 +225,11 @@ class KnowledgeIndex:
         current = {qualified_id(corpus.name, ref.id) for ref in refs}
         # A Document missing from an incomplete listing may still exist if it sat in a part
         # that failed to list; one with no recorded part may have sat in any of them.
-        stale = {document_id for document_id in indexed.keys() - current
-                 if not indexed[document_id].held_back_by(unlisted)}
+        stale = {
+            document_id
+            for document_id in indexed.keys() - current
+            if not indexed[document_id].held_back_by(unlisted)
+        }
         for document_id in stale:
             try:
                 self._store.remove(target, document_id)
@@ -214,8 +237,14 @@ class KnowledgeIndex:
                 failures[document_id] = describe(error)
             else:
                 removed += 1
-        return SyncReport(added=added, replaced=replaced, removed=removed,
-                          unchanged=unchanged, failed=len(failures), failures=failures)
+        return SyncReport(
+            added=added,
+            replaced=replaced,
+            removed=removed,
+            unchanged=unchanged,
+            failed=len(failures),
+            failures=failures,
+        )
 
     def _promote_first(self, generation: str) -> str:
         """Make the generation live unless another Sync's first generation already is.
@@ -254,21 +283,26 @@ class KnowledgeIndex:
         promoted = False
         try:
             listed = [(corpus, corpus.list()) for corpus in corpora]
-            unlisted = {f"{corpus.name}: {part}": why
-                        for corpus, refs in listed for part, why in listing_failures(refs).items()}
+            unlisted = {
+                f"{corpus.name}: {part}": why
+                for corpus, refs in listed
+                for part, why in listing_failures(refs).items()
+            }
             if unlisted:
                 return RebuildReport(
-                    indexed=0, failed=len(unlisted), failures=unlisted,
-                    reason=f"a Corpus could not be listed completely "
-                           f"({', '.join(unlisted)})", warnings=warnings)
+                    indexed=0,
+                    failed=len(unlisted),
+                    failures=unlisted,
+                    reason=f"a Corpus could not be listed completely ({', '.join(unlisted)})",
+                    warnings=warnings,
+                )
             failures: dict[str, str] = {}
             total = 0
             for corpus, refs in listed:
                 total += len(refs)
                 for ref in refs:
                     try:
-                        self._add(self._extract(corpus, corpus.fetch(ref.id), ref),
-                                  generation)
+                        self._add(self._extract(corpus, corpus.fetch(ref.id), ref), generation)
                     except Exception as error:
                         failures[qualified_id(corpus.name, ref.id)] = describe(error)
             failed = len(failures)
@@ -280,8 +314,13 @@ class KnowledgeIndex:
         finally:
             if not promoted:
                 self._discard(generation)
-        return RebuildReport(indexed=total - failed, failed=failed, reason=reason,
-                             failures=failures, warnings=warnings)
+        return RebuildReport(
+            indexed=total - failed,
+            failed=failed,
+            reason=reason,
+            failures=failures,
+            warnings=warnings,
+        )
 
     def forget(self, corpus: str) -> int:
         """Remove every Document the named Corpus owns; returns how many there were.
@@ -322,28 +361,21 @@ class KnowledgeIndex:
         with self._whole_index("switch-back"):
             previous = self._generations.previous()
             if previous is not None and self._assessment(previous).access is Access.REFUSED:
-                raise IndexRefused(_explain(
-                    "the previous index cannot be used", self._assessment(previous)))
+                raise IndexRefused(
+                    _explain("the previous index cannot be used", self._assessment(previous))
+                )
             self._generations.switch_back()
 
     def _journaled[R: (SyncReport, RebuildReport)](
-            self, kind: str, run: Callable[[], R], corpus: str | None = None) -> R:
+        self, kind: str, run: Callable[[], R], corpus: str | None = None
+    ) -> R:
         """Run a Sync or Rebuild and keep its result for ``status``."""
         try:
             report = run()
         except Exception as error:
             self._note(kind, "failed", describe(error), corpus)
             raise
-        if isinstance(report, SyncReport):
-            outcome = "completed with failures" if report.failed else "completed"
-            detail = (f"{report.added} added, {report.replaced} replaced, "
-                      f"{report.removed} removed, {report.unchanged} unchanged, "
-                      f"{report.failed} failed")
-        elif report.promoted:
-            outcome, detail = "promoted", f"{report.indexed} indexed, {report.failed} failed"
-            detail = "; ".join([detail, *report.warnings])
-        else:
-            outcome, detail = "refused", report.reason
+        outcome, detail = _outcome(report)
         self._note(kind, outcome, detail, corpus)
         return report
 
@@ -364,8 +396,10 @@ class KnowledgeIndex:
             return "no Document could be indexed"
         rate, threshold = failed / total, self._settings.rebuild_failure_threshold
         if rate > threshold:
-            return (f"{failed} of {total} Documents failed ({rate:.1%}), "
-                    f"above the {threshold:.1%} threshold")
+            return (
+                f"{failed} of {total} Documents failed ({rate:.1%}), "
+                f"above the {threshold:.1%} threshold"
+            )
         return None
 
     def _discard(self, generation: str) -> None:
@@ -380,9 +414,14 @@ class KnowledgeIndex:
         """The Retrieval mode this code runs in (the Live index may have been built in another)."""
         return self._settings.retrieval
 
-    def search(self, query: str, k: int | None = None,
-               space: str | None = None, repository: str | None = None,
-               ref: str | None = None) -> SearchResults:
+    def search(
+        self,
+        query: str,
+        k: int | None = None,
+        space: str | None = None,
+        repository: str | None = None,
+        ref: str | None = None,
+    ) -> SearchResults:
         """The best Passages for the query. ``repository`` keeps only that Repository's code.
         With no ``ref``, code at a Tracked ref that is not its Repository's Primary ref is
         left out (other Corpora are unaffected); a ``ref`` keeps only Passages at that ref.
@@ -403,20 +442,30 @@ class KnowledgeIndex:
         elif settings.retrieval is RetrievalMode.HYBRID:
             notice = _NO_EMBEDDINGS_NOTICE
         passages = self._store.search(
-            serving, dense=vector, sparse=self._sparse.encode_query(query),
-            narrowing=Narrowing(space, repository, ref), candidates=candidates,
-            limit=max(limit, candidates))
+            serving,
+            dense=vector,
+            sparse=self._sparse.encode_query(query),
+            narrowing=Narrowing(space, repository, ref),
+            candidates=candidates,
+            limit=max(limit, candidates),
+        )
         passages = cap_per_document(passages, settings.max_passages_per_document)
         if settings.rerank:
-            passages = rerank(self._gateway, query, passages)
+            passages = rerank(self._model_gateway, query, passages)
         return SearchResults(passages[:limit], notice)
+
+    @property
+    def _model_gateway(self) -> ModelGateway:
+        """The Model gateway, for work only settings that need one do (checked when made)."""
+        assert self._gateway is not None
+        return self._gateway
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
         """Embed a Document's texts, trying again after a failure that could be transient."""
         settings = self._settings
         for attempt in range(1, settings.embed_attempts + 1):
             try:
-                vectors = self._gateway.embed(texts)
+                vectors = self._model_gateway.embed(texts)
             except Exception as error:
                 self._embedding_failure = describe(error)
                 # Only an error that says another try could help is tried again: a bug, or a
@@ -424,8 +473,13 @@ class KnowledgeIndex:
                 if attempt == settings.embed_attempts or not getattr(error, "retryable", False):
                     raise
                 wait = settings.embed_retry_backoff * 2 ** (attempt - 1)
-                log.warning("embedding failed (attempt %d of %d), trying again in %.1fs: %s",
-                            attempt, settings.embed_attempts, wait, self._embedding_failure)
+                log.warning(
+                    "embedding failed (attempt %d of %d), trying again in %.1fs: %s",
+                    attempt,
+                    settings.embed_attempts,
+                    wait,
+                    self._embedding_failure,
+                )
                 time.sleep(wait)
             else:
                 self._embedding_failure = None
@@ -435,7 +489,7 @@ class KnowledgeIndex:
     def _embed_query(self, query: str) -> list[float] | None:
         """The query's vector, or None, noting why, if the embedding model cannot be reached."""
         try:
-            vector = self._gateway.embed_query(query)
+            vector = self._model_gateway.embed_query(query)
         except Exception as error:
             self._embedding_failure = describe(error)
             log.warning("the embedding model could not be reached: %s", self._embedding_failure)
@@ -453,10 +507,17 @@ class KnowledgeIndex:
         if declared is None or status.generation is None:
             return status
         undeclared = sorted(self._store.corpora(status.generation) - set(declared))
-        return replace(status, warnings=(*status.warnings, *(
-            f"Corpus {name!r} has Documents in the index but is undeclared; they stay "
-            f"searchable until `forget {name}` removes them, or a Rebuild leaves them out"
-            for name in undeclared)))
+        return replace(
+            status,
+            warnings=(
+                *status.warnings,
+                *(
+                    f"Corpus {name!r} has Documents in the index but is undeclared; they stay "
+                    f"searchable until `forget {name}` removes them, or a Rebuild leaves them out"
+                    for name in undeclared
+                ),
+            ),
+        )
 
     def health(self) -> Health:
         """Whether Qdrant and the Knowledge index can be reached. Never raises.
@@ -470,13 +531,15 @@ class KnowledgeIndex:
         try:
             status = self._status(verify_dimension=False)
         except Exception as error:
-            return Health(
-                True, False, (f"the Knowledge index cannot be read: {describe(error)}",))
+            return Health(True, False, (f"the Knowledge index cannot be read: {describe(error)}",))
         notes = status.warnings
         if self._embedding_failure:
-            notes = (*notes, f"the embedding model was unreachable the last time it was used "
-                             f"({self._embedding_failure}); a hybrid search falls back to "
-                             f"keywords until it answers")
+            notes = (
+                *notes,
+                f"the embedding model was unreachable the last time it was used "
+                f"({self._embedding_failure}); a hybrid search falls back to "
+                f"keywords until it answers",
+            )
         return Health(True, status.access is not Access.REFUSED, notes)
 
     def _status(self, *, verify_dimension: bool) -> IndexStatus:
@@ -485,18 +548,31 @@ class KnowledgeIndex:
             live = self._generations.live()
             if live is None:
                 return IndexStatus(
-                    None, Access.READ_WRITE, 0, 0, None, unreadable, last_sync, corpora)
+                    None, Access.READ_WRITE, 0, 0, None, unreadable, last_sync, corpora
+                )
             assessment = self._assessment(live, verify_dimension=verify_dimension)
             documents, passages = self._store.counts(live)
             return IndexStatus(
-                generation=live, access=assessment.access, documents=documents,
-                passages=passages, format=self._generations.format_of(live),
-                warnings=(*assessment.warnings, *unreadable), last_sync=last_sync,
-                corpora=corpora)
+                generation=live,
+                access=assessment.access,
+                documents=documents,
+                passages=passages,
+                format=self._generations.format_of(live),
+                warnings=(*assessment.warnings, *unreadable),
+                last_sync=last_sync,
+                corpora=corpora,
+            )
         except CorruptIndex as error:
             return IndexStatus(
-                None, Access.REFUSED, None, None, None, (str(error), *unreadable), last_sync,
-                corpora)
+                None,
+                Access.REFUSED,
+                None,
+                None,
+                None,
+                (str(error), *unreadable),
+                last_sync,
+                corpora,
+            )
 
     def _last_sync(self) -> tuple[LastSync | None, dict[str, LastSync], tuple[str, ...]]:
         try:
@@ -548,41 +624,58 @@ class KnowledgeIndex:
         if recorded is not None and (recorded.retrieval is RetrievalMode.HYBRID) != dense:
             raise CorruptIndex(
                 f"{generation} records {recorded.retrieval.value} retrieval but its collection "
-                f"{'has' if dense else 'has no'} dense vectors")
+                f"{'has' if dense else 'has no'} dense vectors"
+            )
         assessment = assess(
-            recorded, dimension,
-            self._settings, running_dimension if verify_dimension else None)
+            recorded, dimension, self._settings, running_dimension if verify_dimension else None
+        )
         if verify_dimension and reachable:  # an unverified answer is worth asking for again
             self._assessments[generation] = assessment
             if assessment.access is not Access.READ_WRITE:
-                log.warning("%s", _explain(
-                    f"index {generation} is {assessment.access}", assessment))
+                log.warning(
+                    "%s", _explain(f"index {generation} is {assessment.access}", assessment)
+                )
         return assessment
 
     def _extract(self, corpus: Corpus, raw: RawDocument, ref: DocumentRef) -> Document:
         """The Document as the index stores it: owned by the Corpus, its ids namespaced."""
         return Document(
-            id=qualified_id(corpus.name, raw.id), title=raw.title, url=raw.url,
-            space=raw.space, version=raw.version, text=self._extractor.extract(raw),
+            id=qualified_id(corpus.name, raw.id),
+            title=raw.title,
+            url=raw.url,
+            space=raw.space,
+            version=raw.version,
+            text=self._extractor.extract(raw),
             parent_id=None if raw.parent_id is None else qualified_id(corpus.name, raw.parent_id),
-            media_type=raw.media_type, corpus=corpus.name, parts=ref.parts,
-            placement=ref.placement, code=raw.code)
+            media_type=raw.media_type,
+            corpus=corpus.name,
+            parts=ref.parts,
+            placement=ref.placement,
+            code=raw.code,
+        )
 
     def _add(self, document: Document, collection: str) -> None:
         # A Document with no text is still found by its title: it gets one empty Passage.
         pieces = self._chunker.pieces(document.text, document.media_type) or [Piece("")]
         contents = [f"{_context(document, piece)}\n\n{piece.text}" for piece in pieces]
+        dense: Sequence[list[float] | None]
         if self._settings.retrieval is RetrievalMode.HYBRID:
             dense = self._embed(contents)
             if len(dense) != len(contents):
                 raise ValueError(
-                    f"the Model gateway returned {len(dense)} vectors for {len(contents)} texts")
+                    f"the Model gateway returned {len(dense)} vectors for {len(contents)} texts"
+                )
         else:
             dense = [None] * len(contents)
         self._ensure_collection(collection, None if dense[0] is None else len(dense[0]))
-        self._store.write(collection, document, [
-            Written(piece, self._sparse.encode_document(content), vector)
-            for piece, content, vector in zip(pieces, contents, dense)])
+        self._store.write(
+            collection,
+            document,
+            [
+                Written(piece, self._sparse.encode_document(content), vector)
+                for piece, content, vector in zip(pieces, contents, dense, strict=True)
+            ],
+        )
 
     def list_spaces(self) -> list[str]:
         """The named Spaces (Confluence Spaces, GitLab groups, folders) that have at least one indexed Document, sorted."""
@@ -603,12 +696,29 @@ class KnowledgeIndex:
         if self._store.exists(collection):
             return
         self._generations.create(
-            collection, IndexFormat.written_by(self._settings, dimension),
-            lambda: self._store.create(collection, dimension))
+            collection,
+            IndexFormat.written_by(self._settings, dimension),
+            lambda: self._store.create(collection, dimension),
+        )
 
 
 def _explain(what: str, assessment: Assessment) -> str:
     return f"{what}: {'; '.join(assessment.warnings)}"
+
+
+def _outcome(report: SyncReport | RebuildReport) -> tuple[str, str]:
+    """The outcome and detail ``status`` shows for a finished Sync or Rebuild."""
+    if isinstance(report, SyncReport):
+        outcome = "completed with failures" if report.failed else "completed"
+        return outcome, (
+            f"{report.added} added, {report.replaced} replaced, "
+            f"{report.removed} removed, {report.unchanged} unchanged, "
+            f"{report.failed} failed"
+        )
+    if not report.promoted:
+        return "refused", report.reason or ""
+    detail = f"{report.indexed} indexed, {report.failed} failed"
+    return "promoted", "; ".join([detail, *report.warnings])
 
 
 def _context(document: Document, piece: Piece) -> str:
@@ -616,8 +726,9 @@ def _context(document: Document, piece: Piece) -> str:
     Document's title, or for code its Repository, path and symbol."""
     if piece.start_line is None or document.code is None:
         return document.title
-    return "/".join(filter(None, (
-        document.code.tracked_ref.repository, document.code.path, piece.symbol)))
+    return "/".join(
+        filter(None, (document.code.tracked_ref.repository, document.code.path, piece.symbol))
+    )
 
 
 def _connect(settings: Settings) -> QdrantClient:
@@ -626,5 +737,4 @@ def _connect(settings: Settings) -> QdrantClient:
         return QdrantClient(url=location, api_key=settings.qdrant_api_key, timeout=60)
     if location == ":memory:":
         return QdrantClient(location=location)
-    raise ValueError(
-        f"qdrant_location must be ':memory:' or an http(s) URL, got {location!r}")
+    raise ValueError(f"qdrant_location must be ':memory:' or an http(s) URL, got {location!r}")

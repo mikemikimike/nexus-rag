@@ -6,6 +6,7 @@ declaration file (see ``declaration``): ``--corpora FILE``, else ``RAG_CORPORA_F
 happened and returns a process exit code: 0 on success, 1 on failure or refusal, 2 for a
 command line that cannot be understood.
 """
+
 import argparse
 import logging
 import os
@@ -17,10 +18,13 @@ from typing import TextIO
 
 from qdrant_client import QdrantClient
 
-from local_rag.corpus import Corpus
 from local_rag.declaration import Declaration, DeclarationError
 from local_rag.environment import (
-    DEFAULT_CORPORA_FILE, Environment, environment_from, settings_from_environment)
+    DEFAULT_CORPORA_FILE,
+    Environment,
+    environment_from,
+    settings_from_environment,
+)
 from local_rag.errors import describe
 from local_rag.gateway import ModelGateway
 from local_rag.gateway_litellm import gateway_from_settings
@@ -50,9 +54,15 @@ class UsageError(Exception):
     """The command line, or the Corpus declaration it points to, cannot be used."""
 
 
-def main(argv: Sequence[str], environ: Mapping[str, str], *,
-         stdout: TextIO | None = None, stderr: TextIO | None = None,
-         gateway: ModelGateway | None = None, client: QdrantClient | None = None) -> int:
+def main(
+    argv: Sequence[str],
+    environ: Mapping[str, str],
+    *,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+    gateway: ModelGateway | None = None,
+    client: QdrantClient | None = None,
+) -> int:
     """Run one command and return its exit code.
 
     ``gateway`` and ``client`` replace the LiteLLM gateway and the Qdrant connection that
@@ -65,10 +75,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
         return int(stop.code or 0)
     try:
         settings, environment = settings_from_environment(environ), environment_from(environ)
-        index = KnowledgeIndex(settings, gateway or gateway_from_settings(settings),
-                               client=client)
-        return args.run(args, _Session(index, environment, out,
-                                       _declaration_reader(args, environment)))
+        index = KnowledgeIndex(settings, gateway or gateway_from_settings(settings), client=client)
+        return args.run(
+            args, _Session(index, environment, out, _declaration_reader(args, environment))
+        )
     except UsageError as error:
         print(f"error: {error}", file=err)
         return 2
@@ -84,25 +94,31 @@ def run() -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="local-rag", description="Sync, search and inspect the Knowledge index.")
+        prog="local-rag", description="Sync, search and inspect the Knowledge index."
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     declared = argparse.ArgumentParser(add_help=False)
     declared.add_argument(
-        "--corpora", type=Path, metavar="FILE",
-        help=f"the Corpus declaration file (default: $RAG_CORPORA_FILE, else {DEFAULT_CORPORA_FILE})")
+        "--corpora",
+        type=Path,
+        metavar="FILE",
+        help=f"the Corpus declaration file (default: $RAG_CORPORA_FILE, else {DEFAULT_CORPORA_FILE})",
+    )
 
     sync = commands.add_parser(
-        "sync", parents=[declared], help="bring one Corpus's Documents up to date")
+        "sync", parents=[declared], help="bring one Corpus's Documents up to date"
+    )
     sync.add_argument("corpus", help="the name of a Corpus in the declaration file")
     sync.set_defaults(run=_sync)
     rebuild = commands.add_parser(
-        "rebuild", parents=[declared],
+        "rebuild",
+        parents=[declared],
         help="re-embed every declared Corpus into a fresh index and make it live if complete "
-             "enough")
+        "enough",
+    )
     rebuild.set_defaults(run=_rebuild)
-    forget = commands.add_parser(
-        "forget", help="remove every Document of a Corpus from the index")
+    forget = commands.add_parser("forget", help="remove every Document of a Corpus from the index")
     forget.add_argument("corpus", help="the name of a Corpus that has Documents in the index")
     forget.set_defaults(run=_forget)
     commands.add_parser(
@@ -121,8 +137,9 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _declaration_reader(args: argparse.Namespace,
-                        environment: Environment) -> Callable[[], Declaration]:
+def _declaration_reader(
+    args: argparse.Namespace, environment: Environment
+) -> Callable[[], Declaration]:
     """Reads the declaration when called: search and status never read the file."""
     path = getattr(args, "corpora", None) or environment.corpora_file
     return lambda: Declaration.read(path)
@@ -158,8 +175,9 @@ def _switch_back(args, session: _Session) -> int:
 
 def _search(args, session: _Session) -> int:
     out = session.out
-    passages = session.index.search(args.query, k=args.k, space=args.space,
-                           repository=args.repository, ref=args.ref)
+    passages = session.index.search(
+        args.query, k=args.k, space=args.space, repository=args.repository, ref=args.ref
+    )
     if not passages:
         print("No results.", file=out)
     for number, passage in enumerate(passages, 1):
@@ -180,15 +198,21 @@ def _status(args, session: _Session) -> int:
 
 
 def _print_sync(report: SyncReport, out: TextIO) -> None:
-    print(f"Sync: {report.added} added, {report.replaced} replaced, {report.removed} removed, "
-          f"{report.unchanged} unchanged, {report.failed} failed", file=out)
+    print(
+        f"Sync: {report.added} added, {report.replaced} replaced, {report.removed} removed, "
+        f"{report.unchanged} unchanged, {report.failed} failed",
+        file=out,
+    )
     _print_failures(report.failures, out)
 
 
 def _print_rebuild(report: RebuildReport, out: TextIO) -> None:
     if report.promoted:
-        print(f"Rebuild: promoted to the Live index, {report.indexed} indexed, "
-              f"{report.failed} failed", file=out)
+        print(
+            f"Rebuild: promoted to the Live index, {report.indexed} indexed, "
+            f"{report.failed} failed",
+            file=out,
+        )
     else:
         print(f"Rebuild: refused, the Live index is unchanged: {report.reason}", file=out)
     _print_failures(report.failures, out)
@@ -241,17 +265,24 @@ def _print_status(status: IndexStatus, out: TextIO) -> None:
         show("format", "not recorded")
     else:
         f = status.format
-        show("format", f"schema {f.schema_version}, {_embedding(f)}, sparse k1={f.sparse.k1:g} "
-                       f"b={f.sparse.b:g} avg_doc_length={f.sparse.avg_doc_length:g}, "
-                       f"{_chunks(f)}{_code_chunks(f)}")
+        show(
+            "format",
+            f"schema {f.schema_version}, {_embedding(f)}, sparse k1={f.sparse.k1:g} "
+            f"b={f.sparse.b:g} avg_doc_length={f.sparse.avg_doc_length:g}, "
+            f"{_chunks(f)}{_code_chunks(f)}",
+        )
     if status.last_sync is None:
         show("last sync", "never")
     else:
         last = status.last_sync
-        show("last sync", f"{last.kind} {last.outcome} at "
-                          f"{last.at.isoformat(timespec='seconds')}: {last.detail}")
+        show(
+            "last sync",
+            f"{last.kind} {last.outcome} at {last.at.isoformat(timespec='seconds')}: {last.detail}",
+        )
     for name, last in sorted(status.corpora.items()):
-        show(f"corpus {name}", f"{last.kind} {last.outcome} at "
-                               f"{last.at.isoformat(timespec='seconds')}: {last.detail}")
+        show(
+            f"corpus {name}",
+            f"{last.kind} {last.outcome} at {last.at.isoformat(timespec='seconds')}: {last.detail}",
+        )
     for warning in status.warnings:
         print(f"warning: {warning}", file=out)

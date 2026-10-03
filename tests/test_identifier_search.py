@@ -1,4 +1,5 @@
 """Keyword search matches identifiers by their parts, in Hybrid and Keyword-only retrieval."""
+
 import pytest
 
 from local_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
@@ -9,18 +10,21 @@ from test_index_format import after_an_upgrade
 
 
 def doc(id, text):
-    return Document(id=id, title=id, url=f"https://git.example.test/{id}", space="code",
-                    version="1", text=text)
+    return Document(
+        id=id, title=id, url=f"https://git.example.test/{id}", space="code", version="1", text=text
+    )
 
 
-CODE = InMemoryCorpus([
-    doc("camel", "def getUserById(identifier): return users[identifier]"),
-    doc("dotted", "client = ledger.api.Client(timeout=3)"),
-    doc("kebab", "deploy the payments-v2 service to production"),
-    doc("pascal", "class OrderRepository: pass"),
-    doc("snake", "call get_account_balance now"),
-    doc("unrelated", "nothing of interest lives here"),
-])
+CODE = InMemoryCorpus(
+    [
+        doc("camel", "def getUserById(identifier): return users[identifier]"),
+        doc("dotted", "client = ledger.api.Client(timeout=3)"),
+        doc("kebab", "deploy the payments-v2 service to production"),
+        doc("pascal", "class OrderRepository: pass"),
+        doc("snake", "call get_account_balance now"),
+        doc("unrelated", "nothing of interest lives here"),
+    ]
+)
 
 PARTS = [
     ("user by id", "camel"),

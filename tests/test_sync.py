@@ -1,11 +1,12 @@
 import dataclasses
 import time
+
 import pytest
 
+from conftest import DOCUMENTS
 from local_rag import KnowledgeIndex, Settings
 from local_rag.corpus import Document, DocumentRef, InMemoryCorpus, Listing
 from local_rag.fakes import FakeModelGateway
-from conftest import DOCUMENTS
 
 
 class CountingGateway(FakeModelGateway):
@@ -20,7 +21,8 @@ class CountingGateway(FakeModelGateway):
 
 def revised(document: Document, version: str, text: str | None = None) -> Document:
     return dataclasses.replace(
-        document, version=version, text=text if text is not None else document.text)
+        document, version=version, text=text if text is not None else document.text
+    )
 
 
 def test_syncing_an_unchanged_corpus_again_reports_everything_unchanged(index, corpus):
@@ -28,8 +30,13 @@ def test_syncing_an_unchanged_corpus_again_reports_everything_unchanged(index, c
 
     report = index.sync(corpus)
 
-    assert (report.added, report.replaced, report.removed,
-            report.unchanged, report.failed) == (0, 0, 0, 3, 0)
+    assert (report.added, report.replaced, report.removed, report.unchanged, report.failed) == (
+        0,
+        0,
+        0,
+        3,
+        0,
+    )
 
 
 def test_unchanged_versions_are_not_re_embedded():
@@ -47,8 +54,9 @@ def test_unchanged_versions_are_not_re_embedded():
 def test_a_changed_version_replaces_the_document_and_only_that_one(index):
     battery = DOCUMENTS[2]
     index.sync(InMemoryCorpus(DOCUMENTS))
-    changed = InMemoryCorpus([
-        *DOCUMENTS[:2], revised(battery, "2", "Jump the alternator with ZX-9000 cables.")])
+    changed = InMemoryCorpus(
+        [*DOCUMENTS[:2], revised(battery, "2", "Jump the alternator with ZX-9000 cables.")]
+    )
 
     report = index.sync(changed)
 
@@ -74,7 +82,9 @@ def test_documents_removed_from_the_corpus_disappear_from_search(index):
     report = index.sync(InMemoryCorpus(DOCUMENTS[:2]))
 
     assert (report.removed, report.unchanged) == (1, 2)
-    assert "default:garage/battery" not in {p.document_id for p in index.search("car battery", k=10)}
+    assert "default:garage/battery" not in {
+        p.document_id for p in index.search("car battery", k=10)
+    }
 
 
 def test_a_document_added_later_is_reported_as_added(index):
@@ -109,7 +119,8 @@ def test_a_failed_fetch_of_a_changed_document_keeps_its_old_passages_searchable(
     index.sync(InMemoryCorpus(DOCUMENTS))
     flaky = FlakyCorpus(
         [*DOCUMENTS[:2], revised(DOCUMENTS[2], "2", "Totally new ZX-9000 text.")],
-        failing={"garage/battery"})
+        failing={"garage/battery"},
+    )
 
     report = index.sync(flaky)
 
@@ -281,8 +292,7 @@ class PartedCorpus(InMemoryCorpus):
         self.failing = set(failing)
 
     def list(self):
-        refs = [DocumentRef(r.id, r.version, self.parts.get(r.id, ()))
-                for r in super().list()]
+        refs = [DocumentRef(r.id, r.version, self.parts.get(r.id, ())) for r in super().list()]
         listed = [r for r in refs if self.failing.isdisjoint(r.parts)]
         return Listing(listed, {part: "no answer" for part in self.failing})
 
@@ -377,8 +387,9 @@ def test_a_corpus_whose_sync_crashed_can_be_synced_once_its_lock_is_stale():
     client = QdrantClient(location=":memory:")
     settings = Settings(sync_lock_stale_after=0.2)
     index = KnowledgeIndex(settings, FakeModelGateway(), client=client)
-    crashed = ExclusiveRun(client, f"{settings.collection}.sync-lock.code",
-                           stale_after=0.2, heartbeat_every=3600)
+    crashed = ExclusiveRun(
+        client, f"{settings.collection}.sync-lock.code", stale_after=0.2, heartbeat_every=3600
+    )
     holder = crashed.hold()
     holder.__enter__()  # never exits: the process died, and no heartbeat is left
 

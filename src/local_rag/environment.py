@@ -7,6 +7,7 @@ Settings alone, except Qdrant's location: a command line that kept nothing becau
 defaulted to in-process memory would be worse than useless, so the default is the local
 Qdrant server. The variable names are the ones operators already know from earlier installations.
 """
+
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -14,7 +15,6 @@ from pathlib import Path
 
 from local_rag.settings import RetrievalMode, Settings
 from local_rag.sparse import SparseParams
-
 
 DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
 DEFAULT_MCP_HOST = "127.0.0.1"
@@ -32,7 +32,9 @@ class Environment:
     and where it listens, where the Corpus declaration is, and how the Corpora reach their
     sources. Whether a value is required is for whoever uses it to say."""
 
-    mcp_tokens: tuple[str, ...] = field(default=(), repr=False)  # every valid token sees all content
+    mcp_tokens: tuple[str, ...] = field(
+        default=(), repr=False
+    )  # every valid token sees all content
     mcp_host: str = DEFAULT_MCP_HOST
     mcp_port: int = DEFAULT_MCP_PORT
     mcp_tls_cert: str | None = None  # serve HTTPS with this certificate and key
@@ -47,29 +49,32 @@ class Environment:
 
 def environment_from(environ: Mapping[str, str]) -> Environment:
     """The Environment the variables ask for; raises SettingsError for an unusable value."""
+
     def text(name: str) -> str | None:
         return environ.get(name, "").strip() or None
 
-    port = text("MCP_PORT")
+    given_port = text("MCP_PORT")
     try:
-        port = int(port) if port else None
+        port = int(given_port) if given_port else None
     except ValueError:
-        raise SettingsError(f"MCP_PORT must be a number, got {port!r}") from None
+        raise SettingsError(f"MCP_PORT must be a number, got {given_port!r}") from None
     corpora_file = text("RAG_CORPORA_FILE")
     home = text("HOME")
-    return Environment(**_given(
-        mcp_tokens=split_tokens(environ.get("MCP_TOKENS", "")),
-        mcp_host=text("MCP_HOST"),
-        mcp_port=port,
-        mcp_tls_cert=text("MCP_TLS_CERT"),
-        mcp_tls_key=text("MCP_TLS_KEY"),
-        corpora_file=Path(corpora_file) if corpora_file else None,
-        confluence_bin=text("CONFLUENCE_BIN"),
-        confluence_domain=text("CONFLUENCE_DOMAIN"),
-        gitlab_url=text("GITLAB_URL"),
-        gitlab_token=text("GITLAB_TOKEN"),
-        home=Path(home) if home else None,
-    ))
+    return Environment(
+        **_given(
+            mcp_tokens=split_tokens(environ.get("MCP_TOKENS", "")),
+            mcp_host=text("MCP_HOST"),
+            mcp_port=port,
+            mcp_tls_cert=text("MCP_TLS_CERT"),
+            mcp_tls_key=text("MCP_TLS_KEY"),
+            corpora_file=Path(corpora_file) if corpora_file else None,
+            confluence_bin=text("CONFLUENCE_BIN"),
+            confluence_domain=text("CONFLUENCE_DOMAIN"),
+            gitlab_url=text("GITLAB_URL"),
+            gitlab_token=text("GITLAB_TOKEN"),
+            home=Path(home) if home else None,
+        )
+    )
 
 
 def split_tokens(listed: str) -> tuple[str, ...]:
@@ -77,14 +82,16 @@ def split_tokens(listed: str) -> tuple[str, ...]:
     return tuple(token.strip() for token in listed.split(",") if token.strip())
 
 
-def settings_from_environment(environ: Mapping[str, str], *,
-                              gateway_required: bool = True) -> Settings:
+def settings_from_environment(
+    environ: Mapping[str, str], *, gateway_required: bool = True
+) -> Settings:
     """The Settings the environment asks for; raises SettingsError for an unusable value.
 
     Hybrid retrieval, the default, needs an embedding model named, and it and a reranker need
     the Model gateway named. A caller that never reaches the gateway (the acceptance suite's
     checks of a host's units) passes ``gateway_required=False``.
     """
+
     def text(name: str) -> str | None:
         return environ.get(name) or None
 
@@ -97,16 +104,19 @@ def settings_from_environment(environ: Mapping[str, str], *,
         except ValueError:
             raise SettingsError(f"{name} must be a number, got {value!r}") from None
 
-    sparse = _given(k1=number("RAG_BM25_K1", float), b=number("RAG_BM25_B", float),
-                    avg_doc_length=number("RAG_BM25_AVG_DL", float))
+    sparse = _given(
+        k1=number("RAG_BM25_K1", float),
+        b=number("RAG_BM25_B", float),
+        avg_doc_length=number("RAG_BM25_AVG_DL", float),
+    )
     rerank_model = text("RAG_RERANK_MODEL")
     retrieval = _retrieval_mode(text("RAG_RETRIEVAL"))
-    if gateway_required and retrieval is RetrievalMode.HYBRID \
-            and text("RAG_EMBED_MODEL") is None:
+    if gateway_required and retrieval is RetrievalMode.HYBRID and text("RAG_EMBED_MODEL") is None:
         # Settings would fill a default name in, and a default is no embedding model of ours.
         raise SettingsError(
             "RAG_RETRIEVAL is hybrid but RAG_EMBED_MODEL is not set: name the embedding model "
-            "registered in the Model gateway, or set RAG_RETRIEVAL=keyword to run without one")
+            "registered in the Model gateway, or set RAG_RETRIEVAL=keyword to run without one"
+        )
     given = _given(
         qdrant_location=text("QDRANT_URL") or DEFAULT_QDRANT_URL,
         qdrant_api_key=text("QDRANT_API_KEY"),
@@ -150,7 +160,8 @@ def settings_from_environment(environ: Mapping[str, str], *,
         raise SettingsError(
             f"{cause} but LITELLM_BASE_URL is not set: name the Model gateway's address "
             f"(ending in /v1, e.g. http://localhost:4000/v1), or {other_way} to run without "
-            "one (closed-network setup guide, group B)")
+            "one (closed-network setup guide, group B)"
+        )
     return settings
 
 
@@ -160,8 +171,7 @@ def _retrieval_mode(value: str | None) -> RetrievalMode:
     try:
         return RetrievalMode(value.strip().lower())
     except ValueError:
-        raise SettingsError(
-            f"RAG_RETRIEVAL must be hybrid or keyword, got {value!r}") from None
+        raise SettingsError(f"RAG_RETRIEVAL must be hybrid or keyword, got {value!r}") from None
 
 
 def _given(**values) -> dict:

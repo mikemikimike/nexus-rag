@@ -6,7 +6,8 @@ def test_get_document_returns_the_full_text_by_document_id(index, corpus):
     index.sync(corpus)
 
     assert index.get_document("default:garage/battery") == (
-        "When the car will not start, the battery is dead more often than not.")
+        "When the car will not start, the battery is dead more often than not."
+    )
 
 
 def test_get_document_returns_none_for_an_unknown_document_id(index, corpus):
@@ -108,7 +109,8 @@ def test_rerank_failure_falls_back_to_the_fused_order(corpus):
 def test_fake_gateway_rerank_scores_by_query_term_overlap():
     gateway = FakeModelGateway()
 
-    scores = gateway.rerank("battery dead", [
-        "the battery is dead", "the battery is fine", "unrelated words"])
+    scores = gateway.rerank(
+        "battery dead", ["the battery is dead", "the battery is fine", "unrelated words"]
+    )
 
     assert scores[0] > scores[1] > scores[2] == 0.0

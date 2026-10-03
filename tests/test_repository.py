@@ -1,5 +1,6 @@
 """The repository after the restructure: nothing of the old layout is left, and the README
 points only at things that exist."""
+
 import re
 
 from fake_drop import REPO
@@ -9,8 +10,11 @@ README = (REPO / "README.md").read_text()
 
 def tracked_files():
     skipped = {".git", ".venv", ".pytest_cache", "__pycache__", "local_rag.egg-info"}
-    return [path for path in REPO.rglob("*")
-            if path.is_file() and not skipped & set(path.relative_to(REPO).parts)]
+    return [
+        path
+        for path in REPO.rglob("*")
+        if path.is_file() and not skipped & set(path.relative_to(REPO).parts)
+    ]
 
 
 def test_no_legacy_module_script_or_requirements_file_remains():
@@ -37,11 +41,23 @@ def test_the_readme_documents_both_delivery_routes_and_the_access_limit():
 
 
 def test_no_document_still_describes_the_old_layout():
-    old = ("install_vm", "download_wheels", "download_qdrant", "offline_install", "ingest.py",
-           "export_confluence", "wheelhouse", "scripts/smoke_test")
-    mentions = [(path.relative_to(REPO).as_posix(), word) for path in tracked_files()
-                if path.suffix in {".md", ".py", ".service", ".timer", ".yaml", ".toml", ".snippet"}
-                and path.name != "test_repository.py"
-                for word in old if word in path.read_text(errors="ignore")]
+    old = (
+        "install_vm",
+        "download_wheels",
+        "download_qdrant",
+        "offline_install",
+        "ingest.py",
+        "export_confluence",
+        "wheelhouse",
+        "scripts/smoke_test",
+    )
+    mentions = [
+        (path.relative_to(REPO).as_posix(), word)
+        for path in tracked_files()
+        if path.suffix in {".md", ".py", ".service", ".timer", ".yaml", ".toml", ".snippet"}
+        and path.name != "test_repository.py"
+        for word in old
+        if word in path.read_text(errors="ignore")
+    ]
 
     assert mentions == []

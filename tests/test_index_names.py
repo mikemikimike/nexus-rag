@@ -1,12 +1,20 @@
 """The names of the collections and aliases one Knowledge index keeps in Qdrant."""
+
 from local_rag.index_names import IndexNames
 
 
 def test_every_collection_an_index_makes_is_named_after_it():
     names = IndexNames("knowledge")
 
-    made = [names.plain, names.registry, names.last_sync, names.lock, names.promote_lock,
-            names.corpus_lock("docs"), names.fresh_generation()]
+    made = [
+        names.plain,
+        names.registry,
+        names.last_sync,
+        names.lock,
+        names.promote_lock,
+        names.corpus_lock("docs"),
+        names.fresh_generation(),
+    ]
 
     assert all(names.owns(collection) for collection in made)
 
@@ -14,10 +22,18 @@ def test_every_collection_an_index_makes_is_named_after_it():
 def test_collections_that_only_look_like_an_index_are_not_its():
     names = IndexNames("knowledge")
 
-    lookalikes = ["knowledge.previous-backup", "knowledge_old", "knowledge-2024",
-                  "knowledge.generations-old", "knowledge.gen-short", "knowledge.sync-lock.",
-                  "knowledge.live", "knowledge.previous", "knowledge2.generations",
-                  "other.gen-0123456789ab"]
+    lookalikes = [
+        "knowledge.previous-backup",
+        "knowledge_old",
+        "knowledge-2024",
+        "knowledge.generations-old",
+        "knowledge.gen-short",
+        "knowledge.sync-lock.",
+        "knowledge.live",
+        "knowledge.previous",
+        "knowledge2.generations",
+        "other.gen-0123456789ab",
+    ]
 
     assert [name for name in lookalikes if names.owns(name)] == []
 

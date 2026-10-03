@@ -6,6 +6,7 @@ aliases ``<name>.live`` and ``<name>.previous``, and four kinds of small record 
 beside them: the generation registry, the last Sync, the index-wide lock with one lock per
 Corpus, and the lock that guards a first promotion.
 """
+
 import re
 import uuid
 
@@ -50,7 +51,8 @@ class IndexNames:
     def owns(self, collection: str) -> bool:
         """Whether ``collection`` has a name this index gives its collections. A collection
         named like a generation may still be another's: only the registry says it is ours."""
-        return (collection in (self.plain, self.registry, self.last_sync, self.lock,
-                               self.promote_lock)
-                or self.corpus_of_lock(collection) is not None
-                or self.is_generation(collection))
+        return (
+            collection in (self.plain, self.registry, self.last_sync, self.lock, self.promote_lock)
+            or self.corpus_of_lock(collection) is not None
+            or self.is_generation(collection)
+        )

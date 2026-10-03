@@ -1,7 +1,7 @@
+from conftest import DOCUMENTS
 from local_rag import KnowledgeIndex, Settings, index_format
 from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
-from conftest import DOCUMENTS
 from test_index_format import after_an_upgrade
 from test_index_state import lose_the_live_collection
 
@@ -12,6 +12,7 @@ class UnreachableQdrant:
     def __getattr__(self, name):
         def fail(*args, **kwargs):
             raise ConnectionError("connection refused")
+
         return fail
 
 

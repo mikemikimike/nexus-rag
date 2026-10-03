@@ -1,4 +1,5 @@
 """Python and C code is split along its syntax, each Passage naming the symbol it sits in."""
+
 import dataclasses
 import io
 
@@ -40,7 +41,7 @@ def settle(day):
     return day + 1
 '''
 
-C = '''\
+C = """\
 #include <stdio.h>
 
 struct point {
@@ -62,7 +63,7 @@ int main(void)
     printf("hi");
     return 0;
 }
-'''
+"""
 
 
 def by_symbol(found):
@@ -73,12 +74,20 @@ def test_python_functions_and_classes_are_whole_passages_with_their_symbols():
     found = passages(indexed(PYTHON, MID), "LedgerClient settle import")
 
     symbols = by_symbol(found)
-    assert set(symbols) == {None, "LedgerClient", "LedgerClient.__init__",
-                            "LedgerClient.balance", "LedgerClient.post_entry", "settle"}
+    assert set(symbols) == {
+        None,
+        "LedgerClient",
+        "LedgerClient.__init__",
+        "LedgerClient.balance",
+        "LedgerClient.post_entry",
+        "settle",
+    }
     assert symbols["settle"].text == "def settle(day):\n    return day + 1"
     post = symbols["LedgerClient.post_entry"]
-    assert post.text == ("    async def post_entry(self, entry):\n"
-                         "        total = entry + LIMIT\n        return total")
+    assert post.text == (
+        "    async def post_entry(self, entry):\n"
+        "        total = entry + LIMIT\n        return total"
+    )
     assert (post.start_line, post.end_line) == (17, 19)
 
 
@@ -154,8 +163,12 @@ def test_a_c_file_that_does_not_parse_falls_back_to_lines():
 
 
 def test_other_languages_keep_line_based_splitting():
-    found = passages(indexed("function a() {\n  return 1;\n}\n", BIG, path="a.js",
-                             media_type="text/x-javascript"), "return")
+    found = passages(
+        indexed(
+            "function a() {\n  return 1;\n}\n", BIG, path="a.js", media_type="text/x-javascript"
+        ),
+        "return",
+    )
 
     assert [(p.start_line, p.symbol) for p in found] == [(1, None)]
 
@@ -168,12 +181,14 @@ def test_the_syntax_split_languages_are_recorded_in_the_index_format():
 
 def test_an_index_that_did_not_record_syntax_languages_is_read_only(monkeypatch):
     from local_rag.index_format import IndexFormat
+
     original = IndexFormat.to_payload
 
     def without(self):
         payload = original(self)
         del payload["syntax_languages"]
         return payload
+
     monkeypatch.setattr(IndexFormat, "to_payload", without)
     index = indexed("a = 1\n")
     monkeypatch.undo()
@@ -185,6 +200,7 @@ def test_an_index_that_did_not_record_syntax_languages_is_read_only(monkeypatch)
 
 def test_adding_a_language_makes_an_index_read_only_until_a_rebuild(monkeypatch):
     from local_rag import languages
+
     client = QdrantClient(location=":memory:")
     monkeypatch.setattr(languages, "MEDIA_TYPE_LANGUAGES", {"text/x-python": "python"})
     KnowledgeIndex(SMALL, None, client=client).sync(InMemoryCorpus([code("a = 1\n")]))
@@ -201,8 +217,7 @@ def test_the_cli_and_mcp_headers_show_the_symbol():
     KnowledgeIndex(BIG, None, client=client).sync(InMemoryCorpus([code(PYTHON)]))
     out = io.StringIO()
     environ = {"RAG_RETRIEVAL": "keyword", "RAG_CODE_CHUNK_TOKENS": "400"}
-    assert main(["search", "settle"], environ, stdout=out, stderr=io.StringIO(),
-                client=client) == 0
+    assert main(["search", "settle"], environ, stdout=out, stderr=io.StringIO(), client=client) == 0
     assert "symbol: settle" in out.getvalue()
 
     index = indexed(PYTHON, BIG)
