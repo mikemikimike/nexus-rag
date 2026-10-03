@@ -71,3 +71,13 @@ def test_no_document_still_describes_the_old_layout():
     ]
 
     assert mentions == []
+
+
+def test_the_module_map_names_every_module_and_only_modules():
+    development = (REPO / "docs/development.md").read_text()
+    table = development.split("| Module | Role |")[1].split("\n\n")[0]
+    rows = [line.split("|")[1] for line in table.splitlines() if line.startswith("| `")]
+    named = {name for row in rows for name in re.findall(r"`(\w+)`", row)}
+    modules = {path.stem for path in (REPO / "src/local_rag").glob("*.py")} - {"__init__"}
+
+    assert named == modules
