@@ -40,15 +40,20 @@ SHELL_VARIABLES = {
     "CA_PEM",
 }
 NOT_SETTINGS = {"CONFLUENCE_URL", "CONFLUENCE_TOKEN"}
+# A file of an earlier release that the guide names only to migrate away from it.
+LEGACY_PATHS = {"/etc/local-rag/confluence_roots.txt"}
+VENV = "/opt/local-rag/venv"
 
 
 def sources() -> str:
-    """Everything the guide may name: the code, the deployment files and the examples."""
+    """Everything the guide may name: the code, the deployment files and the examples. Not
+    what an install leaves in the tree: the egg-info holds a copy of the README."""
+    generated = {"local_rag.egg-info", "__pycache__"}
     return "\n".join(
         path.read_text(errors="ignore")
         for folder in ("src", "deploy", "examples")
         for path in (REPO / folder).rglob("*")
-        if path.is_file()
+        if path.is_file() and not generated & set(path.relative_to(REPO).parts)
     )
 
 
@@ -93,7 +98,13 @@ def test_every_absolute_path_in_the_guide_is_one_the_code_or_units_use():
     paths = {path.rstrip(".,;:)") for path in re.findall(r"/(?:etc|opt|var)/[\w./-]+", GUIDE)}
 
     assert paths
-    assert [path for path in sorted(paths) if path not in known] == []
+    assert VENV in known
+    unknown = [
+        path
+        for path in sorted(paths)
+        if path not in known and path not in LEGACY_PATHS and not path.startswith(f"{VENV}/bin/")
+    ]
+    assert unknown == []
 
 
 def test_every_repository_path_the_guide_points_at_exists():
