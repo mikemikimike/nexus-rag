@@ -1,4 +1,5 @@
 """A stand-in for a machine with Docker: images are tarballs whose manifest names their tag."""
+
 import io
 import json
 import tarfile
@@ -14,7 +15,10 @@ def image_tarball(path: Path, ref: str, content: str = "") -> None:
     """What ``docker save`` writes: a manifest.json naming the tags, and the layers."""
     manifest = json.dumps([{"Config": "config.json", "RepoTags": [ref], "Layers": []}]).encode()
     with tarfile.open(path, "w") as archive:
-        for name, data in (("manifest.json", manifest), ("config.json", f"{ref}{content}".encode())):
+        for name, data in (
+            ("manifest.json", manifest),
+            ("config.json", f"{ref}{content}".encode()),
+        ):
             info = tarfile.TarInfo(name)
             info.size = len(data)
             archive.addfile(info, io.BytesIO(data))

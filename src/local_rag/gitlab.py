@@ -15,6 +15,7 @@ A Repository may have several Tracked refs, one of them its Primary ref: the sam
 of them is two Documents. A Tracked ref that no longer exists (a merged and deleted branch)
 fails alone. Each ref may add exclude globs to the defaults.
 """
+
 import base64
 import fnmatch
 import os
@@ -27,7 +28,14 @@ from functools import cache
 from pathlib import Path, PurePosixPath
 
 from local_rag.corpus import (
-    CodeFile, DocumentRef, Listing, RawDocument, TrackedRef, check_corpus_name, is_code)
+    CodeFile,
+    DocumentRef,
+    Listing,
+    RawDocument,
+    TrackedRef,
+    check_corpus_name,
+    is_code,
+)
 
 DEFAULT_MAX_SIZE = 200_000  # bytes; a larger file is data or generated, not something to read
 _MAX_ERROR_LENGTH = 500
@@ -40,45 +48,119 @@ _BATCH = 200
 # ``.html`` is source here, a page in a folder, so it is never ``text/html``: that is prose,
 # which is not judged "generated" (see ``is_code``), and generated HTML would slip in.
 _NAMES = {
-    "Makefile": "text/x-makefile", "GNUmakefile": "text/x-makefile",
-    "Dockerfile": "text/x-dockerfile", "Containerfile": "text/x-dockerfile",
-    "Jenkinsfile": "text/x-groovy", "Vagrantfile": "text/x-ruby", "Rakefile": "text/x-ruby",
-    "Gemfile": "text/x-ruby", "CMakeLists.txt": "text/x-cmake",
+    "Makefile": "text/x-makefile",
+    "GNUmakefile": "text/x-makefile",
+    "Dockerfile": "text/x-dockerfile",
+    "Containerfile": "text/x-dockerfile",
+    "Jenkinsfile": "text/x-groovy",
+    "Vagrantfile": "text/x-ruby",
+    "Rakefile": "text/x-ruby",
+    "Gemfile": "text/x-ruby",
+    "CMakeLists.txt": "text/x-cmake",
 }
 _SUFFIXES = {
-    ".md": "text/markdown", ".markdown": "text/markdown", ".rst": "text/x-rst",
-    ".txt": "text/plain", ".adoc": "text/plain",
-    ".py": "text/x-python", ".pyi": "text/x-python",
-    ".c": "text/x-c", ".h": "text/x-c",
-    ".cc": "text/x-c++", ".cpp": "text/x-c++", ".cxx": "text/x-c++", ".hpp": "text/x-c++",
-    ".hh": "text/x-c++", ".java": "text/x-java", ".kt": "text/x-kotlin",
-    ".scala": "text/x-scala", ".go": "text/x-go", ".rs": "text/x-rust",
-    ".js": "text/javascript", ".mjs": "text/javascript", ".cjs": "text/javascript",
-    ".jsx": "text/javascript", ".ts": "text/typescript", ".tsx": "text/typescript",
-    ".rb": "text/x-ruby", ".php": "text/x-php", ".cs": "text/x-csharp",
-    ".swift": "text/x-swift", ".pl": "text/x-perl", ".lua": "text/x-lua", ".r": "text/x-r",
-    ".sh": "text/x-shellscript", ".bash": "text/x-shellscript", ".zsh": "text/x-shellscript",
-    ".ps1": "text/x-powershell", ".bat": "text/x-batch",
-    ".sql": "text/x-sql", ".proto": "text/x-protobuf", ".graphql": "text/x-graphql",
-    ".css": "text/css", ".scss": "text/x-scss", ".html": "text/x-html-source",
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".rst": "text/x-rst",
+    ".txt": "text/plain",
+    ".adoc": "text/plain",
+    ".py": "text/x-python",
+    ".pyi": "text/x-python",
+    ".c": "text/x-c",
+    ".h": "text/x-c",
+    ".cc": "text/x-c++",
+    ".cpp": "text/x-c++",
+    ".cxx": "text/x-c++",
+    ".hpp": "text/x-c++",
+    ".hh": "text/x-c++",
+    ".java": "text/x-java",
+    ".kt": "text/x-kotlin",
+    ".scala": "text/x-scala",
+    ".go": "text/x-go",
+    ".rs": "text/x-rust",
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".cjs": "text/javascript",
+    ".jsx": "text/javascript",
+    ".ts": "text/typescript",
+    ".tsx": "text/typescript",
+    ".rb": "text/x-ruby",
+    ".php": "text/x-php",
+    ".cs": "text/x-csharp",
+    ".swift": "text/x-swift",
+    ".pl": "text/x-perl",
+    ".lua": "text/x-lua",
+    ".r": "text/x-r",
+    ".sh": "text/x-shellscript",
+    ".bash": "text/x-shellscript",
+    ".zsh": "text/x-shellscript",
+    ".ps1": "text/x-powershell",
+    ".bat": "text/x-batch",
+    ".sql": "text/x-sql",
+    ".proto": "text/x-protobuf",
+    ".graphql": "text/x-graphql",
+    ".css": "text/css",
+    ".scss": "text/x-scss",
+    ".html": "text/x-html-source",
     ".htm": "text/x-html-source",
-    ".json": "text/x-json", ".yaml": "text/x-yaml", ".yml": "text/x-yaml",
-    ".toml": "text/x-toml", ".ini": "text/x-ini", ".cfg": "text/x-ini",
-    ".xml": "text/xml", ".tf": "text/x-terraform", ".gradle": "text/x-groovy",
-    ".cmake": "text/x-cmake", ".mk": "text/x-makefile",
+    ".json": "text/x-json",
+    ".yaml": "text/x-yaml",
+    ".yml": "text/x-yaml",
+    ".toml": "text/x-toml",
+    ".ini": "text/x-ini",
+    ".cfg": "text/x-ini",
+    ".xml": "text/xml",
+    ".tf": "text/x-terraform",
+    ".gradle": "text/x-groovy",
+    ".cmake": "text/x-cmake",
+    ".mk": "text/x-makefile",
 }
 
 # Left out by default. Tests are not on these lists: they are code too.
-_EXCLUDED_DIRECTORIES = frozenset({
-    "vendor", "node_modules", "third_party", "third-party", "thirdparty", "bower_components",
-    "site-packages", "__pycache__", "dist", "build", "out", "target", ".git"})
+_EXCLUDED_DIRECTORIES = frozenset(
+    {
+        "vendor",
+        "node_modules",
+        "third_party",
+        "third-party",
+        "thirdparty",
+        "bower_components",
+        "site-packages",
+        "__pycache__",
+        "dist",
+        "build",
+        "out",
+        "target",
+        ".git",
+    }
+)
 _EXCLUDED_NAMES = (
-    "*.lock", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "go.sum",
-    "*.min.js", "*.min.css", "*.min.*", "*.map",
-    "*_pb2.py", "*_pb2_grpc.py", "*.pb.go", "*.pb.cc", "*.pb.h", "*_generated.*",
-    "*.generated.*", "*.g.dart", "*.designer.cs")
-_GENERATED_MARKERS = (b"@generated", b"DO NOT EDIT", b"Code generated", b"auto-generated",
-                      b"autogenerated")
+    "*.lock",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "go.sum",
+    "*.min.js",
+    "*.min.css",
+    "*.min.*",
+    "*.map",
+    "*_pb2.py",
+    "*_pb2_grpc.py",
+    "*.pb.go",
+    "*.pb.cc",
+    "*.pb.h",
+    "*_generated.*",
+    "*.generated.*",
+    "*.g.dart",
+    "*.designer.cs",
+)
+_GENERATED_MARKERS = (
+    b"@generated",
+    b"DO NOT EDIT",
+    b"Code generated",
+    b"auto-generated",
+    b"autogenerated",
+)
 
 
 class GitLabError(Exception):
@@ -106,8 +188,9 @@ class Repository:
             raise ValueError(f"{self.path}: the Primary ref {primary!r} is not one of its refs")
         unknown = sorted(set(self.exclude) - set(refs))
         if unknown:
-            raise ValueError(f"{self.path} excludes files of refs it does not list: "
-                             f"{', '.join(unknown)}")
+            raise ValueError(
+                f"{self.path} excludes files of refs it does not list: {', '.join(unknown)}"
+            )
         object.__setattr__(self, "refs", refs)
         object.__setattr__(self, "primary", primary)
         object.__setattr__(self, "exclude", {r: tuple(g) for r, g in self.exclude.items()})
@@ -129,9 +212,18 @@ class _File:
 
 
 class GitLabCorpus:
-    def __init__(self, repositories: Sequence[Repository], *, url: str, token: str,
-                 cache: Path | str, name: str = "gitlab", git_bin: str = "git",
-                 max_size: int = DEFAULT_MAX_SIZE, timeout: float = 600.0):
+    def __init__(
+        self,
+        repositories: Sequence[Repository],
+        *,
+        url: str,
+        token: str,
+        cache: Path | str,
+        name: str = "gitlab",
+        git_bin: str = "git",
+        max_size: int = DEFAULT_MAX_SIZE,
+        timeout: float = 600.0,
+    ):
         self.name = check_corpus_name(name)
         self._repositories = list(repositories)
         self._tracked = {t.part: t for r in self._repositories for t in r.tracked_refs}
@@ -154,13 +246,17 @@ class GitLabCorpus:
                 try:
                     if fetched[repository.path]:
                         raise GitLabError(fetched[repository.path])
-                    files = [(CodeFile(tracked, path), blob)
-                             for path, blob in self._files(repository, tracked)]
+                    files = [
+                        (CodeFile(tracked, path), blob)
+                        for path, blob in self._files(repository, tracked)
+                    ]
                 except GitLabError as error:
                     failures[tracked.part] = str(error)
                     continue
-                refs += [DocumentRef(code.document_id, blob, (tracked.part,),
-                                     code.placement(self._url)) for code, blob in files]
+                refs += [
+                    DocumentRef(code.document_id, blob, (tracked.part,), code.placement(self._url))
+                    for code, blob in files
+                ]
         return Listing(refs, failures)
 
     def _fetched(self, repository: Repository) -> str | None:
@@ -188,8 +284,15 @@ class GitLabCorpus:
         content = self._git("cat-file", "blob", blob, cwd=mirror, binary=True)
         parent, _, name = tracked.repository.rpartition("/")
         return RawDocument(
-            id=document_id, title=f"{name}/{path}", space=parent, version=blob,
-            url=code.link(self._url), content=content, media_type=_media_type(path), code=code)
+            id=document_id,
+            title=f"{name}/{path}",
+            space=parent,
+            version=blob,
+            url=code.link(self._url),
+            content=content,
+            media_type=_media_type(path),
+            code=code,
+        )
 
     def _files(self, repository: Repository, tracked: TrackedRef) -> Sequence[tuple[str, str]]:
         """The files worth indexing at a Tracked ref, as (path, blob)."""
@@ -209,8 +312,7 @@ class GitLabCorpus:
             if media_type and not _excluded(path, repository.excluded(tracked.ref)):
                 candidates.append(_File(fields[2], path, media_type))
         verdicts = self._sniff(candidates, mirror)
-        return [(f.path, f.blob) for f in candidates
-                if verdicts[f.blob, is_code(f.media_type)]]
+        return [(f.path, f.blob) for f in candidates if verdicts[f.blob, is_code(f.media_type)]]
 
     def _sniff(self, files: Sequence[_File], mirror: Path) -> dict[tuple[str, bool], bool]:
         """Whether each blob is text worth indexing: not binary, not blank and, as code, not
@@ -221,14 +323,19 @@ class GitLabCorpus:
         unknown = sorted({blob for blob, as_code in wanted if (blob, as_code) not in verdicts})
         learned = []
         for start in range(0, len(unknown), _BATCH):
-            batch = unknown[start:start + _BATCH]
-            output = self._git("cat-file", "--batch", cwd=mirror, binary=True,
-                               stdin="".join(f"{b}\n" for b in batch).encode())
+            batch = unknown[start : start + _BATCH]
+            output = self._git(
+                "cat-file",
+                "--batch",
+                cwd=mirror,
+                binary=True,
+                stdin="".join(f"{b}\n" for b in batch).encode(),
+            )
             offset = 0
             for blob in batch:
                 header_end = output.index(b"\n", offset)
                 size = int(output[offset:header_end].split()[2])
-                content = output[header_end + 1:header_end + 1 + size]
+                content = output[header_end + 1 : header_end + 1 + size]
                 offset = header_end + 1 + size + 1
                 for as_code in (True, False):
                     verdicts[blob, as_code] = _is_worth_indexing(content, code=as_code)
@@ -262,40 +369,68 @@ class GitLabCorpus:
             mirror.parent.mkdir(parents=True, exist_ok=True)
             self._git("init", "--quiet", "--bare", str(mirror))
         # Fetched from the URL itself, with no remote recorded: the mirror holds no address.
-        self._git("fetch", "--quiet", "--prune", "--force",
-                  f"{self._url}/{repository}.git",
-                  "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*",
-                  cwd=mirror, authenticated=True)
+        self._git(
+            "fetch",
+            "--quiet",
+            "--prune",
+            "--force",
+            f"{self._url}/{repository}.git",
+            "+refs/heads/*:refs/heads/*",
+            "+refs/tags/*:refs/tags/*",
+            cwd=mirror,
+            authenticated=True,
+        )
 
     def _commit(self, tracked: TrackedRef) -> str:
         mirror = self._mirror(tracked.repository)
         for prefix in ("refs/heads/", "refs/tags/"):
             try:
-                return self._git("rev-parse", "--verify", "--quiet",
-                                 f"{prefix}{tracked.ref}^{{commit}}", cwd=mirror).strip()
+                return self._git(
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    f"{prefix}{tracked.ref}^{{commit}}",
+                    cwd=mirror,
+                ).strip()
             except GitLabError:
                 continue
         raise GitLabError(f"{tracked.repository} has no branch or tag {tracked.ref!r}")
 
-    def _git(self, *args: str, cwd: Path | None = None, binary: bool = False,
-             stdin: bytes | None = None, authenticated: bool = False):
+    def _git(
+        self,
+        *args: str,
+        cwd: Path | None = None,
+        binary: bool = False,
+        stdin: bytes | None = None,
+        authenticated: bool = False,
+    ):
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
         if authenticated and self._token:
             basic = base64.b64encode(f"oauth2:{self._token}".encode()).decode()
-            env |= {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{self._url}/.extraHeader",
-                    "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}"}
+            env |= {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": f"http.{self._url}/.extraHeader",
+                "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
+            }
         try:
             result = subprocess.run(
-                [self._git_bin, *args], cwd=cwd, env=env, input=stdin, capture_output=True,
-                timeout=self._timeout)
+                [self._git_bin, *args],
+                cwd=cwd,
+                env=env,
+                input=stdin,
+                capture_output=True,
+                timeout=self._timeout,
+            )
         except FileNotFoundError:
             raise GitLabError(f"git not found (looked for {self._git_bin!r})") from None
         except subprocess.TimeoutExpired:
             raise GitLabError(f"git {args[0]} timed out after {self._timeout:g}s") from None
         if result.returncode != 0:
             message = result.stderr.decode("utf-8", errors="replace").strip()
-            raise GitLabError(f"git {args[0]} failed ({result.returncode}): "
-                              f"{self._scrub(message)[:_MAX_ERROR_LENGTH]}")
+            raise GitLabError(
+                f"git {args[0]} failed ({result.returncode}): "
+                f"{self._scrub(message)[:_MAX_ERROR_LENGTH]}"
+            )
         return result.stdout if binary else result.stdout.decode("utf-8", errors="replace")
 
     def _scrub(self, message: str) -> str:
@@ -325,8 +460,10 @@ def _excluded(path: str, globs: Sequence[str]) -> bool:
     """Whether a file matches one of the Tracked ref's globs: ``docs/**`` or ``src/*_gen.py``
     against its path, or a glob with no ``/`` (``*.sql``) against its name at any depth."""
     name = PurePosixPath(path).name
-    return any(_glob(glob).fullmatch(path) or ("/" not in glob and fnmatch.fnmatchcase(name, glob))
-               for glob in globs)
+    return any(
+        _glob(glob).fullmatch(path) or ("/" not in glob and fnmatch.fnmatchcase(name, glob))
+        for glob in globs
+    )
 
 
 @cache

@@ -1,4 +1,5 @@
 """Token counting that needs no tokenizer files, so it works on an air-gapped network."""
+
 import re
 
 _TOKEN = re.compile(r"\w+|[^\w\s]", re.UNICODE)

@@ -6,6 +6,7 @@ covers. Sizes are measured by a token counter supplied by the caller (normally t
 gateway's), so nothing here reads LlamaIndex's global settings, downloads a tokenizer
 or touches its embedding client.
 """
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -19,7 +20,6 @@ from local_rag.gateway import ModelGateway
 from local_rag.settings import Settings
 from local_rag.syntax import splitter_for
 from local_rag.tokens import count_tokens
-
 
 CODE_OVERLAP_LINES = 3  # lines shared by neighbouring code Passages
 
@@ -55,8 +55,9 @@ class LineSplitter:
     on its own is cut within itself, its pieces all citing that line.
     """
 
-    def __init__(self, count_tokens: Callable[[str], int], *, size: int,
-                 overlap: int = CODE_OVERLAP_LINES):
+    def __init__(
+        self, count_tokens: Callable[[str], int], *, size: int, overlap: int = CODE_OVERLAP_LINES
+    ):
         self._count = count_tokens
         self._size = size
         self._overlap = overlap
@@ -69,8 +70,11 @@ class LineSplitter:
         while start < len(lines):
             end = self._end(lines, start)
             if end - start == 1 and self._count(lines[start]) > self._size:
-                pieces += [Piece(part, start + 1, start + 1)
-                           for part in self._cut(lines[start]) if part.strip()]
+                pieces += [
+                    Piece(part, start + 1, start + 1)
+                    for part in self._cut(lines[start])
+                    if part.strip()
+                ]
             else:
                 pieces.append(_trimmed(lines, start, end))
             if end >= len(lines):
@@ -132,26 +136,36 @@ def _trimmed(lines: list[str], start: int, end: int) -> Piece:
 
 
 class Chunker:
-    def __init__(self, count_tokens: Callable[[str], int], *, size: int, overlap: int,
-                 code_size: int = 800):
+    def __init__(
+        self, count_tokens: Callable[[str], int], *, size: int, overlap: int, code_size: int = 800
+    ):
         if overlap >= size:
             raise ValueError(f"chunk overlap ({overlap}) must be smaller than size ({size})")
         punkt = PunktSentenceTokenizer()  # rule-based: needs no downloaded model
         self._count, self._code_size = count_tokens, code_size
         self._code = LineSplitter(count_tokens, size=code_size)
         self._syntax = {}  # Media type -> its splitter, made when first needed
-        self._prose = _ProseSplitter(SentenceSplitter(
-            chunk_size=size, chunk_overlap=overlap,
-            # The splitter only takes len() of what its tokenizer returns.
-            tokenizer=lambda text: range(count_tokens(text)),
-            chunking_tokenizer_fn=lambda text: split_by_sentence_tokenizer_internal(text, punkt)))
+        self._prose = _ProseSplitter(
+            SentenceSplitter(
+                chunk_size=size,
+                chunk_overlap=overlap,
+                # The splitter only takes len() of what its tokenizer returns.
+                tokenizer=lambda text: range(count_tokens(text)),
+                chunking_tokenizer_fn=lambda text: split_by_sentence_tokenizer_internal(
+                    text, punkt
+                ),
+            )
+        )
 
     @classmethod
     def from_settings(cls, settings: Settings, gateway: ModelGateway | None) -> "Chunker":
         """Sized by the gateway's token count, or the local one when there is no gateway."""
-        return cls(count_tokens if gateway is None else gateway.count_tokens,
-                   size=settings.chunk_tokens, overlap=settings.chunk_overlap,
-                   code_size=settings.code_chunk_tokens)
+        return cls(
+            count_tokens if gateway is None else gateway.count_tokens,
+            size=settings.chunk_tokens,
+            overlap=settings.chunk_overlap,
+            code_size=settings.code_chunk_tokens,
+        )
 
     def split(self, text: str, media_type: str = "text/plain") -> list[str]:
         """The text of each Passage of a Document, split the way its Media type calls for."""
@@ -168,6 +182,8 @@ class Chunker:
         if not is_code(media_type):
             return self._prose
         if media_type not in self._syntax:
-            self._syntax[media_type] = splitter_for(
-                media_type, self._count, size=self._code_size, fallback=self._code) or self._code
+            self._syntax[media_type] = (
+                splitter_for(media_type, self._count, size=self._code_size, fallback=self._code)
+                or self._code
+            )
         return self._syntax[media_type]

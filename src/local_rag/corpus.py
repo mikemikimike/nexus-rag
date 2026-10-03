@@ -14,7 +14,8 @@ def check_corpus_name(name: str) -> str:
     if not _NAME.fullmatch(name):
         raise ValueError(
             f"{name!r} cannot name a Corpus: use letters, digits, '-' and '_', "
-            f"starting with a letter or digit")
+            f"starting with a letter or digit"
+        )
     return name
 
 
@@ -132,8 +133,7 @@ class Listing(list[DocumentRef]):
     without a recorded part are held back while any part failed.
     """
 
-    def __init__(self, refs: Iterable[DocumentRef] = (),
-                 failures: Mapping[str, str] | None = None):
+    def __init__(self, refs: Iterable[DocumentRef] = (), failures: Mapping[str, str] | None = None):
         super().__init__(refs)
         self.failures = dict(failures or {})
 
@@ -164,8 +164,7 @@ class Corpus(Protocol):
 class InMemoryCorpus:
     """Holds Documents (ready text) or RawDocuments (content with a media type)."""
 
-    def __init__(self, documents: Iterable[Document | RawDocument] = (), *,
-                 name: str = "default"):
+    def __init__(self, documents: Iterable[Document | RawDocument] = (), *, name: str = "default"):
         self.name = check_corpus_name(name)
         self._documents = {d.id: _raw(d) for d in documents}
 
@@ -180,6 +179,12 @@ def _raw(document: Document | RawDocument) -> RawDocument:
     if isinstance(document, RawDocument):
         return document
     return RawDocument(
-        id=document.id, title=document.title, url=document.url, space=document.space,
-        version=document.version, content=document.text.encode("utf-8"),
-        media_type="text/plain", parent_id=document.parent_id)
+        id=document.id,
+        title=document.title,
+        url=document.url,
+        space=document.space,
+        version=document.version,
+        content=document.text.encode("utf-8"),
+        media_type="text/plain",
+        parent_id=document.parent_id,
+    )

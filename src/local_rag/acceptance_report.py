@@ -1,5 +1,6 @@
 """What every acceptance check group works from. How a check reports is shared with the
 Smoke check, in ``checks``. Standard library only."""
+
 import argparse
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -24,7 +25,9 @@ class Context:
     report: Report
     gateway: Any  # the Model gateway, or None if it cannot be built
     connect: Callable[[str, str | None], Any]  # (Qdrant location, API key) -> a Qdrant client
-    run: Callable[[Sequence[str]], str]  # runs a host command, returns its output, raises if it fails
+    run: Callable[
+        [Sequence[str]], str
+    ]  # runs a host command, returns its output, raises if it fails
     args: argparse.Namespace
     run_id: Any  # the Run whose identifiers the generated Documents carry
     gateway_problem: str | None = None  # why there is no gateway, if the settings name one

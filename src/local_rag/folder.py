@@ -1,4 +1,5 @@
 """A Corpus over a folder of files: the relative path is the Document's identity."""
+
 import hashlib
 from pathlib import Path
 
@@ -20,26 +21,34 @@ class FolderCorpus:
         self._root = Path(root).resolve()
 
     def list(self) -> list[DocumentRef]:
-        return [DocumentRef(document_id, _version(path))
-                for document_id, path in _files(self._root)]
+        return [
+            DocumentRef(document_id, _version(path)) for document_id, path in _files(self._root)
+        ]
 
     def fetch(self, document_id: str) -> RawDocument:
         path = self._root / document_id
         content = path.read_bytes()
         parts = Path(document_id).parts
         return RawDocument(
-            id=document_id, title=path.stem, url=path.as_uri(),
+            id=document_id,
+            title=path.stem,
+            url=path.as_uri(),
             space=parts[0] if len(parts) > 1 else self._root.name or "root",
-            version=_hash(content), content=content,
-            media_type=MEDIA_TYPES[path.suffix.lower()])
+            version=_hash(content),
+            content=content,
+            media_type=MEDIA_TYPES[path.suffix.lower()],
+        )
 
 
 def _files(root: Path) -> list[tuple[str, Path]]:
     found = []
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
-        if (path.is_file() and path.suffix.lower() in MEDIA_TYPES
-                and not any(part.startswith(".") for part in relative.parts)):
+        if (
+            path.is_file()
+            and path.suffix.lower() in MEDIA_TYPES
+            and not any(part.startswith(".") for part in relative.parts)
+        ):
             found.append((relative.as_posix(), path))
     return found
 
@@ -55,4 +64,3 @@ def _version(path: Path) -> str:
 
 def _hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
-

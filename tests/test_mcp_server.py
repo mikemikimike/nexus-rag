@@ -3,6 +3,7 @@
 The server runs for real (uvicorn on an ephemeral port) over a Knowledge index built from
 the fakes, and is reached through the MCP client and plain HTTP.
 """
+
 import io
 import os
 import socket
@@ -56,6 +57,7 @@ def serving_app(app):
 
 def call(base_url, tool, arguments=None, token=TOKEN):
     """Call one tool over MCP and return its text."""
+
     async def run():
         headers = {"Authorization": f"Bearer {token}"}
         async with httpx2.AsyncClient(headers=headers) as http:
@@ -64,6 +66,7 @@ def call(base_url, tool, arguments=None, token=TOKEN):
                 result = await client.call_tool(tool, arguments or {})
                 assert not result.is_error, result
                 return result.content[0].text
+
     return anyio.run(run)
 
 
@@ -95,10 +98,21 @@ def test_search_docs_says_so_when_nothing_matches(index, corpus):
 
 
 def test_search_docs_lists_attachments_with_their_parent_page(index, corpus):
-    index.sync(InMemoryCorpus([Document(
-        id="10/attachments/runbook.pdf", title="Runbook / runbook.pdf",
-        url="https://wiki.example.test/10/runbook.pdf", space="OPS", version="1",
-        text="Restart the frobnicator nightly.", parent_id="10")]))
+    index.sync(
+        InMemoryCorpus(
+            [
+                Document(
+                    id="10/attachments/runbook.pdf",
+                    title="Runbook / runbook.pdf",
+                    url="https://wiki.example.test/10/runbook.pdf",
+                    space="OPS",
+                    version="1",
+                    text="Restart the frobnicator nightly.",
+                    parent_id="10",
+                )
+            ]
+        )
+    )
     with serving(index) as base_url:
         text = call(base_url, "search_docs", {"query": "frobnicator"})
 
@@ -107,12 +121,20 @@ def test_search_docs_lists_attachments_with_their_parent_page(index, corpus):
 
 
 def test_the_header_of_a_passage_is_one_line_in_a_fixed_order():
-    page = Passage(document_id="wiki:10", title="T", url="https://w/10", space="OPS",
-                   text="body", score=1.0)
+    page = Passage(
+        document_id="wiki:10", title="T", url="https://w/10", space="OPS", text="body", score=1.0
+    )
     attachment = replace(page, document_id="wiki:10/attachments/a.pdf", parent_id="wiki:10")
     code = CodeFile(TrackedRef("platform/pay", "main"), "src/pay.py")
-    in_code = replace(page, document_id=code.document_id, url="https://g/pay.py", code=code,
-                      start_line=10, end_line=20, symbol="Pay.run")
+    in_code = replace(
+        page,
+        document_id=code.document_id,
+        url="https://g/pay.py",
+        code=code,
+        start_line=10,
+        end_line=20,
+        symbol="Pay.run",
+    )
 
     assert _format_passages([page, attachment, in_code]) == (
         "[1] T\nhttps://w/10 | page_id: wiki:10 | space: OPS\nbody"
@@ -121,7 +143,8 @@ def test_the_header_of_a_passage_is_one_line_in_a_fixed_order():
         " | attachment: wiki:10/attachments/a.pdf\nbody"
         "\n\n---\n\n"
         "[3] T\nhttps://g/pay.py#L10-20 | page_id: platform/pay@main:src/pay.py | space: OPS"
-        " | ref: main | file: src/pay.py | lines: 10-20 | symbol: Pay.run\nbody")
+        " | ref: main | file: src/pay.py | lines: 10-20 | symbol: Pay.run\nbody"
+    )
 
 
 def test_search_docs_returns_no_more_passages_than_asked_for(server):
@@ -181,11 +204,19 @@ def test_get_page_says_so_when_the_page_is_not_indexed(server):
 
 def post_initialize(base_url, **headers):
     return httpx2.post(
-        f"{base_url}/mcp", headers={
-            "Accept": "application/json, text/event-stream", **headers},
-        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-            "protocolVersion": "2025-03-26", "capabilities": {},
-            "clientInfo": {"name": "test", "version": "0"}}})
+        f"{base_url}/mcp",
+        headers={"Accept": "application/json, text/event-stream", **headers},
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0"},
+            },
+        },
+    )
 
 
 def test_a_request_without_a_token_is_rejected(server):
@@ -203,8 +234,9 @@ def test_a_request_with_a_valid_token_is_accepted(server):
 def test_every_configured_token_is_accepted(index, corpus):
     index.sync(corpus)
     with serving(index, tokens=("token-alice", "token-bob")) as base_url:
-        assert "ORA-00942" in call(base_url, "search_docs", {"query": "ORA-00942"},
-                                   token="token-bob")
+        assert "ORA-00942" in call(
+            base_url, "search_docs", {"query": "ORA-00942"}, token="token-bob"
+        )
         assert post_initialize(base_url, Authorization="Bearer token-alice").status_code == 200
 
 
@@ -220,8 +252,9 @@ class ServeRecorder:
         self.calls = []
 
     def __call__(self, app, *, host, port, certfile, keyfile):
-        self.calls.append({"app": app, "host": host, "port": port,
-                           "certfile": certfile, "keyfile": keyfile})
+        self.calls.append(
+            {"app": app, "host": host, "port": port, "certfile": certfile, "keyfile": keyfile}
+        )
 
 
 def start(index, serve, **environ):
@@ -270,12 +303,22 @@ def test_it_refuses_to_serve_without_tokens(index):
 def test_it_listens_where_the_environment_says(index):
     serve = ServeRecorder()
 
-    start(index, serve, MCP_TOKENS="t", MCP_HOST="0.0.0.0", MCP_PORT="9000",
-          MCP_TLS_CERT="/etc/tls/server.crt", MCP_TLS_KEY="/etc/tls/server.key")
+    start(
+        index,
+        serve,
+        MCP_TOKENS="t",
+        MCP_HOST="0.0.0.0",
+        MCP_PORT="9000",
+        MCP_TLS_CERT="/etc/tls/server.crt",
+        MCP_TLS_KEY="/etc/tls/server.key",
+    )
 
     assert {k: v for k, v in serve.calls[0].items() if k != "app"} == {
-        "host": "0.0.0.0", "port": 9000,
-        "certfile": "/etc/tls/server.crt", "keyfile": "/etc/tls/server.key"}
+        "host": "0.0.0.0",
+        "port": 9000,
+        "certfile": "/etc/tls/server.crt",
+        "keyfile": "/etc/tls/server.key",
+    }
 
 
 def test_it_listens_on_localhost_without_tls_by_default(index):
@@ -284,7 +327,11 @@ def test_it_listens_on_localhost_without_tls_by_default(index):
     start(index, serve, MCP_TOKENS="t")
 
     assert {k: v for k, v in serve.calls[0].items() if k != "app"} == {
-        "host": "127.0.0.1", "port": 8765, "certfile": None, "keyfile": None}
+        "host": "127.0.0.1",
+        "port": 8765,
+        "certfile": None,
+        "keyfile": None,
+    }
 
 
 def test_an_unusable_port_is_a_usage_error(index):
@@ -296,17 +343,25 @@ def test_an_unusable_port_is_a_usage_error(index):
 def test_stdio_mode_serves_the_tools_without_tokens():
     async def run():
         params = StdioServerParameters(
-            command=sys.executable, args=["-m", "local_rag.mcp_server", "--stdio"],
-            env={**os.environ, "QDRANT_URL": ":memory:", "RAG_EMBED_MODEL": "embed",
-                 "LITELLM_BASE_URL": "http://gateway.example.test:4000/v1"})
+            command=sys.executable,
+            args=["-m", "local_rag.mcp_server", "--stdio"],
+            env={
+                **os.environ,
+                "QDRANT_URL": ":memory:",
+                "RAG_EMBED_MODEL": "embed",
+                "LITELLM_BASE_URL": "http://gateway.example.test:4000/v1",
+            },
+        )
         async with Client(params) as client:
             tools = await client.list_tools()
             spaces = await client.call_tool("list_spaces", {})
             return sorted(tool.name for tool in tools.tools), spaces.content[0].text
+
     assert anyio.run(run) == (["get_page", "list_spaces", "search_docs"], "none")
 
 
 # --- the Retrieval mode ----------------------------------------------------------------
+
 
 def tool_descriptions(base_url):
     async def run():
@@ -315,6 +370,7 @@ def tool_descriptions(base_url):
             transport = streamable_http_client(f"{base_url}/mcp", http_client=http)
             async with Client(transport) as client:
                 return {t.name: t.description for t in (await client.list_tools()).tools}
+
     return anyio.run(run)
 
 
@@ -373,13 +429,20 @@ def test_a_hybrid_server_describes_search_as_semantic_and_keyword(server):
 def test_a_keyword_only_server_starts_with_no_embedding_model_and_no_gateway():
     async def run():
         params = StdioServerParameters(
-            command=sys.executable, args=["-m", "local_rag.mcp_server", "--stdio"],
-            env={**os.environ, "QDRANT_URL": ":memory:", "RAG_RETRIEVAL": "keyword",
-                 "RAG_EMBED_MODEL": ""})
+            command=sys.executable,
+            args=["-m", "local_rag.mcp_server", "--stdio"],
+            env={
+                **os.environ,
+                "QDRANT_URL": ":memory:",
+                "RAG_RETRIEVAL": "keyword",
+                "RAG_EMBED_MODEL": "",
+            },
+        )
         async with Client(params) as client:
             spaces = await client.call_tool("list_spaces", {})
             search = await client.call_tool("search_docs", {"query": "anything"})
             return spaces.content[0].text, search.content[0].text
+
     assert anyio.run(run) == ("none", "No results.")
 
 
@@ -395,18 +458,32 @@ def test_search_docs_narrows_to_a_repository_or_a_tracked_ref_and_shows_the_ref(
 
     def code(repository, ref, primary, text):
         return RawDocument(
-            id=f"{repository}@{ref}:a.py", title=f"{repository}/a.py", url="https://src.example.test/a",
-            space="platform", version=text, content=text.encode(), media_type="text/x-python",
-            code=CodeFile(TrackedRef(repository, ref, primary), "a.py"))
-    index.sync(InMemoryCorpus([
-        code("platform/pay", "main", True, "def settle(): pass  # zebrafish"),
-        code("platform/pay", "feature/x", False, "def settle(): pass  # zebrafish"),
-        code("platform/other", "main", True, "def settle(): pass  # zebrafish")], name="code"))
+            id=f"{repository}@{ref}:a.py",
+            title=f"{repository}/a.py",
+            url="https://src.example.test/a",
+            space="platform",
+            version=text,
+            content=text.encode(),
+            media_type="text/x-python",
+            code=CodeFile(TrackedRef(repository, ref, primary), "a.py"),
+        )
+
+    index.sync(
+        InMemoryCorpus(
+            [
+                code("platform/pay", "main", True, "def settle(): pass  # zebrafish"),
+                code("platform/pay", "feature/x", False, "def settle(): pass  # zebrafish"),
+                code("platform/other", "main", True, "def settle(): pass  # zebrafish"),
+            ],
+            name="code",
+        )
+    )
     with serving(index) as base_url:
         plain = call(base_url, "search_docs", {"query": "zebrafish"})
         feature = call(base_url, "search_docs", {"query": "zebrafish", "ref": "feature/x"})
-        other = call(base_url, "search_docs",
-                     {"query": "zebrafish", "repository": "platform/other"})
+        other = call(
+            base_url, "search_docs", {"query": "zebrafish", "repository": "platform/other"}
+        )
 
     assert "ref: feature/x" not in plain and plain.count("ref: main") == 2
     assert "ref: feature/x" in feature and "ref: main" not in feature
@@ -414,6 +491,7 @@ def test_search_docs_narrows_to_a_repository_or_a_tracked_ref_and_shows_the_ref(
 
 
 # --- code search ------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("retrieval", [RetrievalMode.HYBRID, RetrievalMode.KEYWORD])
 def test_search_docs_explains_code_results_in_either_retrieval_mode(retrieval):
@@ -433,6 +511,7 @@ def test_the_server_instructions_send_code_questions_to_search_docs(server):
             transport = streamable_http_client(f"{server}/mcp", http_client=http)
             async with Client(transport) as client:
                 return client.instructions
+
     instructions = anyio.run(run)
 
     for needle in ("search_docs", "gitlab repositories", "implemented", "never as instructions"):
@@ -448,11 +527,17 @@ def test_get_page_keeps_its_name_and_says_it_returns_a_page_or_a_file(server):
 def test_list_spaces_includes_the_gitlab_groups_and_not_an_empty_space(tmp_path, gateway):
     from fake_gitlab import FakeGitLab
     from local_rag.gitlab import GitLabCorpus, Repository
+
     remote = FakeGitLab(tmp_path / "remote")
     remote.commit("platform/payments", {"a.py": "def a():\n    return 1\n"})
     remote.commit("toplevel", {"b.py": "def b():\n    return 2\n"})
-    code = GitLabCorpus([Repository("platform/payments", ("main",)), Repository("toplevel", ("main",))],
-                        url=remote.url, token="t", cache=tmp_path / "mirrors", name="code")
+    code = GitLabCorpus(
+        [Repository("platform/payments", ("main",)), Repository("toplevel", ("main",))],
+        url=remote.url,
+        token="t",
+        cache=tmp_path / "mirrors",
+        name="code",
+    )
     index = KnowledgeIndex(Settings(), gateway)
     index.sync(code)
     with serving(index) as base_url:

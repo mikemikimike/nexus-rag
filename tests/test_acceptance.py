@@ -3,22 +3,34 @@
 Every check passes against the good stand-ins, and each failure path has a deliberately
 broken stand-in, so the suite's own logic is verified before it meets the real thing.
 """
+
 import os
 import socket
 import subprocess
 import sys
 
 from acceptance_support import (
-    ENVIRONMENT, MCP_TOKEN, SECRETS, TIMERS, Host, Qdrant, container_host, good_gateway, line,
-    probe_synonyms, run_suite, systemd_host)
+    ENVIRONMENT,
+    MCP_TOKEN,
+    SECRETS,
+    TIMERS,
+    Host,
+    Qdrant,
+    container_host,
+    good_gateway,
+    line,
+    probe_synonyms,
+    run_suite,
+    systemd_host,
+)
 from fake_drop import REPO
-from test_health import UnreachableQdrant
-from test_mcp_server import serving, serving_app
 from local_rag import KnowledgeIndex, Settings
 from local_rag.corpus import Document, InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from local_rag.gateway_litellm import GatewayError
 from local_rag.mcp_server import build_server
+from test_health import UnreachableQdrant
+from test_mcp_server import serving, serving_app
 
 
 def test_an_unknown_argument_is_a_usage_error():
@@ -29,6 +41,7 @@ def test_an_unknown_argument_is_a_usage_error():
 
 
 # --- the Model gateway ---------------------------------------------------------------
+
 
 def gateway_only(**kwargs):
     return run_suite("--only", "gateway", **kwargs)
@@ -55,8 +68,11 @@ class DownGateway(FakeModelGateway):
 
 
 def test_an_unreachable_gateway_fails_with_its_cause_and_the_guide_section():
-    code, out, _ = gateway_only(gateway=DownGateway(
-        "gateway http://gateway.example.test:4000/v1/embeddings unreachable: refused"))
+    code, out, _ = gateway_only(
+        gateway=DownGateway(
+            "gateway http://gateway.example.test:4000/v1/embeddings unreachable: refused"
+        )
+    )
 
     assert code == 1
     failed = line(out, "gateway.embeddings")
@@ -68,15 +84,21 @@ def test_an_unreachable_gateway_fails_with_its_cause_and_the_guide_section():
 
 
 def test_a_gateway_that_refuses_the_key_names_the_key():
-    _, out, _ = gateway_only(gateway=DownGateway(
-        "gateway http://gateway.example.test:4000/v1/embeddings answered 401: bad key"))
+    _, out, _ = gateway_only(
+        gateway=DownGateway(
+            "gateway http://gateway.example.test:4000/v1/embeddings answered 401: bad key"
+        )
+    )
 
     assert "LITELLM_API_KEY" in line(out, "gateway.embeddings")
 
 
 def test_a_gateway_that_does_not_know_the_url_or_model_names_both():
-    _, out, _ = gateway_only(gateway=DownGateway(
-        "gateway http://gateway.example.test:4000/v1/embeddings answered 404: nope"))
+    _, out, _ = gateway_only(
+        gateway=DownGateway(
+            "gateway http://gateway.example.test:4000/v1/embeddings answered 404: nope"
+        )
+    )
 
     failed = line(out, "gateway.embeddings")
     assert "/v1" in failed and "RAG_EMBED_MODEL" in failed
@@ -91,8 +113,11 @@ def test_an_unset_gateway_is_refused_before_any_check():
 
 def test_a_gateway_address_that_is_not_http_is_reported_as_a_gateway_problem():
     code, out, _ = run_suite(
-        "--only", "gateway", no_gateway=True,
-        environ={"LITELLM_BASE_URL": "gateway.example.test:4000/v1"})
+        "--only",
+        "gateway",
+        no_gateway=True,
+        environ={"LITELLM_BASE_URL": "gateway.example.test:4000/v1"},
+    )
 
     assert code == 1
     assert "http(s)" in line(out, "gateway.embeddings")
@@ -165,6 +190,7 @@ def test_a_gateway_whose_vectors_differ_within_a_batch_fails():
 
 # --- Qdrant --------------------------------------------------------------------------
 
+
 def qdrant_only(**kwargs):
     return run_suite("--only", "qdrant", **kwargs)
 
@@ -204,7 +230,9 @@ def test_an_unreachable_qdrant_fails_with_its_cause():
     code, out, _ = qdrant_only(qdrant=Unreachable())
 
     assert code == 1
-    assert "unreachable" in line(out, "qdrant.reachable") and "NO_PROXY" in line(out, "qdrant.reachable")
+    assert "unreachable" in line(out, "qdrant.reachable") and "NO_PROXY" in line(
+        out, "qdrant.reachable"
+    )
 
 
 def test_without_a_key_the_wrong_key_check_is_skipped_with_its_reason():
@@ -257,9 +285,18 @@ def test_a_long_text_is_split_so_every_passage_is_embedded():
 
 # --- the Knowledge index round trip --------------------------------------------------
 
-INDEX_CHECKS = ["index.sync", "index.keyword", "index.dense", "index.tail-keyword",
-                "index.tail-meaning", "index.status", "index.replace", "index.remove",
-                "index.rebuild", "index.switch-back"]
+INDEX_CHECKS = [
+    "index.sync",
+    "index.keyword",
+    "index.dense",
+    "index.tail-keyword",
+    "index.tail-meaning",
+    "index.status",
+    "index.replace",
+    "index.remove",
+    "index.rebuild",
+    "index.switch-back",
+]
 
 
 def index_only(**kwargs):
@@ -293,9 +330,13 @@ def test_the_live_index_is_untouched_by_a_run():
 
 def snapshot(qdrant):
     names = sorted(qdrant.names())
-    return names, {name: sorted(
-        (str(r.id), str(r.payload)) for r in qdrant.client.scroll(name, limit=1000, with_payload=True)[0])
-        for name in names}
+    return names, {
+        name: sorted(
+            (str(r.id), str(r.payload))
+            for r in qdrant.client.scroll(name, limit=1000, with_payload=True)[0]
+        )
+        for name in names
+    }
 
 
 def test_the_throwaway_collection_is_its_own_name_not_the_live_one():
@@ -355,7 +396,9 @@ def forbid(message):
     def forbidden(real):
         def method(*args, **kwargs):
             raise RuntimeError(message)
+
         return method
+
     return forbidden
 
 
@@ -371,6 +414,7 @@ def test_a_qdrant_that_keeps_deleted_passages_fails_remove_and_is_still_cleaned(
 
 def forbid_after(allowed, message):
     """A client method that works ``allowed`` times, then is forbidden."""
+
     def broken(real):
         calls = []
 
@@ -379,7 +423,9 @@ def forbid_after(allowed, message):
             if len(calls) > allowed:
                 raise RuntimeError(message)
             return real(*args, **kwargs)
+
         return method
+
     return broken
 
 
@@ -408,8 +454,14 @@ def test_a_failed_cleanup_is_a_failure_that_names_what_is_left():
 def test_without_a_working_gateway_the_index_group_is_skipped_and_creates_nothing():
     qdrant = Qdrant()
 
-    code, out, _ = run_suite("--only", "gateway", "--only", "index", qdrant=qdrant,
-                             gateway=DownGateway("gateway http://g unreachable"))
+    code, out, _ = run_suite(
+        "--only",
+        "gateway",
+        "--only",
+        "index",
+        qdrant=qdrant,
+        gateway=DownGateway("gateway http://g unreachable"),
+    )
 
     assert code == 1
     assert line(out, "index.sync").startswith("[SKIP]")
@@ -432,8 +484,14 @@ def test_a_corpus_whose_documents_cannot_be_indexed_reports_the_reason():
 
 # --- the MCP server -------------------------------------------------------------------
 
-MCP_CHECKS = ["mcp.healthz", "mcp.no-token", "mcp.wrong-token", "mcp.search_docs",
-              "mcp.list_spaces", "mcp.get_page"]
+MCP_CHECKS = [
+    "mcp.healthz",
+    "mcp.no-token",
+    "mcp.wrong-token",
+    "mcp.search_docs",
+    "mcp.list_spaces",
+    "mcp.get_page",
+]
 
 
 def served_index(*documents):
@@ -443,8 +501,14 @@ def served_index(*documents):
     return index
 
 
-PAGE = Document("ops/guide", "Runbook", "https://wiki.example.test/guide", "OPS", "1",
-                "Restart the scheduler after the failover.")
+PAGE = Document(
+    "ops/guide",
+    "Runbook",
+    "https://wiki.example.test/guide",
+    "OPS",
+    "1",
+    "Restart the scheduler after the failover.",
+)
 
 
 def mcp_only(url, *extra, **kwargs):
@@ -544,6 +608,7 @@ def test_without_any_token_the_tool_checks_fail_and_name_the_setting():
 
 # --- the installation ------------------------------------------------------------------
 
+
 def install_only(*route, host):
     return run_suite("--only", "install", *route, host=host)
 
@@ -554,15 +619,22 @@ def test_a_complete_systemd_installation_passes():
     code, out, _ = install_only("--systemd", host=host)
 
     assert code == 0, out
-    for name in ("install.units", "install.active", "install.enabled", "install.env-file",
-                 "install.timers"):
+    for name in (
+        "install.units",
+        "install.active",
+        "install.enabled",
+        "install.env-file",
+        "install.timers",
+    ):
         assert line(out, name).startswith("[ OK ]"), out
     assert ["systemctl", "is-active", "--quiet", "local-rag-mcp.service"] in host.calls
     assert "not world-readable" in line(out, "install.env-file")
 
 
 def test_a_missing_unit_fails_and_points_at_the_installer():
-    code, out, _ = install_only("--systemd", host=systemd_host(failing=["cat --no-pager qdrant.service"]))
+    code, out, _ = install_only(
+        "--systemd", host=systemd_host(failing=["cat --no-pager qdrant.service"])
+    )
 
     failed = line(out, "install.units")
     assert code == 1 and failed.startswith("[FAIL]") and "qdrant.service" in failed
@@ -572,7 +644,8 @@ def test_a_missing_unit_fails_and_points_at_the_installer():
 
 def test_an_inactive_unit_is_named():
     code, out, _ = install_only(
-        "--systemd", host=systemd_host(failing=["is-active --quiet local-rag-mcp.service"]))
+        "--systemd", host=systemd_host(failing=["is-active --quiet local-rag-mcp.service"])
+    )
 
     failed = line(out, "install.active")
     assert code == 1 and "local-rag-mcp.service" in failed and "qdrant.service" not in failed
@@ -580,7 +653,8 @@ def test_an_inactive_unit_is_named():
 
 def test_a_disabled_unit_is_named():
     code, out, _ = install_only(
-        "--systemd", host=systemd_host(failing=["is-enabled --quiet local-rag-sync.timer"]))
+        "--systemd", host=systemd_host(failing=["is-enabled --quiet local-rag-sync.timer"])
+    )
 
     assert code == 1 and "local-rag-sync.timer" in line(out, "install.enabled")
 
@@ -600,7 +674,8 @@ def test_a_world_readable_env_file_fails_without_printing_a_secret():
 def test_a_timer_without_a_next_run_is_not_scheduled():
     host = systemd_host()
     host.answers["list-timers"] = TIMERS.format(
-        sync="local-rag-sync", full="local-rag-full").replace("Thu 2026-10-01 13:00:00 UTC  40min left", "n/a  n/a")
+        sync="local-rag-sync", full="local-rag-full"
+    ).replace("Thu 2026-10-01 13:00:00 UTC  40min left", "n/a  n/a")
 
     code, out, _ = install_only("--systemd", host=host)
 
@@ -649,7 +724,6 @@ def test_the_install_group_can_be_left_out_and_is_otherwise_not_optional():
     assert code == 0 and "install." not in out
 
 
-
 def test_asking_for_only_the_install_group_needs_a_route():
     code, out, err = run_suite("--only", "install")
     assert code == 2 and out == "" and "--systemd or --container" in err
@@ -671,15 +745,22 @@ def roots_file(tmp_path, *roots):
 
 
 def confluence_only(tmp_path, *roots, host=None, environ=None):
-    return run_suite("--only", "confluence", "--corpora", roots_file(tmp_path, *roots),
-                     environ={**CONFLUENCE, **(environ or {})},
-                     host=host or Host({"info": '{"id": "100", "title": "Home"}'}))
+    return run_suite(
+        "--only",
+        "confluence",
+        "--corpora",
+        roots_file(tmp_path, *roots),
+        environ={**CONFLUENCE, **(environ or {})},
+        host=host or Host({"info": '{"id": "100", "title": "Home"}'}),
+    )
 
 
 def test_confluence_is_read_and_every_root_resolves(tmp_path):
     host = Host({"info": '{"id": "100", "title": "Home"}'})
 
-    code, out, err = confluence_only(tmp_path, "100", "https://wiki.example.test/x?pageId=7", host=host)
+    code, out, err = confluence_only(
+        tmp_path, "100", "https://wiki.example.test/x?pageId=7", host=host
+    )
 
     assert code == 0, out
     assert "reads wiki.example.test" in line(out, "confluence.read")
@@ -716,8 +797,9 @@ def test_a_root_that_does_not_resolve_is_named(tmp_path):
 
 
 def test_a_missing_roots_file_skips_the_roots_check_with_the_reason(tmp_path):
-    code, out, _ = run_suite("--only", "confluence", "--corpora", str(tmp_path / "none.toml"),
-                             environ=CONFLUENCE)
+    code, out, _ = run_suite(
+        "--only", "confluence", "--corpora", str(tmp_path / "none.toml"), environ=CONFLUENCE
+    )
 
     assert code == 0, out
     assert "no usable Corpus declaration" in line(out, "confluence.roots")
@@ -725,13 +807,20 @@ def test_a_missing_roots_file_skips_the_roots_check_with_the_reason(tmp_path):
 
 # --- as a whole -----------------------------------------------------------------------
 
+
 def test_all_groups_pass_together_and_the_summary_says_so(tmp_path):
     host = systemd_host()
     host.answers["info"] = '{"id": "100"}'
     with serving(served_index(PAGE), tokens=(MCP_TOKEN,)) as url:
         code, out, err = run_suite(
-            "--systemd", "--mcp-url", url, "--corpora", roots_file(tmp_path, "100"),
-            environ=CONFLUENCE, host=host)
+            "--systemd",
+            "--mcp-url",
+            url,
+            "--corpora",
+            roots_file(tmp_path, "100"),
+            environ=CONFLUENCE,
+            host=host,
+        )
 
     assert code == 0, out
     assert out.rstrip().endswith("ACCEPTANCE PASSED")
@@ -753,12 +842,24 @@ def test_unusable_settings_are_a_usage_error_naming_the_variable():
 
 
 def test_the_settings_used_are_printed_and_no_secret_ever_is():
-    environ = {"QDRANT_URL": "http://user:url-password@qdrant.example.test:6333",
-               "RAG_RERANK_MODEL": "rerank-model"}
+    environ = {
+        "QDRANT_URL": "http://user:url-password@qdrant.example.test:6333",
+        "RAG_RERANK_MODEL": "rerank-model",
+    }
     for failing in (Qdrant(), Qdrant(key="other")):
-        code, out, err = run_suite("--only", "gateway", "--only", "qdrant", "--only", "index",
-                                   "--only", "mcp", environ=environ, qdrant=failing,
-                                   gateway=DownGateway(f"gateway answered 401 for {ENVIRONMENT['LITELLM_API_KEY']}"))
+        code, out, err = run_suite(
+            "--only",
+            "gateway",
+            "--only",
+            "qdrant",
+            "--only",
+            "index",
+            "--only",
+            "mcp",
+            environ=environ,
+            qdrant=failing,
+            gateway=DownGateway(f"gateway answered 401 for {ENVIRONMENT['LITELLM_API_KEY']}"),
+        )
 
         assert "RAG_EMBED_MODEL" not in out  # names of settings are not values
         assert "embed-model" in out and "gateway.example.test:4000" in out
@@ -769,7 +870,7 @@ def test_the_settings_used_are_printed_and_no_secret_ever_is():
 
 def test_the_install_group_runs_on_a_host_without_the_packages_dependencies():
     """The container route's install checks run on the host, with only PYTHONPATH=src."""
-    program = '''
+    program = """
 import sys
 class Block:
     def find_spec(self, name, path=None, target=None):
@@ -780,15 +881,20 @@ sys.meta_path.insert(0, Block())
 from local_rag import acceptance
 code = acceptance.main(["--only", "install", "--systemd"], {}, run=lambda command: "640\\n")
 sys.exit(0 if code in (0, 1) else 9)
-'''
-    done = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True,
-                          env={"PYTHONPATH": str(REPO / "src"), "PATH": os.environ["PATH"]})
+"""
+    done = subprocess.run(
+        [sys.executable, "-c", program],
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(REPO / "src"), "PATH": os.environ["PATH"]},
+    )
 
     assert done.returncode == 0, done.stderr
     assert "install.units" in done.stdout
 
 
 # --- what the review asked to be pinned down ------------------------------------------
+
 
 def test_the_marker_sits_at_the_end_of_a_nearly_full_passage():
     from local_rag import acceptance_corpus as corpus_files
@@ -798,8 +904,9 @@ def test_the_marker_sits_at_the_end_of_a_nearly_full_passage():
     chunker = Chunker(gateway.count_tokens, size=400, overlap=60)
     for _ in range(5):  # the random mark changes the text
         run = corpus_files.Run.new()
-        text = corpus_files.long_text(run, chunk_tokens=400, count_tokens=gateway.count_tokens,
-                                      split=chunker.split)
+        text = corpus_files.long_text(
+            run, chunk_tokens=400, count_tokens=gateway.count_tokens, split=chunker.split
+        )
         last = chunker.split(text)[-1]
 
         assert gateway.count_tokens(last) >= 0.9 * 400
@@ -810,8 +917,14 @@ def test_the_marker_sits_at_the_end_of_a_nearly_full_passage():
 def test_a_secret_inside_the_gateway_url_is_never_printed():
     environ = {"LITELLM_BASE_URL": "http://svc:url-secret-pw@gateway.example.test:4000/v1"}
 
-    code, out, err = run_suite("--only", "gateway", environ=environ, gateway=DownGateway(
-        "gateway http://svc:url-secret-pw@gateway.example.test:4000/v1/embeddings unreachable"))
+    code, out, err = run_suite(
+        "--only",
+        "gateway",
+        environ=environ,
+        gateway=DownGateway(
+            "gateway http://svc:url-secret-pw@gateway.example.test:4000/v1/embeddings unreachable"
+        ),
+    )
 
     assert code == 1 and "gateway.example.test" in out
     assert "url-secret-pw" not in out + err
@@ -822,7 +935,11 @@ def test_a_server_that_rejects_a_missing_token_but_accepts_a_wrong_one_fails_tha
 
     async def app(scope, receive, send):
         headers = dict(scope.get("headers", []))
-        if scope["type"] == "http" and scope["path"] != "/healthz" and b"authorization" not in headers:
+        if (
+            scope["type"] == "http"
+            and scope["path"] != "/healthz"
+            and b"authorization" not in headers
+        ):
             await send({"type": "http.response.start", "status": 401, "headers": []})
             return await send({"type": "http.response.body", "body": b""})
         return await inner(scope, receive, send)
@@ -848,25 +965,32 @@ def test_a_switch_back_that_does_nothing_fails():
 
 def do_nothing_after(allowed):
     """A client method that works ``allowed`` times, then silently does nothing."""
+
     def broken(real):
         calls = []
 
         def method(*args, **kwargs):
             calls.append(1)
             return real(*args, **kwargs) if len(calls) <= allowed else None
+
         return method
+
     return broken
 
 
 # --- GitLab ---------------------------------------------------------------------------
 
+
 def gitlab_declaration(tmp_path, *repositories):
     from fake_gitlab import FakeGitLab
+
     remote = FakeGitLab(tmp_path / "remote")
     remote.commit("platform/payments", {"ledger.py": "def post():\n    return 1\n"})
     path = tmp_path / "corpora.toml"
-    listed = "\n".join(f'[[corpus.code.repositories]]\npath = "{r}"\nrefs = ["main"]\n'
-                       for r in repositories or ("platform/payments",))
+    listed = "\n".join(
+        f'[[corpus.code.repositories]]\npath = "{r}"\nrefs = ["main"]\n'
+        for r in repositories or ("platform/payments",)
+    )
     path.write_text(f'[corpus.code]\nkind = "gitlab"\ncache = "{tmp_path / "mirrors"}"\n{listed}')
     return str(path), {"GITLAB_URL": remote.url, "GITLAB_TOKEN": "glpat-secret"}
 
@@ -923,19 +1047,38 @@ def test_a_keyword_only_suite_passes_with_no_gateway_and_skips_what_needs_embedd
 
     assert code == 0, out
     assert "ACCEPTANCE PASSED" in out and "[FAIL]" not in out
-    for name in ("gateway.embeddings", "gateway.dimension", "gateway.input-limit",
-                 "gateway.rerank", "index.dense", "index.tail-meaning"):
+    for name in (
+        "gateway.embeddings",
+        "gateway.dimension",
+        "gateway.input-limit",
+        "gateway.rerank",
+        "index.dense",
+        "index.tail-meaning",
+    ):
         assert line(out, name).startswith("[SKIP]"), name
     assert "keyword" in line(out, "gateway.embeddings")
-    for name in ("index.sync", "index.keyword", "index.tail-keyword", "index.status",
-                 "index.replace", "index.remove", "index.rebuild", "index.switch-back"):
+    for name in (
+        "index.sync",
+        "index.keyword",
+        "index.tail-keyword",
+        "index.status",
+        "index.replace",
+        "index.remove",
+        "index.rebuild",
+        "index.switch-back",
+    ):
         assert line(out, name).startswith("[ OK ]"), name
 
 
 def test_a_keyword_only_suite_still_checks_a_reranker_that_is_named():
     code, out, _ = run_suite(
-        *NO_STACK_EXTRAS, environ={**KEYWORD_ONLY, "RAG_RERANK_MODEL": "rerank-model",
-                                   "LITELLM_BASE_URL": "http://gateway.example.test:4000/v1"})
+        *NO_STACK_EXTRAS,
+        environ={
+            **KEYWORD_ONLY,
+            "RAG_RERANK_MODEL": "rerank-model",
+            "LITELLM_BASE_URL": "http://gateway.example.test:4000/v1",
+        },
+    )
 
     assert code == 0, out
     assert line(out, "gateway.embeddings").startswith("[SKIP]")
@@ -944,7 +1087,8 @@ def test_a_keyword_only_suite_still_checks_a_reranker_that_is_named():
 
 def test_a_hybrid_suite_with_a_dead_embedding_model_fails_instead_of_skipping():
     code, out, _ = run_suite(
-        *NO_STACK_EXTRAS, gateway=DownGateway(GatewayError("gateway unreachable")))
+        *NO_STACK_EXTRAS, gateway=DownGateway(GatewayError("gateway unreachable"))
+    )
 
     assert code == 1
     assert line(out, "gateway.embeddings").startswith("[FAIL]")

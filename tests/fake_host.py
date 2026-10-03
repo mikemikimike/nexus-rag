@@ -1,17 +1,30 @@
 """A stand-in for the machine the Installer runs on: records the commands it would run."""
+
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from local_rag.installer import CommandFailed
-from collections.abc import Sequence
 
 
 class FakeHost:
-    def __init__(self, *, users: set[str] = frozenset(), commands: set[str] | None = None,
-                 root: bool = True, machine: str = "x86_64", python: tuple[int, int] = (3, 12),
-                 modules: set[str] | None = None, fail_on: str | None = None):
+    def __init__(
+        self,
+        *,
+        users: set[str] = frozenset(),
+        commands: set[str] | None = None,
+        root: bool = True,
+        machine: str = "x86_64",
+        python: tuple[int, int] = (3, 12),
+        modules: set[str] | None = None,
+        fail_on: str | None = None,
+    ):
         self.users = set(users)
-        self.available = {"systemctl", "useradd", "chown", "git", "python3.12"} if commands is None else set(commands)
+        self.available = (
+            {"systemctl", "useradd", "chown", "git", "python3.12"}
+            if commands is None
+            else set(commands)
+        )
         self.modules = {"venv", "ensurepip"} if modules is None else set(modules)
         self._root, self._machine, self._python = root, machine, python
         self.fail_on = fail_on

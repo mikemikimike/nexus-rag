@@ -10,6 +10,7 @@ A check that depends on another that did not pass is skipped with that reason, s
 gateway shows as one failure and not a dozen. A warning never fails the run. Standard library
 only: the Acceptance suite's install group runs on a host that has no Python packages.
 """
+
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import TextIO
@@ -21,10 +22,16 @@ from local_rag.settings import RetrievalMode, Settings
 
 GUIDE = "docs/agents/closed-network-setup.md"
 COMMAND_TIMEOUT = 30.0
-QDRANT_DOWN = 'section 10 (row "/healthz 503, Qdrant is unreachable")'  # the row for any Qdrant trouble
+QDRANT_DOWN = (
+    'section 10 (row "/healthz 503, Qdrant is unreachable")'  # the row for any Qdrant trouble
+)
 SECRET_NAMES = ("KEY", "TOKEN", "TOKENS", "SECRET", "PASSWORD")
-SYSTEMD_UNITS = ("qdrant.service", "local-rag-mcp.service",
-                 "local-rag-sync.timer", "local-rag-full.timer")  # what the systemd route runs
+SYSTEMD_UNITS = (
+    "qdrant.service",
+    "local-rag-mcp.service",
+    "local-rag-sync.timer",
+    "local-rag-full.timer",
+)  # what the systemd route runs
 KEYWORD_ONLY = "RAG_RETRIEVAL=keyword, so no embedding model is used"
 _LABELS = {"ok": "[ OK ]", "warn": "[WARN]", "fail": "[FAIL]", "skip": "[SKIP]"}
 
@@ -56,8 +63,14 @@ class Warned(Exception):
 class Report:
     """One line per check, and a summary ending in ``<VERDICT> PASSED`` or ``<VERDICT> FAILED``."""
 
-    def __init__(self, out: TextIO, secrets: Iterable[str] = (), *, verdict: str,
-                 default_see: str = "section 10"):
+    def __init__(
+        self,
+        out: TextIO,
+        secrets: Iterable[str] = (),
+        *,
+        verdict: str,
+        default_see: str = "section 10",
+    ):
         self._out = out
         self._secrets = sorted({s for s in secrets if s}, key=len, reverse=True)
         self._verdict = verdict
@@ -86,8 +99,15 @@ class Report:
         except Failure as failure:
             return self._finish(name, "fail", self._explain(failure))
         except Exception as error:
-            return self._finish(name, "fail", self._explain(Failure(
-                f"{type(error).__name__}: {error}" if str(error) else type(error).__name__)))
+            return self._finish(
+                name,
+                "fail",
+                self._explain(
+                    Failure(
+                        f"{type(error).__name__}: {error}" if str(error) else type(error).__name__
+                    )
+                ),
+            )
 
     def _explain(self, failure: Failure) -> str:
         text = failure.what.rstrip(". ")
@@ -108,31 +128,44 @@ class Report:
         counts = {kind: list(self.results.values()).count(kind) for kind in _LABELS}
         warned = f", {counts['warn']} warned" if counts["warn"] else ""
         self.say()
-        self.say(f"{len(self.results)} checks: {counts['ok']} passed{warned}, "
-                 f"{counts['fail']} failed, {counts['skip']} skipped")
-        self.say(f"{self._verdict} PASSED" if not self.failed else
-                 f"{self._verdict} FAILED: {', '.join(self.failed)}")
+        self.say(
+            f"{len(self.results)} checks: {counts['ok']} passed{warned}, "
+            f"{counts['fail']} failed, {counts['skip']} skipped"
+        )
+        self.say(
+            f"{self._verdict} PASSED"
+            if not self.failed
+            else f"{self._verdict} FAILED: {', '.join(self.failed)}"
+        )
 
 
 def secrets_in(environ: Mapping[str, str]) -> list[str]:
     """The values in the environment that must never be printed."""
-    values = [value for name, value in environ.items()
-              if any(name.endswith(word) for word in SECRET_NAMES)]
+    values = [
+        value
+        for name, value in environ.items()
+        if any(name.endswith(word) for word in SECRET_NAMES)
+    ]
     values += [t.strip() for t in environ.get("MCP_TOKENS", "").split(",")]
-    values += [urlsplit(value).password or "" for value in environ.values()
-               if value.startswith(("http://", "https://"))]  # credentials inside a URL
+    values += [
+        urlsplit(value).password or ""
+        for value in environ.values()
+        if value.startswith(("http://", "https://"))
+    ]  # credentials inside a URL
     return [v for v in values if v]
 
 
 def run_command(command: Sequence[str]) -> str:
     """Run a host command; returns its output, raises RuntimeError saying why it failed."""
     try:
-        return subprocess.run(command, check=True, capture_output=True, text=True,
-                              timeout=COMMAND_TIMEOUT).stdout
+        return subprocess.run(
+            command, check=True, capture_output=True, text=True, timeout=COMMAND_TIMEOUT
+        ).stdout
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or "").strip().splitlines()
-        raise RuntimeError(f"{command[0]} exited {error.returncode}"
-                           + (f": {detail[-1]}" if detail else "")) from None
+        raise RuntimeError(
+            f"{command[0]} exited {error.returncode}" + (f": {detail[-1]}" if detail else "")
+        ) from None
     except FileNotFoundError:
         raise RuntimeError(f"{command[0]} not found") from None
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -143,17 +176,30 @@ def gateway_failure(error: Exception) -> Failure:
     """A Model gateway error, with the cause its wording points to."""
     text = describe(error)
     if "answered 401" in text or "answered 403" in text:
-        return Failure(text, cause="LITELLM_API_KEY is wrong or missing",
-                       see='section 10 (row "gateway ... answered 401")')
+        return Failure(
+            text,
+            cause="LITELLM_API_KEY is wrong or missing",
+            see='section 10 (row "gateway ... answered 401")',
+        )
     if "answered 404" in text or "answered 400" in text:
-        return Failure(text, cause="LITELLM_BASE_URL lacks /v1, or RAG_EMBED_MODEL is not a "
-                                   "LiteLLM model_name", see='section 10 (row "gateway ... answered 404")')
+        return Failure(
+            text,
+            cause="LITELLM_BASE_URL lacks /v1, or RAG_EMBED_MODEL is not a LiteLLM model_name",
+            see='section 10 (row "gateway ... answered 404")',
+        )
     if "unreachable" in text:
-        return Failure(text, cause="the address, a firewall or DNS between this host and the "
-                                   "Model gateway (it is always contacted directly, ignoring proxy "
-                                   "variables)", see='section 10 (row "gateway ... unreachable")')
-    return Failure(text, cause="the Model gateway answered something unusable; "
-                               "read its own log", see="section 3 B (Model gateway)")
+        return Failure(
+            text,
+            cause="the address, a firewall or DNS between this host and the "
+            "Model gateway (it is always contacted directly, ignoring proxy "
+            "variables)",
+            see='section 10 (row "gateway ... unreachable")',
+        )
+    return Failure(
+        text,
+        cause="the Model gateway answered something unusable; read its own log",
+        see="section 3 B (Model gateway)",
+    )
 
 
 def embeddings(settings: Settings, gateway: ModelGateway | None) -> str:
@@ -165,9 +211,11 @@ def embeddings(settings: Settings, gateway: ModelGateway | None) -> str:
     except Exception as error:
         raise gateway_failure(error) from None
     if not vector:
-        raise Failure("the Model gateway answered with an empty vector",
-                      cause="RAG_EMBED_MODEL names a model that does not produce embeddings",
-                      see="section 3 B (Model gateway)")
+        raise Failure(
+            "the Model gateway answered with an empty vector",
+            cause="RAG_EMBED_MODEL names a model that does not produce embeddings",
+            see="section 3 B (Model gateway)",
+        )
     return f"model {settings.embed_model!r} answers, {len(vector)} dimensions"
 
 
@@ -181,14 +229,19 @@ def rerank(settings: Settings, gateway: ModelGateway | None) -> str:
     try:
         scores = gateway.rerank("how do I reset my password", [unrelated, relevant])
     except Exception as error:
-        raise Failure(describe(error),
-                      cause="the Model gateway does not serve /v1/rerank for "
-                            "RAG_RERANK_MODEL; unset it to disable rerank",
-                      see='section 10 (the proxy row) and the README troubleshooting "Rerank ignored"'
-                      ) from None
+        raise Failure(
+            describe(error),
+            cause="the Model gateway does not serve /v1/rerank for "
+            "RAG_RERANK_MODEL; unset it to disable rerank",
+            see='section 10 (the proxy row) and the README troubleshooting "Rerank ignored"',
+        ) from None
     if len(scores) != 2 or not scores[1] > scores[0]:
-        raise Failure(f"the reranker scored the relevant text {scores[1:]} against "
-                      f"{scores[:1]} for an unrelated one" if len(scores) == 2 else
-                      f"asked to score 2 texts, got {len(scores)} scores",
-                      cause="RAG_RERANK_MODEL is not a reranker", see="section 3 B (Model gateway)")
+        raise Failure(
+            f"the reranker scored the relevant text {scores[1:]} against "
+            f"{scores[:1]} for an unrelated one"
+            if len(scores) == 2
+            else f"asked to score 2 texts, got {len(scores)} scores",
+            cause="RAG_RERANK_MODEL is not a reranker",
+            see="section 3 B (Model gateway)",
+        )
     return f"model {model!r} ranks the relevant text first"

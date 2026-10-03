@@ -4,11 +4,12 @@ It speaks the one command the extractor uses, `lit parse <file> [--no-ocr]`: the
 line of the file is a format header that is dropped, the rest is the "extracted" text.
 A file whose body says CORRUPT makes it fail the way a bad PDF does.
 """
+
 import stat
 import sys
 from pathlib import Path
 
-SCRIPT = '''#!{python}
+SCRIPT = """#!{python}
 import sys
 
 args = sys.argv[1:]
@@ -19,7 +20,7 @@ if "CORRUPT" in body:
     sys.exit("Error: could not read the document")
 print("[liteparse] total: 1.0ms", file=sys.stderr)
 sys.stdout.write(body)
-'''
+"""
 
 
 def install(directory: Path) -> Path:

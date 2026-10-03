@@ -2,13 +2,11 @@ import dataclasses
 
 import pytest
 
-from local_rag import (
-    IndexReadOnly, KnowledgeIndex, NoPreviousIndex, Settings, SyncInProgress)
+from conftest import DOCUMENTS
+from index_states import NAMES, collections, generations_in, legacy_index, take_over_the_lock
+from local_rag import IndexReadOnly, KnowledgeIndex, NoPreviousIndex, Settings, SyncInProgress
 from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
-from conftest import DOCUMENTS
-from index_states import (
-    NAMES, collections, generations_in, legacy_index, take_over_the_lock)
 from test_sync import CountingGateway, FlakyCorpus, revised
 
 
@@ -229,11 +227,17 @@ def test_cleanup_only_removes_generations_the_system_created(index, client):
     from qdrant_client import models
 
     # Collections in the same Qdrant that merely look like ours by name.
-    lookalikes = {"knowledge.gen-0123456789ab", "knowledge.previous-backup",
-                  "knowledge_old", "knowledge-2024", "knowledge.generations-old"}
+    lookalikes = {
+        "knowledge.gen-0123456789ab",
+        "knowledge.previous-backup",
+        "knowledge_old",
+        "knowledge-2024",
+        "knowledge.generations-old",
+    }
     for name in lookalikes:
         client.create_collection(
-            name, vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE))
+            name, vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE)
+        )
 
     for text in ("first", "second", "third"):
         index.rebuild([corpus_saying(text)])
@@ -251,7 +255,8 @@ def test_generations_left_behind_do_not_accumulate(index, client):
 
 
 def test_a_failed_cleanup_does_not_mask_the_error_and_is_swept_by_the_next_rebuild(
-        index, client, monkeypatch):
+    index, client, monkeypatch
+):
     class Crash(BaseException):
         pass
 
@@ -289,7 +294,8 @@ def test_a_sync_of_nothing_leaves_no_generation_behind(index, client):
 
 
 def test_an_index_written_by_an_earlier_version_keeps_being_served_but_not_synced(
-        index, client, gateway):
+    index, client, gateway
+):
     legacy_index(client, gateway, DOCUMENTS)
 
     with pytest.raises(IndexReadOnly, match="not recorded"):
@@ -301,7 +307,8 @@ def test_an_index_written_by_an_earlier_version_keeps_being_served_but_not_synce
 
 
 def test_a_rebuild_replaces_an_index_written_by_an_earlier_version_and_cleans_it_up(
-        index, client, gateway):
+    index, client, gateway
+):
     legacy_index(client, gateway, DOCUMENTS)
 
     index.rebuild([corpus_saying("first")])
@@ -361,6 +368,7 @@ def test_a_rebuild_that_lost_the_lock_does_not_promote(index, client):
 
 def test_a_rebuild_is_refused_while_any_part_of_a_listing_is_incomplete():
     from test_sync import PARTS, PartedCorpus
+
     index = KnowledgeIndex(Settings(rebuild_failure_threshold=1.0), FakeModelGateway())
     index.sync(PartedCorpus(DOCUMENTS, PARTS))
 

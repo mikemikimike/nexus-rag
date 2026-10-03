@@ -1,4 +1,5 @@
 """Named Corpora in one Knowledge index: each owns its Documents, a Sync touches only its own."""
+
 import pytest
 
 from local_rag.corpus import Document, InMemoryCorpus
@@ -70,6 +71,7 @@ def test_a_name_that_would_break_the_namespace_is_refused():
 
 # --- the declaration file ---------------------------------------------------------------
 
+
 def read(tmp_path, text):
     path = tmp_path / "corpora.toml"
     path.write_text(text)
@@ -78,7 +80,9 @@ def read(tmp_path, text):
 
 def test_a_declaration_builds_each_corpus_by_name(tmp_path):
     (tmp_path / "docs").mkdir()
-    declaration = read(tmp_path, '''
+    declaration = read(
+        tmp_path,
+        """
 [corpus.docs]
 kind = "folder"
 path = "docs"
@@ -87,29 +91,43 @@ path = "docs"
 kind = "confluence"
 roots = ["100", "https://wiki.example.test/pages/viewpage.action?pageId=5"]
 max_depth = 2
-''')
+""",
+    )
 
     assert declaration.names == ["docs", "wiki"]
     assert [c.name for c in declaration.corpora()] == ["docs", "wiki"]
 
 
-@pytest.mark.parametrize("text, message", [
-    ('[corpus.a]\nkind = "gopher"', "kind must be one of"),
-    ('[corpus.a]\nkind = "folder"\npath = "x"\nroots = []', "unknown roots"),
-    ('[corpus.a]\nkind = "confluence"\nroots = "100"', "list of non-empty strings"),
-    ('[corpus.a]\nkind = "confluence"\nroots = ["1"]\nmax_depth = -1', "max_depth"),
-    ('[corpus."a:b"]\nkind = "folder"\npath = "x"', "cannot name a Corpus"),
-    ('[other.a]\nkind = "folder"', "unknown top-level"),
-    ('[corpus.a]\nkind = "gitlab"', "repositories must be"),
-    ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = ["main"]',
-     "GITLAB_URL and GITLAB_TOKEN must be set"),
-    ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = []',
-     "at least one ref"),
-    ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\n'
-     'refs = ["main", "main"]', "lists a ref twice"),
-    ('[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = ["m"]\n'
-     'branch = "x"', "unknown branch"),
-])
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ('[corpus.a]\nkind = "gopher"', "kind must be one of"),
+        ('[corpus.a]\nkind = "folder"\npath = "x"\nroots = []', "unknown roots"),
+        ('[corpus.a]\nkind = "confluence"\nroots = "100"', "list of non-empty strings"),
+        ('[corpus.a]\nkind = "confluence"\nroots = ["1"]\nmax_depth = -1', "max_depth"),
+        ('[corpus."a:b"]\nkind = "folder"\npath = "x"', "cannot name a Corpus"),
+        ('[other.a]\nkind = "folder"', "unknown top-level"),
+        ('[corpus.a]\nkind = "gitlab"', "repositories must be"),
+        (
+            '[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = ["main"]',
+            "GITLAB_URL and GITLAB_TOKEN must be set",
+        ),
+        (
+            '[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = []',
+            "at least one ref",
+        ),
+        (
+            '[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\n'
+            'refs = ["main", "main"]',
+            "lists a ref twice",
+        ),
+        (
+            '[corpus.a]\nkind = "gitlab"\n[[corpus.a.repositories]]\npath = "g/p"\nrefs = ["m"]\n'
+            'branch = "x"',
+            "unknown branch",
+        ),
+    ],
+)
 def test_a_wrong_declaration_is_rejected_when_it_is_read(tmp_path, text, message):
     with pytest.raises(DeclarationError, match=message):
         declaration = read(tmp_path, text)

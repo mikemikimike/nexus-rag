@@ -5,6 +5,7 @@ tarball). A file that does not match is refused before it is run or installed. S
 library only, and independent of how the files are then installed, so the systemd route
 (``installer``) and the container route share it.
 """
+
 import hashlib
 import os
 import shutil
@@ -62,8 +63,7 @@ def verify_checksum(path: Path, expected: str, *, what: str) -> None:
     except OSError as error:
         raise DropRefused(f"cannot read {what}: {error}") from None
     if actual != expected.lower():
-        raise DropRefused(
-            f"checksum of {what} does not match: expected {expected}, got {actual}")
+        raise DropRefused(f"checksum of {what} does not match: expected {expected}, got {actual}")
 
 
 def verify_against_sums(path: Path, sums: Path) -> None:
@@ -92,8 +92,12 @@ def verified_qdrant_binary(tarball: Path, record: Artifact = QDRANT) -> Iterator
     with tempfile.TemporaryDirectory(prefix="qdrant-drop-") as scratch:
         unpacked = Path(scratch) / "qdrant"
         _unpack_binary(tarball, unpacked)
-        require_version("Qdrant", record.version, _reported_version(unpacked),
-                        source=f"the binary in {tarball.name}")
+        require_version(
+            "Qdrant",
+            record.version,
+            _reported_version(unpacked),
+            source=f"the binary in {tarball.name}",
+        )
         yield unpacked
 
 
@@ -102,7 +106,8 @@ def require_version(name: str, expected: str, reported: str, *, source: str) -> 
     if reported != expected:
         raise DropRefused(
             f"{name} version does not match: the repository expects {expected}, "
-            f"{source} reports {reported or 'nothing'}")
+            f"{source} reports {reported or 'nothing'}"
+        )
 
 
 def verified_code_archive(drop: Path) -> Path:
@@ -110,7 +115,8 @@ def verified_code_archive(drop: Path) -> Path:
     archives = sorted(drop.glob(CODE_ARCHIVE_PATTERN))
     if len(archives) != 1:
         raise DropRefused(
-            f"expected one code archive ({CODE_ARCHIVE_PATTERN}) in {drop}, found {len(archives)}")
+            f"expected one code archive ({CODE_ARCHIVE_PATTERN}) in {drop}, found {len(archives)}"
+        )
     verify_against_sums(archives[0], drop / "SHA256SUMS")
     return archives[0]
 
@@ -172,8 +178,9 @@ def _unpack_binary(tarball: Path, target: Path) -> None:
 def _reported_version(binary: Path) -> str:
     """The version a Qdrant binary reports: ``qdrant --version`` prints ``qdrant 1.19.1``."""
     try:
-        result = subprocess.run([str(binary), "--version"], capture_output=True, text=True,
-                                timeout=30, check=True)
+        result = subprocess.run(
+            [str(binary), "--version"], capture_output=True, text=True, timeout=30, check=True
+        )
     except (OSError, subprocess.SubprocessError) as error:
         raise DropRefused(f"the Qdrant binary does not run: {error}") from None
     return parse_reported_version(result.stdout)

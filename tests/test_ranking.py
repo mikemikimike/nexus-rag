@@ -16,7 +16,12 @@ def test_cap_keeps_the_best_ranked_passages_of_each_document_in_order():
     capped = cap_per_document(ranked, 2)
 
     assert [(p.document_id, p.text) for p in capped] == [
-        ("a", "0"), ("a", "1"), ("b", "2"), ("b", "4"), ("c", "5")]
+        ("a", "0"),
+        ("a", "1"),
+        ("b", "2"),
+        ("b", "4"),
+        ("c", "5"),
+    ]
 
 
 def test_cap_of_one_returns_one_passage_per_document():

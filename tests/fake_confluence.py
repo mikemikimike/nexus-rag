@@ -5,12 +5,13 @@ answering from a small site kept in a JSON file that the test edits through `Fak
 and logs every call so a test can tell what was (not) fetched. A page can be told to fail
 each command; a failing command exits non-zero with a message on stderr, like the CLI.
 """
+
 import json
 import stat
 import sys
 from pathlib import Path
 
-SCRIPT = '''#!{python}
+SCRIPT = """#!{python}
 import json
 import re
 import sys
@@ -72,7 +73,7 @@ elif command == "export":
     Path(option("--dest"), option("--file")).write_text(p["body"])
 else:
     fail("fake confluence: unsupported command " + command)
-'''
+"""
 
 
 class FakeSite:
@@ -84,19 +85,34 @@ class FakeSite:
         self.bin.write_text(SCRIPT.format(python=sys.executable, site=str(self._file)))
         self.bin.chmod(self.bin.stat().st_mode | stat.S_IEXEC)
 
-    def page(self, page_id: str, title: str, *, space: str = "ENG", parent: str | None = None,
-             version: int | None = 1, body: str = "", type: str = "page") -> None:
+    def page(
+        self,
+        page_id: str,
+        title: str,
+        *,
+        space: str = "ENG",
+        parent: str | None = None,
+        version: int | None = 1,
+        body: str = "",
+        type: str = "page",
+    ) -> None:
         """Add a page, or change it: a changed page keeps its attachments and failures."""
         old = self._pages.get(page_id, {})
         self._pages[page_id] = {
-            "id": page_id, "title": title, "type": type, "spaceKey": space,
+            "id": page_id,
+            "title": title,
+            "type": type,
+            "spaceKey": space,
             "url": f"https://wiki.example.test/pages/viewpage.action?pageId={page_id}",
-            "version": version, "parent": parent, "body": body,
-            "attachments": old.get("attachments", {}), "fail": old.get("fail", [])}
+            "version": version,
+            "parent": parent,
+            "body": body,
+            "attachments": old.get("attachments", {}),
+            "fail": old.get("fail", []),
+        }
         self._save()
 
-    def attach(self, page_id: str, name: str, content: str, *,
-               version: int | None = 1) -> None:
+    def attach(self, page_id: str, name: str, content: str, *, version: int | None = 1) -> None:
         self._pages[page_id]["attachments"][name] = {"content": content, "version": version}
         self._save()
 

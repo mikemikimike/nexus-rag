@@ -1,20 +1,20 @@
 import io
 
 import pytest
-
-import fake_confluence
 from qdrant_client import QdrantClient
 
+import fake_confluence
+from conftest import SYNONYMS
+from fake_litellm_server import FakeLiteLLM
+from index_states import NAMES
 from local_rag.cli import main
 from local_rag.exclusive import ExclusiveRun
 from local_rag.fakes import FakeModelGateway
-from conftest import SYNONYMS
-from index_states import NAMES
-from fake_litellm_server import FakeLiteLLM
 
-
-EMBEDDING = {"RAG_EMBED_MODEL": "embed",  # Hybrid retrieval, the default, needs these named
-             "LITELLM_BASE_URL": "http://gateway.example.test:4000/v1"}
+EMBEDDING = {
+    "RAG_EMBED_MODEL": "embed",  # Hybrid retrieval, the default, needs these named
+    "LITELLM_BASE_URL": "http://gateway.example.test:4000/v1",
+}
 
 
 @pytest.fixture
@@ -23,11 +23,14 @@ def folder(tmp_path):
     (root / "dba").mkdir(parents=True)
     (root / "garage").mkdir()
     (root / "dba" / "ora-00942.md").write_text(
-        "ORA-00942: table or view does not exist. Check the schema owner and grants.")
+        "ORA-00942: table or view does not exist. Check the schema owner and grants."
+    )
     (root / "dba" / "ora-12154.md").write_text(
-        "ORA-12154: TNS could not resolve the connect identifier. Check tnsnames.")
+        "ORA-12154: TNS could not resolve the connect identifier. Check tnsnames."
+    )
     (root / "garage" / "battery.md").write_text(
-        "When the car will not start, the battery is dead more often than not.")
+        "When the car will not start, the battery is dead more often than not."
+    )
     declare(tmp_path, docs=f'kind = "folder"\npath = "{root}"')
     return root
 
@@ -52,10 +55,16 @@ def cli(monkeypatch, tmp_path):
 
     def run(*argv, **environ):
         out, err = io.StringIO(), io.StringIO()
-        code = main(list(argv), {**EMBEDDING, "RAG_CORPORA_FILE": str(tmp_path / "corpora.toml"),
-                                 **environ}, stdout=out, stderr=err,
-                    gateway=gateway, client=client)
+        code = main(
+            list(argv),
+            {**EMBEDDING, "RAG_CORPORA_FILE": str(tmp_path / "corpora.toml"), **environ},
+            stdout=out,
+            stderr=err,
+            gateway=gateway,
+            client=client,
+        )
         return code, out.getvalue(), err.getvalue()
+
     run.client, run.gateway = client, gateway
     return run
 
@@ -179,8 +188,7 @@ def test_the_rebuild_threshold_comes_from_the_environment(cli, folder):
     sync(cli, folder)
     (folder / "garage" / "empty.md").write_text("")
 
-    code, out, _ = cli("rebuild",
-                       RAG_REBUILD_FAILURE_THRESHOLD="0.25")
+    code, out, _ = cli("rebuild", RAG_REBUILD_FAILURE_THRESHOLD="0.25")
 
     assert code == 0
     assert "promoted" in out and "3 indexed, 1 failed" in out
@@ -222,12 +230,15 @@ def test_a_folder_that_does_not_exist_is_not_an_empty_corpus(cli, folder, tmp_pa
     assert "documents:   3" in cli("status")[1]
 
 
-@pytest.mark.parametrize("argv", [
-    ["sync"],
-    ["sync", "nope"],
-    ["sync", "docs", "--corpora", "missing.toml"],
-    ["rebuild", "--corpora", "missing.toml"],
-])
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["sync"],
+        ["sync", "nope"],
+        ["sync", "docs", "--corpora", "missing.toml"],
+        ["rebuild", "--corpora", "missing.toml"],
+    ],
+)
 def test_a_command_without_a_usable_corpus_is_a_usage_error(cli, folder, argv):
     code, out, err = cli(*argv)
 
@@ -260,8 +271,9 @@ def test_the_declaration_file_can_be_named_on_the_command_line(cli, folder, tmp_
     elsewhere = tmp_path / "elsewhere.toml"
     elsewhere.write_text(f'[corpus.notes]\nkind = "folder"\npath = "{folder}"\n')
 
-    code, out, _ = cli("sync", "notes", "--corpora", str(elsewhere),
-                       RAG_CORPORA_FILE=str(tmp_path / "unused.toml"))
+    code, out, _ = cli(
+        "sync", "notes", "--corpora", str(elsewhere), RAG_CORPORA_FILE=str(tmp_path / "unused.toml")
+    )
 
     assert code == 0 and "3 added" in out
 
@@ -270,8 +282,11 @@ def test_syncing_one_corpus_leaves_the_documents_of_another_alone(cli, folder, t
     other = tmp_path / "other"
     other.mkdir()
     (other / "notes.md").write_text("Notes about ZX-9000.")
-    declare(tmp_path, docs=f'kind = "folder"\npath = "{folder}"',
-            other=f'kind = "folder"\npath = "{other}"')
+    declare(
+        tmp_path,
+        docs=f'kind = "folder"\npath = "{folder}"',
+        other=f'kind = "folder"\npath = "{other}"',
+    )
     cli("sync", "docs")
     cli("sync", "other")
     (other / "notes.md").unlink()
@@ -306,10 +321,18 @@ def test_an_unreachable_model_gateway_fails_each_document_and_exits_non_zero(fol
     client = QdrantClient(location=":memory:")
     out, err = io.StringIO(), io.StringIO()
 
-    code = main(["sync", "docs"],
-                {**EMBEDDING, **declared(folder), "LITELLM_BASE_URL": "http://127.0.0.1:1/v1",
-                 "RAG_EMBED_RETRY_BACKOFF": "0"},
-                stdout=out, stderr=err, client=client)
+    code = main(
+        ["sync", "docs"],
+        {
+            **EMBEDDING,
+            **declared(folder),
+            "LITELLM_BASE_URL": "http://127.0.0.1:1/v1",
+            "RAG_EMBED_RETRY_BACKOFF": "0",
+        },
+        stdout=out,
+        stderr=err,
+        client=client,
+    )
 
     assert code == 1
     assert "Sync: 0 added, 0 replaced, 0 removed, 0 unchanged, 3 failed" in out.getvalue()
@@ -319,13 +342,19 @@ def test_an_unreachable_model_gateway_fails_each_document_and_exits_non_zero(fol
 def test_the_real_model_gateway_is_built_from_the_environment(folder):
     server = FakeLiteLLM(FakeModelGateway(synonyms=SYNONYMS)).start()
     client = QdrantClient(location=":memory:")
-    environ = {**EMBEDDING, **declared(folder), "LITELLM_BASE_URL": server.base_url,
-               "LITELLM_API_KEY": server.api_key, "RAG_RERANK_MODEL": "rerank"}
+    environ = {
+        **EMBEDDING,
+        **declared(folder),
+        "LITELLM_BASE_URL": server.base_url,
+        "LITELLM_API_KEY": server.api_key,
+        "RAG_RERANK_MODEL": "rerank",
+    }
 
     def run(*argv):
         out = io.StringIO()
-        return main(list(argv), environ, stdout=out, stderr=io.StringIO(), client=client), \
-            out.getvalue()
+        return main(
+            list(argv), environ, stdout=out, stderr=io.StringIO(), client=client
+        ), out.getvalue()
 
     try:
         assert run("sync", "docs")[0] == 0
@@ -347,8 +376,12 @@ def test_a_second_run_while_one_is_running_is_refused(cli, folder):
 def test_a_confluence_corpus_is_synced_from_roots(cli, tmp_path):
     site = fake_confluence.FakeSite(tmp_path)
     site.page("100", "ENG home", body="# ENG home\n\nStart here.\n")
-    site.page("101", "Fixing ORA-00942", parent="100",
-              body="Table or view does not exist. Check the grants.\n")
+    site.page(
+        "101",
+        "Fixing ORA-00942",
+        parent="100",
+        body="Table or view does not exist. Check the grants.\n",
+    )
     declare(tmp_path, wiki='kind = "confluence"\nroots = ["100"]')
 
     code, out, _ = cli("sync", "wiki", CONFLUENCE_BIN=str(site.bin))
@@ -376,15 +409,22 @@ def test_a_listing_that_failed_makes_the_sync_fail_and_removes_nothing(cli, tmp_
 
 # --- the Retrieval mode ----------------------------------------------------------------
 
+
 def test_keyword_retrieval_runs_with_no_embedding_model_and_never_calls_a_gateway(folder):
     client = QdrantClient(location=":memory:")
-    environ = {"RAG_RETRIEVAL": "keyword", **declared(folder),
-               "LITELLM_BASE_URL": "http://127.0.0.1:1/v1"}  # nothing listens there
+    environ = {
+        "RAG_RETRIEVAL": "keyword",
+        **declared(folder),
+        "LITELLM_BASE_URL": "http://127.0.0.1:1/v1",
+    }  # nothing listens there
 
     def run(*argv):
         out, err = io.StringIO(), io.StringIO()
-        return main(list(argv), environ, stdout=out, stderr=err, client=client), \
-            out.getvalue(), err.getvalue()
+        return (
+            main(list(argv), environ, stdout=out, stderr=err, client=client),
+            out.getvalue(),
+            err.getvalue(),
+        )
 
     assert run("sync", "docs")[0] == 0
     code, out, _ = run("search", "ORA-00942")
@@ -400,6 +440,7 @@ def test_a_search_that_fell_back_to_keywords_prints_the_notice(cli, folder, monk
 
     def down(text):
         raise ConnectionError("unreachable")
+
     monkeypatch.setattr(cli.gateway, "embed_query", down)
 
     code, out, _ = cli("search", "ORA-00942")
@@ -418,8 +459,11 @@ def test_forget_removes_a_corpuss_documents_and_reports_how_many(cli, folder, tm
     other = tmp_path / "other"
     other.mkdir()
     (other / "notes.md").write_text("Notes about ZX-9000.")
-    declare(tmp_path, docs=f'kind = "folder"\npath = "{folder}"',
-            other=f'kind = "folder"\npath = "{other}"')
+    declare(
+        tmp_path,
+        docs=f'kind = "folder"\npath = "{folder}"',
+        other=f'kind = "folder"\npath = "{other}"',
+    )
     cli("sync", "docs")
     cli("sync", "other")
 
@@ -463,8 +507,11 @@ def test_a_rebuild_leaves_out_an_undeclared_corpus(cli, folder, tmp_path):
     other = tmp_path / "other"
     other.mkdir()
     (other / "notes.md").write_text("Notes about ZX-9000.")
-    declare(tmp_path, docs=f'kind = "folder"\npath = "{folder}"',
-            other=f'kind = "folder"\npath = "{other}"')
+    declare(
+        tmp_path,
+        docs=f'kind = "folder"\npath = "{folder}"',
+        other=f'kind = "folder"\npath = "{other}"',
+    )
     cli("sync", "docs")
     cli("sync", "other")
     declare(tmp_path, docs=f'kind = "folder"\npath = "{folder}"')
@@ -478,18 +525,22 @@ def test_a_rebuild_leaves_out_an_undeclared_corpus(cli, folder, tmp_path):
 
 def test_search_can_name_a_repository_and_a_tracked_ref_and_shows_the_ref(cli, tmp_path):
     from fake_gitlab import FakeGitLab
+
     remote = FakeGitLab(tmp_path / "remote")
     remote.commit("platform/pay", {"a.py": "def settle(): pass  # zebrafish\n"})
     remote.commit("platform/pay", {"a.py": "def settle(): pass  # zebrafish\n"}, branch="feat")
     remote.commit("platform/other", {"b.py": "def settle(): pass  # zebrafish\n"})
-    declare(tmp_path, code=f'''kind = "gitlab"
+    declare(
+        tmp_path,
+        code=f'''kind = "gitlab"
 cache = "{tmp_path / "mirrors"}"
 [[corpus.code.repositories]]
 path = "platform/pay"
 refs = ["main", "feat"]
 [[corpus.code.repositories]]
 path = "platform/other"
-refs = ["main"]''')
+refs = ["main"]''',
+    )
     env = {"GITLAB_URL": remote.url, "GITLAB_TOKEN": "t"}
     assert cli("sync", "code", **env)[0] == 0
 

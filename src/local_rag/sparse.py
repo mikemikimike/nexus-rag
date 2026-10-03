@@ -3,6 +3,7 @@
 Document side: saturated term frequency with length normalisation. Query side: 1.0 per
 unique term. IDF is applied by Qdrant (sparse vector modifier=IDF).
 """
+
 import re
 import zlib
 from collections import Counter
@@ -40,8 +41,7 @@ def tokenize(text: str) -> list[str]:
             for segment in piece.split("_"):  # snake_case
                 parts = _CAMEL_PART.findall(segment)  # camelCase and PascalCase
                 if len(parts) > 1 or segment != piece:
-                    tokens.extend(part.lower() for part in (parts or [segment])
-                                  if len(part) > 1)
+                    tokens.extend(part.lower() for part in (parts or [segment]) if len(part) > 1)
     return tokens
 
 

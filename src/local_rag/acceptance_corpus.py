@@ -6,6 +6,7 @@ Two of the probes are searched by meaning, with a query that shares no word with
 Document: the suite's proof that the dense vectors work (and, for the tail of a long
 Document, that the embedding model read all of a Passage).
 """
+
 import random
 import secrets
 import string
@@ -25,8 +26,7 @@ SEMANTIC_QUERY = "automobile refuses ignition"
 SEMANTIC_MEANING = ("vehicle", "automobile", "start", "ignition", "refuses", "battery", "dead")
 TAIL_TEXT = "Finally, the lighthouse keeper repaired the broken lamp before the storm."
 TAIL_QUERY = "beacon mended tempest"
-TAIL_MEANING = ("lighthouse", "beacon", "keeper", "repaired", "mended", "lamp", "storm",
-                "tempest")
+TAIL_MEANING = ("lighthouse", "beacon", "keeper", "repaired", "mended", "lamp", "storm", "tempest")
 MEANINGS = (SEMANTIC_MEANING, TAIL_MEANING)
 
 # How many times longer than one Passage the long Document is: far longer, so that a
@@ -35,10 +35,32 @@ LONG_FACTOR = 10
 # How full the last Passage of the long Document is made, as a share of the Passage size.
 FULL_PASSAGE = 0.9
 
-_ADJECTIVES = ("quarterly", "annual", "draft", "internal", "weekly", "revised", "pending",
-               "regional", "summary", "provisional")
-_NOUNS = ("ledger", "invoice", "budget", "agenda", "forecast", "roster", "inventory",
-          "schedule", "voucher", "minutes", "estimate", "memo")
+_ADJECTIVES = (
+    "quarterly",
+    "annual",
+    "draft",
+    "internal",
+    "weekly",
+    "revised",
+    "pending",
+    "regional",
+    "summary",
+    "provisional",
+)
+_NOUNS = (
+    "ledger",
+    "invoice",
+    "budget",
+    "agenda",
+    "forecast",
+    "roster",
+    "inventory",
+    "schedule",
+    "voucher",
+    "minutes",
+    "estimate",
+    "memo",
+)
 _VERBS = ("covers", "lists", "updates", "replaces", "mentions", "tracks", "follows")
 
 
@@ -60,12 +82,19 @@ class Run:
 
 
 def keyword_text(identifier: str) -> str:
-    return (f"Maintenance window runbook. The reference of this runbook is {identifier}. "
-            "It is a generated Document of the acceptance suite.")
+    return (
+        f"Maintenance window runbook. The reference of this runbook is {identifier}. "
+        "It is a generated Document of the acceptance suite."
+    )
 
 
-def long_text(run: Run, *, chunk_tokens: int, count_tokens: Callable[[str], int],
-              split: Callable[[str], list[str]]) -> str:
+def long_text(
+    run: Run,
+    *,
+    chunk_tokens: int,
+    count_tokens: Callable[[str], int],
+    split: Callable[[str], list[str]],
+) -> str:
     """Many Passages of invented sentences, and the tail's marker in the very last sentence.
 
     Sentences are added before the marker until the last Passage is nearly full-sized, so the
@@ -78,8 +107,10 @@ def long_text(run: Run, *, chunk_tokens: int, count_tokens: Callable[[str], int]
     def sentence() -> str:
         nonlocal number
         number += 1
-        return (f"The {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)} {rng.choice(_VERBS)} "
-                f"the {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)} of item {number}.")
+        return (
+            f"The {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)} {rng.choice(_VERBS)} "
+            f"the {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)} of item {number}."
+        )
 
     paragraphs = []
     while count_tokens("\n\n".join(paragraphs)) < LONG_FACTOR * chunk_tokens:
@@ -88,8 +119,10 @@ def long_text(run: Run, *, chunk_tokens: int, count_tokens: Callable[[str], int]
     while True:
         closing = " ".join([*padding, TAIL_TEXT, f"The closing reference is {run.tail}."])
         text = "\n\n".join([*paragraphs, closing])
-        if (count_tokens(split(text)[-1]) >= FULL_PASSAGE * chunk_tokens
-                or len(padding) > chunk_tokens):  # (the bound only guards a splitter gone wrong)
+        if (
+            count_tokens(split(text)[-1]) >= FULL_PASSAGE * chunk_tokens
+            or len(padding) > chunk_tokens
+        ):  # (the bound only guards a splitter gone wrong)
             return text
         padding.append(sentence())
 

@@ -1,4 +1,5 @@
 """The text of a draw.io diagram: the page names and every shape and connector label."""
+
 import base64
 import re
 import urllib.parse
@@ -45,7 +46,8 @@ def _model(diagram: ElementTree.Element) -> ElementTree.Element:
     try:
         # Raw deflate, then URL-encoded XML, is how draw.io compresses a page.
         xml = urllib.parse.unquote(
-            zlib.decompress(base64.b64decode(encoded, validate=True), -15).decode("utf-8"))
+            zlib.decompress(base64.b64decode(encoded, validate=True), -15).decode("utf-8")
+        )
         return ElementTree.fromstring(xml)
     except (ValueError, zlib.error, ElementTree.ParseError) as error:
         raise DrawioError(f"not a readable drawio page: {error}") from None
@@ -56,8 +58,11 @@ def _labels(model: ElementTree.Element) -> list[str]:
     for element in model.iter():
         # A plain cell keeps its label in `value`; a cell wrapped in object/UserObject
         # (custom properties) has it on the wrapper as `label`.
-        label = element.get("label") if element.tag in ("object", "UserObject") else (
-            element.get("value") if element.tag == "mxCell" else None)
+        label = (
+            element.get("label")
+            if element.tag in ("object", "UserObject")
+            else (element.get("value") if element.tag == "mxCell" else None)
+        )
         if label and (label := _plain(label)):
             found.append(label)
     return found

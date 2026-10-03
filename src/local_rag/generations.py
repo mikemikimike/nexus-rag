@@ -15,6 +15,7 @@ alias points at. Other collections in the same Qdrant, however their names start
 never touched. The registry also notes which generation was last made live, so that a
 Live index lost from Qdrant is reported as corrupt rather than read as a new, empty one.
 """
+
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -86,8 +87,7 @@ class Generations:
             registry.formats[generation] = index_format.to_payload()
         self._save(registry)
 
-    def create(self, generation: str, index_format: IndexFormat,
-               make: Callable[[], None]) -> None:
+    def create(self, generation: str, index_format: IndexFormat, make: Callable[[], None]) -> None:
         """Record the generation with its format, then ``make`` its collection. Recorded first,
         so a crash part way leaves nothing that cleanup does not know of."""
         self.record(generation, index_format)
@@ -132,10 +132,14 @@ class Generations:
         if live is None or previous is None:
             raise NoPreviousIndex("there is no previous index to switch back to")
         registry = self._load()  # before the swap: an unreadable record is reported untouched
-        self._client.update_collection_aliases(change_aliases_operations=[
-            _drop_alias(self._live_alias), _drop_alias(self._previous_alias),
-            _create_alias(self._live_alias, previous),
-            _create_alias(self._previous_alias, live)])
+        self._client.update_collection_aliases(
+            change_aliases_operations=[
+                _drop_alias(self._live_alias),
+                _drop_alias(self._previous_alias),
+                _create_alias(self._live_alias, previous),
+                _create_alias(self._previous_alias, live),
+            ]
+        )
         registry.live = previous
         self._save(registry)
 
@@ -192,8 +196,9 @@ class Generations:
     def _live_and_previous(self) -> tuple[str | None, str | None]:
         return self._resolve(self._aliases())
 
-    def _resolve(self, aliases: dict[str, str],
-                 strict: bool = True) -> tuple[str | None, str | None]:
+    def _resolve(
+        self, aliases: dict[str, str], strict: bool = True
+    ) -> tuple[str | None, str | None]:
         """The live and previous collections. Strict also reports a Live index that was lost."""
         live = aliases.get(self._live_alias)
         if live is None and self._client.collection_exists(self._name):
@@ -231,25 +236,42 @@ class Generations:
         generations = payload.get("generations")
         # Registries written before formats were recorded only have the names.
         formats, live = payload.get("formats", {}), payload.get("live")
-        if not (isinstance(generations, list) and all(isinstance(g, str) for g in generations)
-                and isinstance(formats, dict) and isinstance(live, str | None)):
+        if not (
+            isinstance(generations, list)
+            and all(isinstance(g, str) for g in generations)
+            and isinstance(formats, dict)
+            and isinstance(live, str | None)
+        ):
             raise CorruptIndex("the record of index generations is unreadable")
         return _Registry(generations, formats, live)
 
     def _save(self, registry: _Registry) -> None:
         if not self._client.collection_exists(self._registry):
             self._client.create_collection(
-                self._registry, vectors_config=models.VectorParams(
-                    size=1, distance=models.Distance.COSINE))
-        self._client.upsert(self._registry, points=[models.PointStruct(
-            id=_REGISTRY_POINT, vector=[1.0],
-            payload={"generations": registry.generations, "formats": registry.formats,
-                     "live": registry.live})], wait=True)
+                self._registry,
+                vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
+            )
+        self._client.upsert(
+            self._registry,
+            points=[
+                models.PointStruct(
+                    id=_REGISTRY_POINT,
+                    vector=[1.0],
+                    payload={
+                        "generations": registry.generations,
+                        "formats": registry.formats,
+                        "live": registry.live,
+                    },
+                )
+            ],
+            wait=True,
+        )
 
 
 def _create_alias(alias: str, collection: str) -> models.CreateAliasOperation:
     return models.CreateAliasOperation(
-        create_alias=models.CreateAlias(collection_name=collection, alias_name=alias))
+        create_alias=models.CreateAlias(collection_name=collection, alias_name=alias)
+    )
 
 
 def _drop_alias(alias: str) -> models.DeleteAliasOperation:

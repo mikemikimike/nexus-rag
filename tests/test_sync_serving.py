@@ -16,8 +16,9 @@ def test_replaced_document_serves_its_new_full_text(index, corpus):
     index.sync(corpus)
     changed = replace(DOCUMENTS[0], version="2", text="Brand new body.")
 
-    report = index.sync(InMemoryCorpus([changed, corpus.fetch("dba/ora-12154"),
-                                        corpus.fetch("garage/battery")]))
+    report = index.sync(
+        InMemoryCorpus([changed, corpus.fetch("dba/ora-12154"), corpus.fetch("garage/battery")])
+    )
 
     assert report.replaced == 1
     assert index.get_document("default:dba/ora-00942") == "Brand new body."
@@ -26,8 +27,9 @@ def test_replaced_document_serves_its_new_full_text(index, corpus):
 def test_removed_document_and_space_disappear_from_serving(index, corpus):
     index.sync(corpus)
 
-    report = index.sync(InMemoryCorpus([corpus.fetch("dba/ora-00942"),
-                                        corpus.fetch("dba/ora-12154")]))
+    report = index.sync(
+        InMemoryCorpus([corpus.fetch("dba/ora-00942"), corpus.fetch("dba/ora-12154")])
+    )
 
     assert report.removed == 1
     assert index.get_document("default:garage/battery") is None

@@ -12,6 +12,7 @@ schema version in ``index_format``. Points written by earlier versions lack some
 Corpus, parts, a placement) and are read as they are. A point missing a field every version
 wrote is reported as corrupt, never skipped.
 """
+
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -58,17 +59,22 @@ class Passage:
         symbol when known; empty for a Passage that is not code."""
         if self.start_line is None:
             return []
-        found = [("file", self.code.path if self.code else self.title),
-                 ("lines", self.line_range), ("symbol", self.symbol)]
+        found = [
+            ("file", self.code.path if self.code else self.title),
+            ("lines", self.line_range),
+            ("symbol", self.symbol),
+        ]
         return [(name, value) for name, value in found if value]
 
     def citation(self) -> tuple[tuple[str, str], ...]:
         """The ordered (name, value) fields that cite it: where to read it, the page it is on
         (its parent's, for an Attachment), its space, the Tracked ref for code, the Attachment
         itself, and the code location. Renderers show these and decide only the layout."""
-        fields = [("link", self.link),
-                  ("page_id", self.parent_id or self.document_id),
-                  ("space", self.space)]
+        fields = [
+            ("link", self.link),
+            ("page_id", self.parent_id or self.document_id),
+            ("space", self.space),
+        ]
         if self.code:
             fields.append(("ref", self.code.tracked_ref.ref))
         if self.parent_id:
@@ -121,8 +127,11 @@ class Stored:
         """Unchanged: one stored version, the listed one (or ``version``, the one fetched),
         and the part and placement it was listed under (a Document that moved to another part,
         or whose Primary ref mark or link changed, is re-added so what is stored stays true)."""
-        return self.versions == {version or ref.version} and self.placements == {ref.placement} and (
-            not self.recorded or self.parts == set(ref.parts))
+        return (
+            self.versions == {version or ref.version}
+            and self.placements == {ref.placement}
+            and (not self.recorded or self.parts == set(ref.parts))
+        )
 
     def held_back_by(self, failures: Mapping[str, str]) -> bool:
         """True if a part this Document sat in could not be listed. With no part recorded,
@@ -147,16 +156,18 @@ class PassageStore:
         """``dimension`` is the size of the dense vectors, None for a Keyword-only index."""
         self._client.create_collection(
             collection_name=collection,
-            vectors_config={} if dimension is None else {"dense": models.VectorParams(
-                size=dimension, distance=models.Distance.COSINE)},
-            sparse_vectors_config={"bm25": models.SparseVectorParams(
-                modifier=models.Modifier.IDF)},
+            vectors_config={}
+            if dimension is None
+            else {"dense": models.VectorParams(size=dimension, distance=models.Distance.COSINE)},
+            sparse_vectors_config={"bm25": models.SparseVectorParams(modifier=models.Modifier.IDF)},
         )
         if self._payload_indexes:
             self._client.create_payload_index(
-                collection, "document_id", models.PayloadSchemaType.KEYWORD)
+                collection, "document_id", models.PayloadSchemaType.KEYWORD
+            )
             self._client.create_payload_index(
-                collection, "corpus", models.PayloadSchemaType.KEYWORD)
+                collection, "corpus", models.PayloadSchemaType.KEYWORD
+            )
 
     def dense_size(self, collection: str) -> int | None:
         """The size of the collection's dense vectors; None if it has none (Keyword-only).
@@ -164,8 +175,7 @@ class PassageStore:
         Raises CorruptIndex if the collection is not laid out as a generation.
         """
         params = self._client.get_collection(collection).config.params
-        if not (isinstance(params.vectors, dict)
-                and "bm25" in (params.sparse_vectors or {})):
+        if not (isinstance(params.vectors, dict) and "bm25" in (params.sparse_vectors or {})):
             raise CorruptIndex(f"{collection} is not a Knowledge index collection")
         dense = params.vectors.get("dense")
         return dense.size if dense else None
@@ -175,51 +185,84 @@ class PassageStore:
         document_point = _document_point(document)
         points = []
         for number, written in enumerate(passages):
-            vectors = {"bm25": models.SparseVector(
-                indices=written.sparse.indices, values=written.sparse.values)}
+            vectors = {
+                "bm25": models.SparseVector(
+                    indices=written.sparse.indices, values=written.sparse.values
+                )
+            }
             if written.dense is not None:
                 vectors["dense"] = written.dense
-            points.append(models.PointStruct(
-                id=_passage_id(document.id, number),
-                vector=vectors,
-                payload={"document_id": document.id, "version": document.version,
-                         "title": document.title, "url": document.url,
-                         "space": document.space, "text": written.piece.text,
-                         "parent_id": document.parent_id, "corpus": document.corpus,
-                         "parts": list(document.parts), "placement": document.placement,
-                         **_of_code(document), **_code_payload(document, written.piece)}))
+            points.append(
+                models.PointStruct(
+                    id=_passage_id(document.id, number),
+                    vector=vectors,
+                    payload={
+                        "document_id": document.id,
+                        "version": document.version,
+                        "title": document.title,
+                        "url": document.url,
+                        "space": document.space,
+                        "text": written.piece.text,
+                        "parent_id": document.parent_id,
+                        "corpus": document.corpus,
+                        "parts": list(document.parts),
+                        "placement": document.placement,
+                        **_of_code(document),
+                        **_code_payload(document, written.piece),
+                    },
+                )
+            )
         # Write the new Passages first, then delete this Document's leftover old ones (those
         # of an earlier, longer version included), so a failure in between never leaves the
         # Document missing from search.
         self._client.upsert(collection, points=[*points, document_point], wait=True)
         self._client.delete(
-            collection, wait=True,
-            points_selector=models.FilterSelector(filter=models.Filter(
-                must=[_match("document_id", document.id)],
-                must_not=[models.HasIdCondition(
-                    has_id=[*(p.id for p in points), document_point.id])])))
+            collection,
+            wait=True,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[_match("document_id", document.id)],
+                    must_not=[
+                        models.HasIdCondition(has_id=[*(p.id for p in points), document_point.id])
+                    ],
+                )
+            ),
+        )
 
     def remove(self, collection: str, document_id: str) -> None:
         self._client.delete(
-            collection, wait=True,
+            collection,
+            wait=True,
             points_selector=models.FilterSelector(
-                filter=models.Filter(must=[_match("document_id", document_id)])))
+                filter=models.Filter(must=[_match("document_id", document_id)])
+            ),
+        )
 
     def forget(self, collection: str, corpus: str) -> int:
         """Remove every Document the Corpus owns; returns how many there were."""
         documents = self._client.count(
-            collection, exact=True, count_filter=models.Filter(
-                must=[_match("corpus", corpus), _match("kind", _DOCUMENT_KIND)])).count
+            collection,
+            exact=True,
+            count_filter=models.Filter(
+                must=[_match("corpus", corpus), _match("kind", _DOCUMENT_KIND)]
+            ),
+        ).count
         self._client.delete(
-            collection, wait=True, points_selector=models.FilterSelector(
-                filter=models.Filter(must=[_match("corpus", corpus)])))
+            collection,
+            wait=True,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(must=[_match("corpus", corpus)])
+            ),
+        )
         return documents
 
     def counts(self, collection: str) -> tuple[int, int]:
         """How many Documents and how many Passages the collection holds."""
         documents = self._client.count(
-            collection, count_filter=models.Filter(must=[_match("kind", _DOCUMENT_KIND)]),
-            exact=True).count
+            collection,
+            count_filter=models.Filter(must=[_match("kind", _DOCUMENT_KIND)]),
+            exact=True,
+        ).count
         return documents, self._client.count(collection, exact=True).count - documents
 
     def stored(self, collection: str, corpus: str) -> dict[str, Stored]:
@@ -227,8 +270,11 @@ class PassageStore:
 
         More than one version means an interrupted replace, so the Document is re-synced.
         """
-        points = self._scroll(collection, models.Filter(must=[_match("corpus", corpus)]),
-                              ["document_id", "version", "parts", "placement"])
+        points = self._scroll(
+            collection,
+            models.Filter(must=[_match("corpus", corpus)]),
+            ["document_id", "version", "parts", "placement"],
+        )
         found: dict[str, Stored] = {}
         with self._reading(collection):
             for point in points:
@@ -237,9 +283,13 @@ class PassageStore:
 
     def corpora(self, collection: str) -> set[str]:
         """The names of the Corpora that own at least one Document in ``collection``."""
-        return {p.payload["corpus"] for p in self._scroll(
-                    collection, models.Filter(must=[_match("kind", _DOCUMENT_KIND)]), ["corpus"])
-                if p.payload.get("corpus")}
+        return {
+            p.payload["corpus"]
+            for p in self._scroll(
+                collection, models.Filter(must=[_match("kind", _DOCUMENT_KIND)]), ["corpus"]
+            )
+            if p.payload.get("corpus")
+        }
 
     def spaces(self, collection: str) -> list[str]:
         """The named Spaces that have at least one Document, sorted."""
@@ -252,56 +302,96 @@ class PassageStore:
         """The full text of a Document, or None if it is not there."""
         records, _ = self._client.scroll(
             collection,
-            scroll_filter=models.Filter(must=[
-                _match("kind", _DOCUMENT_KIND), _match("document_id", document_id)]),
-            limit=1, with_payload=["full_text"])
+            scroll_filter=models.Filter(
+                must=[_match("kind", _DOCUMENT_KIND), _match("document_id", document_id)]
+            ),
+            limit=1,
+            with_payload=["full_text"],
+        )
         if not records:
             return None
         with self._reading(collection):
             return records[0].payload["full_text"]
 
-    def search(self, collection: str, *, dense: list[float] | None, sparse: SparseVector,
-               narrowing: Narrowing, candidates: int, limit: int) -> list[Passage]:
+    def search(
+        self,
+        collection: str,
+        *,
+        dense: list[float] | None,
+        sparse: SparseVector,
+        narrowing: Narrowing,
+        candidates: int,
+        limit: int,
+    ) -> list[Passage]:
         """The Passages the dense and sparse vectors find, fused by rank, best first. With
         neither vector there is nothing to look for, and nothing is found."""
-        must = [_match(key, value) for key, value in
-                (("space", narrowing.space), ("repository", narrowing.repository),
-                 ("ref", narrowing.ref))
-                if value is not None]
+        must = [
+            _match(key, value)
+            for key, value in (
+                ("space", narrowing.space),
+                ("repository", narrowing.repository),
+                ("ref", narrowing.ref),
+            )
+            if value is not None
+        ]
         # Only a Passage marked non-primary is left out: other Corpora's carry no mark.
         not_primary = [] if narrowing.ref is not None else [_match("primary", False)]
         narrowed = models.Filter(must=must, must_not=not_primary)
         prefetch = []
         if dense is not None:
-            prefetch.append(models.Prefetch(
-                query=dense, using="dense", limit=candidates, filter=narrowed))
+            prefetch.append(
+                models.Prefetch(query=dense, using="dense", limit=candidates, filter=narrowed)
+            )
         if sparse.indices:
-            prefetch.append(models.Prefetch(
-                query=models.SparseVector(indices=sparse.indices, values=sparse.values),
-                using="bm25", limit=candidates, filter=narrowed))
+            prefetch.append(
+                models.Prefetch(
+                    query=models.SparseVector(indices=sparse.indices, values=sparse.values),
+                    using="bm25",
+                    limit=candidates,
+                    filter=narrowed,
+                )
+            )
         if not prefetch:
             return []
         points = self._client.query_points(
-            collection, prefetch=prefetch,
+            collection,
+            prefetch=prefetch,
             query=models.FusionQuery(fusion=models.Fusion.RRF),
-            limit=limit, with_payload=True).points
+            limit=limit,
+            with_payload=True,
+        ).points
         with self._reading(collection):
-            return [Passage(
-                document_id=p.payload["document_id"], title=p.payload["title"],
-                url=p.payload["url"], space=p.payload["space"], text=p.payload["text"],
-                score=float(p.score), parent_id=p.payload.get("parent_id"),
-                corpus=p.payload.get("corpus"), code=_code_file(p.payload),
-                start_line=p.payload.get("start_line"), end_line=p.payload.get("end_line"),
-                symbol=p.payload.get("symbol"))
-                for p in points]
+            return [
+                Passage(
+                    document_id=p.payload["document_id"],
+                    title=p.payload["title"],
+                    url=p.payload["url"],
+                    space=p.payload["space"],
+                    text=p.payload["text"],
+                    score=float(p.score),
+                    parent_id=p.payload.get("parent_id"),
+                    corpus=p.payload.get("corpus"),
+                    code=_code_file(p.payload),
+                    start_line=p.payload.get("start_line"),
+                    end_line=p.payload.get("end_line"),
+                    symbol=p.payload.get("symbol"),
+                )
+                for p in points
+            ]
 
-    def _scroll(self, collection: str, where: models.Filter | None,
-                fields: list[str]) -> list[models.Record]:
+    def _scroll(
+        self, collection: str, where: models.Filter | None, fields: list[str]
+    ) -> list[models.Record]:
         found, offset = [], None
         while True:
             points, offset = self._client.scroll(
-                collection, limit=1000, offset=offset, with_vectors=False,
-                scroll_filter=where, with_payload=fields)
+                collection,
+                limit=1000,
+                offset=offset,
+                with_vectors=False,
+                scroll_filter=where,
+                with_payload=fields,
+            )
             found.extend(points)
             if offset is None:
                 return found
@@ -327,21 +417,35 @@ def _passage_id(document_id: str, number: int) -> str:
 
 def _document_point(document: Document) -> models.PointStruct:
     return models.PointStruct(
-        id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document.id}#document")), vector={},
-        payload={"kind": _DOCUMENT_KIND, "document_id": document.id,
-                 "version": document.version, "title": document.title, "url": document.url,
-                 "space": document.space, "full_text": document.text,
-                 "parent_id": document.parent_id, "corpus": document.corpus,
-                 "parts": list(document.parts), "placement": document.placement,
-                 **_of_code(document)})
+        id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document.id}#document")),
+        vector={},
+        payload={
+            "kind": _DOCUMENT_KIND,
+            "document_id": document.id,
+            "version": document.version,
+            "title": document.title,
+            "url": document.url,
+            "space": document.space,
+            "full_text": document.text,
+            "parent_id": document.parent_id,
+            "corpus": document.corpus,
+            "parts": list(document.parts),
+            "placement": document.placement,
+            **_of_code(document),
+        },
+    )
 
 
 def _code_payload(document: Document, piece: Piece) -> dict:
     """What a code Passage adds to the Document's ``_of_code`` payload: its file path and lines."""
     if piece.start_line is None:
         return {}
-    return {"path": document.code and document.code.path,
-            "start_line": piece.start_line, "end_line": piece.end_line, "symbol": piece.symbol}
+    return {
+        "path": document.code and document.code.path,
+        "start_line": piece.start_line,
+        "end_line": piece.end_line,
+        "symbol": piece.symbol,
+    }
 
 
 def _of_code(document: Document) -> dict:

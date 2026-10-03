@@ -32,6 +32,8 @@ local-rag-mcp = "local_rag.mcp_server:run"
 dev = [
     "pytest",
     "pyyaml",  # reads the compose file in tests
+    "ruff==0.16.10",  # lint and format, as CI runs them
+    "mypy==2.4.0",  # typecheck, as CI runs it
 ]
 
 [tool.setuptools.packages.find]
@@ -42,11 +44,22 @@ testpaths = ["tests"]
 
 [tool.ruff]
 target-version = "py312"
+line-length = 100
+src = ["src", "tests"]  # the tests import their shared helpers by module name
 
 [tool.ruff.lint]
-# Errors and likely bugs, not style: pyflakes, pycodestyle's runtime errors, bugbear, pyupgrade.
-select = ["E4", "E7", "E9", "F", "B", "UP"]
+# Errors and likely bugs (pyflakes, pycodestyle's runtime errors, bugbear, pyupgrade), and
+# sorted imports. Layout is ruff format's.
+select = ["E4", "E7", "E9", "F", "B", "UP", "I"]
 ignore = [
     "E731",  # a lambda bound to a name, used for small test stand-ins
     "E741",  # `l` as a loop variable
 ]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "tests"  # the tests import their shared helpers by module name
+
+[[tool.mypy.overrides]]
+module = ["nltk.*", "yaml"]
+ignore_missing_imports = true  # neither ships type hints

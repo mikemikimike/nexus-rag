@@ -1,6 +1,7 @@
 """States of a Knowledge index in Qdrant that its interface never produces: damage, and the
 layouts earlier versions wrote. Tests reach them through the Qdrant client they share with the
 index, naming collections through ``IndexNames`` rather than spelling them out."""
+
 from qdrant_client import QdrantClient, models
 
 from local_rag import Settings
@@ -24,8 +25,7 @@ def generations_in(client: QdrantClient) -> set[str]:
     return {name for name in collections(client) if NAMES.is_generation(name)}
 
 
-def legacy_index(client: QdrantClient, gateway: ModelGateway,
-                 documents: list[Document]) -> None:
+def legacy_index(client: QdrantClient, gateway: ModelGateway, documents: list[Document]) -> None:
     """The plain collection earlier versions kept as the whole index: no generations, no
     record of them or of the format, and Documents owned by no Corpus."""
     store, sparse = PassageStore(client, payload_indexes=False), SparseEncoder(Settings().sparse)
@@ -33,8 +33,11 @@ def legacy_index(client: QdrantClient, gateway: ModelGateway,
     vectors = gateway.embed(contents)
     store.create(NAMES.plain, dimension=len(vectors[0]))
     for document, content, vector in zip(documents, contents, vectors, strict=True):
-        store.write(NAMES.plain, document,
-                    [Written(Piece(document.text), sparse.encode_document(content), vector)])
+        store.write(
+            NAMES.plain,
+            document,
+            [Written(Piece(document.text), sparse.encode_document(content), vector)],
+        )
 
 
 def record_format(client: QdrantClient, generation: str, index_format: IndexFormat) -> None:
@@ -47,8 +50,9 @@ def registry_payload(client: QdrantClient) -> dict:
 
 
 def overwrite_registry(client: QdrantClient, payload: dict) -> None:
-    client.upsert(NAMES.registry, points=[
-        models.PointStruct(id=1, vector=[1.0], payload=payload)], wait=True)
+    client.upsert(
+        NAMES.registry, points=[models.PointStruct(id=1, vector=[1.0], payload=payload)], wait=True
+    )
 
 
 def lose_the_registry(client: QdrantClient) -> None:
@@ -63,11 +67,16 @@ def lose_the_collection(client: QdrantClient, generation: str) -> None:
 def replace_with_a_non_index(client: QdrantClient, generation: str) -> None:
     """The Live index's alias pointing at a collection of the same name that is not an index."""
     client.delete_collection(generation)
-    client.create_collection(generation, vectors_config=models.VectorParams(
-        size=1, distance=models.Distance.COSINE))
-    client.update_collection_aliases(change_aliases_operations=[
-        models.CreateAliasOperation(create_alias=models.CreateAlias(
-            collection_name=generation, alias_name=NAMES.live))])
+    client.create_collection(
+        generation, vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE)
+    )
+    client.update_collection_aliases(
+        change_aliases_operations=[
+            models.CreateAliasOperation(
+                create_alias=models.CreateAlias(collection_name=generation, alias_name=NAMES.live)
+            )
+        ]
+    )
 
 
 def strip_from_every_point(client: QdrantClient, field: str) -> None:
@@ -76,8 +85,9 @@ def strip_from_every_point(client: QdrantClient, field: str) -> None:
 
 
 def overwrite_the_last_sync(client: QdrantClient, payload: dict) -> None:
-    client.upsert(NAMES.last_sync, points=[
-        models.PointStruct(id=1, vector=[1.0], payload=payload)], wait=True)
+    client.upsert(
+        NAMES.last_sync, points=[models.PointStruct(id=1, vector=[1.0], payload=payload)], wait=True
+    )
 
 
 def take_over_the_lock(client: QdrantClient) -> None:

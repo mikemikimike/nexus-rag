@@ -2,11 +2,11 @@ import time
 
 import pytest
 
+from conftest import DOCUMENTS
+from index_states import collections, overwrite_the_last_sync
 from local_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
 from local_rag.corpus import InMemoryCorpus
 from local_rag.sparse import SparseParams
-from conftest import DOCUMENTS
-from index_states import collections, overwrite_the_last_sync
 from test_index_format import after_an_upgrade
 from test_sync import FlakyCorpus
 
@@ -29,9 +29,18 @@ def test_status_reports_the_live_generation_counts_and_format(index, client):
     assert status.generation.startswith("knowledge.gen-")
     assert (status.documents, status.passages) == (3, 3)
     assert status.format == IndexFormat(
-        schema_version=1, sparse=SparseParams(), embed_model="embed", dimension=64,
-        chunk_tokens=400, chunk_overlap=60, corpus_ownership=True, identifier_splitting=True,
-            code_chunk_tokens=800, code_splitting="lines", syntax_languages=("c", "python"))
+        schema_version=1,
+        sparse=SparseParams(),
+        embed_model="embed",
+        dimension=64,
+        chunk_tokens=400,
+        chunk_overlap=60,
+        corpus_ownership=True,
+        identifier_splitting=True,
+        code_chunk_tokens=800,
+        code_splitting="lines",
+        syntax_languages=("c", "python"),
+    )
     assert status.access == "read-write" and status.warnings == ()
 
 

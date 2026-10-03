@@ -1,4 +1,5 @@
 """Result shaping applied to fused search candidates: per-Document cap and rerank."""
+
 from __future__ import annotations
 
 import logging
@@ -26,8 +27,7 @@ def cap_per_document(passages: Sequence[Passage], limit: int) -> list[Passage]:
     return kept
 
 
-def rerank(gateway: ModelGateway, query: str,
-           passages: Sequence[Passage]) -> list[Passage]:
+def rerank(gateway: ModelGateway, query: str, passages: Sequence[Passage]) -> list[Passage]:
     """Reorder Passages by the gateway's relevance scores; on any failure keep the order given."""
     if len(passages) < 2:
         return list(passages)

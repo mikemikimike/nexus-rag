@@ -21,11 +21,14 @@ def folder(tmp_path):
     (root / "dba").mkdir(parents=True)
     (root / "security").mkdir()
     (root / "dba" / "ora-00942.md").write_text(
-        "# Fixing ORA-00942\n\nTable or view does not exist. Check the grants.\n")
+        "# Fixing ORA-00942\n\nTable or view does not exist. Check the grants.\n"
+    )
     (root / "dba" / "failover.pdf").write_bytes(
-        fake_lit.pdf("Quarterly failover runbook for the standby database."))
+        fake_lit.pdf("Quarterly failover runbook for the standby database.")
+    )
     (root / "security" / "rotation.docx").write_bytes(
-        fake_lit.docx("Rotate the ZX-9000 credentials every quarter."))
+        fake_lit.docx("Rotate the ZX-9000 credentials every quarter.")
+    )
     return root
 
 
@@ -33,6 +36,7 @@ def folder(tmp_path):
 def make_index(lit):
     def make(**settings):
         return KnowledgeIndex(Settings(liteparse_bin=str(lit), **settings), FakeModelGateway())
+
     return make
 
 
@@ -94,7 +98,8 @@ def test_an_html_file_is_indexed_as_markdown_without_scripts_or_styles(index, fo
     (folder / "dba" / "page.html").write_text(
         "<html><head><title>T</title><style>p {color: red}</style></head><body>"
         "<script>var leaked = 1;</script><h1>Standby setup</h1>"
-        "<p>Enable <b>redo transport</b>.</p></body></html>")
+        "<p>Enable <b>redo transport</b>.</p></body></html>"
+    )
 
     index.sync(FolderCorpus(folder))
 
@@ -114,8 +119,7 @@ def test_unsupported_and_hidden_files_are_left_out(index, folder):
     assert (report.added, report.failed) == (3, 0)
 
 
-def test_a_document_that_fails_extraction_counts_as_failed_and_the_rest_is_indexed(
-        index, folder):
+def test_a_document_that_fails_extraction_counts_as_failed_and_the_rest_is_indexed(index, folder):
     (folder / "dba" / "scan.pdf").write_bytes(fake_lit.pdf("CORRUPT"))
 
     report = index.sync(FolderCorpus(folder))
@@ -160,7 +164,8 @@ def test_a_document_that_became_empty_keeps_its_old_version(index, folder):
 
 def test_a_missing_liteparse_fails_only_the_documents_that_need_it(folder, tmp_path):
     index = KnowledgeIndex(
-        Settings(liteparse_bin=str(tmp_path / "no-such-lit")), FakeModelGateway())
+        Settings(liteparse_bin=str(tmp_path / "no-such-lit")), FakeModelGateway()
+    )
 
     report = index.sync(FolderCorpus(folder))
 
@@ -213,8 +218,7 @@ def test_a_utf8_byte_order_mark_is_not_part_of_the_text(index, folder):
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can read any file")
-def test_an_unreadable_file_counts_as_one_failed_document_and_the_rest_is_synced(
-        index, folder):
+def test_an_unreadable_file_counts_as_one_failed_document_and_the_rest_is_synced(index, folder):
     locked = folder / "dba" / "locked.md"
     locked.write_text("secret")
     locked.chmod(0)
@@ -226,9 +230,19 @@ def test_an_unreadable_file_counts_as_one_failed_document_and_the_rest_is_synced
 
 
 def test_an_unknown_media_type_fails_the_document(index):
-    corpus = InMemoryCorpus([RawDocument(
-        id="x", title="x", url="", space="s", version="1",
-        content=b"\x00", media_type="application/x-mystery")])
+    corpus = InMemoryCorpus(
+        [
+            RawDocument(
+                id="x",
+                title="x",
+                url="",
+                space="s",
+                version="1",
+                content=b"\x00",
+                media_type="application/x-mystery",
+            )
+        ]
+    )
 
     report = index.sync(corpus)
 
@@ -266,7 +280,9 @@ def _minimal_pdf(line: str) -> bytes:
     out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
     out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
     return out + b"trailer<</Size %d/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF" % (
-        len(objects) + 1, xref)
+        len(objects) + 1,
+        xref,
+    )
 
 
 def test_a_rebuild_extracts_and_reports_which_documents_failed(make_index, folder):

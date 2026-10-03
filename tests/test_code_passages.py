@@ -1,4 +1,5 @@
 """Code is split into Passages by lines, each knowing its line range."""
+
 import dataclasses
 import io
 import itertools
@@ -16,8 +17,12 @@ from local_rag.tokens import count_tokens
 from test_mcp_server import call, serving
 
 URL = "https://gitlab.example.test/platform/payments/-/blob/main/src/ledger.py"
-SMALL = Settings(retrieval=RetrievalMode.KEYWORD, code_chunk_tokens=60,
-                 max_passages_per_document=1000, hybrid_candidates=200)
+SMALL = Settings(
+    retrieval=RetrievalMode.KEYWORD,
+    code_chunk_tokens=60,
+    max_passages_per_document=1000,
+    hybrid_candidates=200,
+)
 
 
 def functions(count: int) -> str:
@@ -25,12 +30,19 @@ def functions(count: int) -> str:
     return "\n\n".join(f"def step_{i}(value):\n    return value + {i}\n" for i in range(count))
 
 
-def code(text: str, *, path: str = "src/ledger.py", media_type: str = "text/x-python",
-         eol: str = "\n") -> RawDocument:
+def code(
+    text: str, *, path: str = "src/ledger.py", media_type: str = "text/x-python", eol: str = "\n"
+) -> RawDocument:
     return RawDocument(
-        id=f"platform/payments@main:{path}", title=f"payments/{path}", url=URL,
-        space="platform", version="1", content=text.replace("\n", eol).encode(),
-        media_type=media_type, code=CodeFile(TrackedRef("platform/payments", "main"), path))
+        id=f"platform/payments@main:{path}",
+        title=f"payments/{path}",
+        url=URL,
+        space="platform",
+        version="1",
+        content=text.replace("\n", eol).encode(),
+        media_type=media_type,
+        code=CodeFile(TrackedRef("platform/payments", "main"), path),
+    )
 
 
 def indexed(text: str, settings: Settings = SMALL, **kwargs) -> KnowledgeIndex:
@@ -52,7 +64,7 @@ def test_every_code_passage_knows_the_lines_it_covers():
     assert len(found) > 3
     for passage in found:
         assert passage.start_line >= 1
-        assert passage.text == "\n".join(lines[passage.start_line - 1:passage.end_line])
+        assert passage.text == "\n".join(lines[passage.start_line - 1 : passage.end_line])
 
 
 def test_code_passages_cover_the_whole_file_with_a_small_overlap():
@@ -120,8 +132,11 @@ def test_prose_passages_have_no_line_range(gateway, corpus):
 
 def test_markdown_in_a_code_repository_is_still_prose():
     index = KnowledgeIndex(SMALL, None)
-    index.sync(InMemoryCorpus([code("# Title\n\nSome words here.\n", path="README.md",
-                                    media_type="text/markdown")]))
+    index.sync(
+        InMemoryCorpus(
+            [code("# Title\n\nSome words here.\n", path="README.md", media_type="text/markdown")]
+        )
+    )
 
     (found, *_) = index.search("words")
 
@@ -149,7 +164,8 @@ def test_the_chunker_exposes_pieces_with_lines_and_a_symbol_slot():
     pieces = chunker.pieces("a = 1\n\nb = 2\n", "text/x-python")
 
     assert [(p.text, p.start_line, p.end_line, p.symbol) for p in pieces] == [
-        ("a = 1\n\nb = 2", 1, 3, None)]
+        ("a = 1\n\nb = 2", 1, 3, None)
+    ]
     assert chunker.pieces("Hello there.", "text/plain")[0].start_line is None
 
 
@@ -185,12 +201,14 @@ def test_the_code_size_limit_and_splitting_method_are_recorded():
 
 def test_an_index_that_did_not_record_code_splitting_is_read_only(monkeypatch):
     from local_rag.index_format import IndexFormat
+
     original = IndexFormat.to_payload
 
     def without(self):
         payload = original(self)
         del payload["code_chunk_tokens"], payload["code_splitting"]
         return payload
+
     monkeypatch.setattr(IndexFormat, "to_payload", without)
     index = indexed("a = 1\n")
     monkeypatch.undo()
@@ -203,8 +221,7 @@ def search_cli(text: str, query: str) -> str:
     KnowledgeIndex(SMALL, None, client=client).sync(InMemoryCorpus([code(text)]))
     out = io.StringIO()
     environ = {"RAG_RETRIEVAL": "keyword", "RAG_CODE_CHUNK_TOKENS": "60"}
-    assert main(["search", query], environ, stdout=out, stderr=io.StringIO(),
-                client=client) == 0
+    assert main(["search", query], environ, stdout=out, stderr=io.StringIO(), client=client) == 0
     return out.getvalue()
 
 
@@ -225,4 +242,3 @@ def test_the_mcp_result_header_shows_path_ref_and_line_range():
 
     assert f"{URL}#L1-2" in text
     assert "ref: main" in text and "lines: 1-2" in text and "src/ledger.py" in text
-

@@ -8,6 +8,7 @@ processes (overlapping timers) that share one Qdrant server. The holder refreshe
 heartbeat while it runs; a marker whose heartbeat has stopped (the holder crashed) is
 taken over once it is older than ``stale_after`` seconds.
 """
+
 import threading
 import time
 import uuid
@@ -40,8 +41,14 @@ class Lease:
 
 
 class ExclusiveRun:
-    def __init__(self, client: QdrantClient, name: str, *,
-                 stale_after: float = 120.0, heartbeat_every: float | None = None):
+    def __init__(
+        self,
+        client: QdrantClient,
+        name: str,
+        *,
+        stale_after: float = 120.0,
+        heartbeat_every: float | None = None,
+    ):
         self._client = client
         self._name = name
         self._stale_after = stale_after
@@ -63,7 +70,8 @@ class ExclusiveRun:
                 raise SyncInProgress(f"cannot start {what}: another run holds the lock")
             stop = threading.Event()
             beat = threading.Thread(
-                target=self._beat, args=(owner, stop), daemon=True, name="exclusive-run")
+                target=self._beat, args=(owner, stop), daemon=True, name="exclusive-run"
+            )
             beat.start()
             try:
                 yield Lease(self, owner)
@@ -95,8 +103,9 @@ class ExclusiveRun:
             return False
         try:
             self._client.create_collection(
-                self._name, vectors_config=models.VectorParams(
-                    size=1, distance=models.Distance.COSINE))
+                self._name,
+                vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
+            )
         except Exception:
             if self._client.collection_exists(self._name):
                 return False  # lost the race to another process
@@ -104,9 +113,17 @@ class ExclusiveRun:
         return True
 
     def _stamp(self, owner: str) -> None:
-        self._client.upsert(self._name, points=[models.PointStruct(
-            id=_HEARTBEAT_POINT, vector=[1.0],
-            payload={"owner": owner, "heartbeat": time.time()})], wait=True)
+        self._client.upsert(
+            self._name,
+            points=[
+                models.PointStruct(
+                    id=_HEARTBEAT_POINT,
+                    vector=[1.0],
+                    payload={"owner": owner, "heartbeat": time.time()},
+                )
+            ],
+            wait=True,
+        )
 
     def _age(self) -> float:
         points = self._client.retrieve(self._name, ids=[_HEARTBEAT_POINT])

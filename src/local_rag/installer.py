@@ -20,6 +20,7 @@ unpack it anywhere and run it with ``PYTHONPATH=<unpacked>/src``.
 Standard library only: it runs before anything else is installed. ``--root`` installs below
 another directory, for tests.
 """
+
 import argparse
 import hashlib
 import importlib.util
@@ -37,14 +38,24 @@ from pathlib import Path
 from typing import TextIO
 
 from local_rag.binary_drop import (
-    QDRANT, Artifact, DropRefused, place_binary, sha256_of, unpack_code, verified_code_archive,
-    verified_qdrant_binary)
+    QDRANT,
+    Artifact,
+    DropRefused,
+    place_binary,
+    sha256_of,
+    unpack_code,
+    verified_code_archive,
+    verified_qdrant_binary,
+)
 from local_rag.environment import DEFAULT_CORPORA_FILE
 
-
 SERVICE_USER = "ragsvc"
-PREREQUISITE_COMMANDS = {"systemctl": "systemd", "useradd": "passwd / shadow-utils",
-                         "chown": "coreutils", "git": "git"}
+PREREQUISITE_COMMANDS = {
+    "systemctl": "systemd",
+    "useradd": "passwd / shadow-utils",
+    "chown": "coreutils",
+    "git": "git",
+}
 LOCKFILE = "requirements.lock"
 UNITS_DIRECTORY = "deploy/systemd"
 
@@ -58,9 +69,13 @@ class Layout:
     def at(self, absolute: str) -> Path:
         return self.root / absolute.lstrip("/")
 
-    service_directories = property(lambda self: [
-        self.at("/var/lib/qdrant"), self.at("/var/lib/qdrant/storage"),
-        self.at("/var/lib/qdrant/snapshots")])
+    service_directories = property(
+        lambda self: [
+            self.at("/var/lib/qdrant"),
+            self.at("/var/lib/qdrant/storage"),
+            self.at("/var/lib/qdrant/snapshots"),
+        ]
+    )
     corpora_file = property(lambda self: self.at(str(DEFAULT_CORPORA_FILE)))
     units_directory = property(lambda self: self.at("/etc/systemd/system"))
     venv = property(lambda self: self.at("/opt/local-rag/venv"))
@@ -108,8 +123,14 @@ class SystemHost:
         return sys.executable
 
 
-def main(argv: Sequence[str], *, host=None, qdrant: Artifact = QDRANT,
-         stdout: TextIO | None = None, stderr: TextIO | None = None) -> int:
+def main(
+    argv: Sequence[str],
+    *,
+    host=None,
+    qdrant: Artifact = QDRANT,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+) -> int:
     """Install or upgrade; returns the process exit code (0 done, 1 refused or failed).
 
     ``host`` stands in for the machine (tests), ``qdrant`` for the repository's record of the
@@ -125,12 +146,14 @@ def main(argv: Sequence[str], *, host=None, qdrant: Artifact = QDRANT,
     try:
         # Everything in the drop is verified before the machine is touched.
         archive = verified_code_archive(args.drop)
-        with (verified_qdrant_binary(args.drop / qdrant.filename, qdrant) as binary,
-              tempfile.TemporaryDirectory(prefix="local-rag-code-") as scratch):
-            source = unpack_code(archive, Path(scratch),
-                                 requires=[LOCKFILE, UNITS_DIRECTORY])
+        with (
+            verified_qdrant_binary(args.drop / qdrant.filename, qdrant) as binary,
+            tempfile.TemporaryDirectory(prefix="local-rag-code-") as scratch,
+        ):
+            source = unpack_code(archive, Path(scratch), requires=[LOCKFILE, UNITS_DIRECTORY])
             _Install(host, Layout(args.root), out, index_url=args.index_url).run(
-                binary, archive, source)
+                binary, archive, source
+            )
     except DropRefused as error:
         print(f"refused: {error}", file=err)
         return 1
@@ -168,8 +191,18 @@ class _Install:
 
     def _service_account(self) -> None:
         if not self.host.user_exists(SERVICE_USER):
-            self.host.run(["useradd", "--system", "--home-dir", "/var/lib/ragsvc",
-                           "--create-home", "--shell", "/usr/sbin/nologin", SERVICE_USER])
+            self.host.run(
+                [
+                    "useradd",
+                    "--system",
+                    "--home-dir",
+                    "/var/lib/ragsvc",
+                    "--create-home",
+                    "--shell",
+                    "/usr/sbin/nologin",
+                    SERVICE_USER,
+                ]
+            )
             self.done("created", f"user {SERVICE_USER}")
 
     def _directories(self) -> None:
@@ -192,8 +225,10 @@ class _Install:
     def _env_file(self) -> None:
         layout = self.layout
         layout.env_file.parent.mkdir(parents=True, exist_ok=True)
-        if _create_env_file(layout.env_file, lambda staged: self.host.run(
-                ["chown", f"root:{SERVICE_USER}", str(staged)])):
+        if _create_env_file(
+            layout.env_file,
+            lambda staged: self.host.run(["chown", f"root:{SERVICE_USER}", str(staged)]),
+        ):
             self.done("created", f"{layout.env_file} (new secrets)")
         else:
             self.done("kept", layout.env_file)
@@ -212,10 +247,8 @@ class _Install:
             self.host.run([self.host.python_executable(), "-m", "venv", str(layout.venv)])
         if recorded.get("lock") != wanted["lock"] or not python.exists():
             mirror = ["--index-url", self.index_url] if self.index_url else []
-            self.host.run([*pip, *mirror, "--only-binary", ":all:", "-r",
-                           str(source / LOCKFILE)])
-        self.host.run([*pip, "--no-deps", "--force-reinstall", "--no-build-isolation",
-                       str(source)])
+            self.host.run([*pip, *mirror, "--only-binary", ":all:", "-r", str(source / LOCKFILE)])
+        self.host.run([*pip, "--no-deps", "--force-reinstall", "--no-build-isolation", str(source)])
         self._remember(**wanted)
         self.done("installed", layout.venv)
         return True
@@ -232,8 +265,9 @@ class _Install:
                 shutil.copyfile(source, installed)
                 rewritten = True
                 self.done("installed", installed)
-        registered = hashlib.sha256(b"".join(
-            path.name.encode() + path.read_bytes() for path in sources)).hexdigest()
+        registered = hashlib.sha256(
+            b"".join(path.name.encode() + path.read_bytes() for path in sources)
+        ).hexdigest()
         register = rewritten or self._state().get("units") != registered
         if register:
             self.host.run(["systemctl", "daemon-reload"])
@@ -241,8 +275,16 @@ class _Install:
             self.host.run(["systemctl", "try-restart", service])  # does nothing if not running
         if register:
             self.host.run(["systemctl", "enable", "--now", "qdrant.service"])
-            self.host.run(["systemctl", "enable", "--now", "local-rag-mcp.service",
-                           "local-rag-sync.timer", "local-rag-full.timer"])
+            self.host.run(
+                [
+                    "systemctl",
+                    "enable",
+                    "--now",
+                    "local-rag-mcp.service",
+                    "local-rag-sync.timer",
+                    "local-rag-full.timer",
+                ]
+            )
             self._remember(units=registered)
 
     def _state(self) -> dict[str, str]:
@@ -311,7 +353,8 @@ SHARED_SETTINGS = """\
 """
 
 
-ENV_FILE = """\
+ENV_FILE = (
+    """\
 # local-rag settings and secrets, read by every service (systemd EnvironmentFile).
 # Written once by the Installer; an upgrade never touches it. Restart the services after
 # an edit:  systemctl restart qdrant local-rag-mcp
@@ -334,7 +377,9 @@ MCP_PORT=8765
 # MCP_TLS_CERT=/etc/local-rag/tls/server.crt
 # MCP_TLS_KEY=/etc/local-rag/tls/server.key
 
-""" + SHARED_SETTINGS
+"""
+    + SHARED_SETTINGS
+)
 
 
 CORPORA_FILE = """\
@@ -355,13 +400,17 @@ CORPORA_FILE = """\
 
 def _create_env_file(path: Path, prepare: Callable[[Path], None] = lambda staged: None) -> bool:
     """Write the env file with fresh secrets unless one exists; True if it was written."""
-    return create_text(path, ENV_FILE.format(
-        qdrant_key=secrets.token_hex(24), mcp_token=secrets.token_hex(24)),
-        mode=0o640, prepare=prepare)
+    return create_text(
+        path,
+        ENV_FILE.format(qdrant_key=secrets.token_hex(24), mcp_token=secrets.token_hex(24)),
+        mode=0o640,
+        prepare=prepare,
+    )
 
 
-def create_text(path: Path, text: str, mode: int = 0o644,
-                prepare: Callable[[Path], None] = lambda staged: None) -> bool:
+def create_text(
+    path: Path, text: str, mode: int = 0o644, prepare: Callable[[Path], None] = lambda staged: None
+) -> bool:
     """Write ``path`` unless something is there already; True if it was written.
 
     The file is complete (and ``prepare`` has run on it, to set its owner) before it appears
@@ -387,10 +436,13 @@ def create_text(path: Path, text: str, mode: int = 0o644,
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python3.12 -m local_rag.installer",
-                                     description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(
+        prog="python3.12 -m local_rag.installer", description=__doc__.split("\n\n")[0]
+    )
     parser.add_argument("--drop", type=Path, required=True, help="the Binary drop directory")
-    parser.add_argument("--index-url", help="the Mirror's package index (default: pip's own configuration)")
+    parser.add_argument(
+        "--index-url", help="the Mirror's package index (default: pip's own configuration)"
+    )
     parser.add_argument("--root", type=Path, default=Path("/"), help="install below this directory")
     return parser
 

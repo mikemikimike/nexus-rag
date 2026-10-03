@@ -1,11 +1,10 @@
 import pytest
 
+from conftest import SYNONYMS
 from fake_litellm_server import FakeLiteLLM
 from local_rag import Settings
 from local_rag.fakes import FakeModelGateway
 from local_rag.gateway_litellm import GatewayError, LiteLLMGateway
-
-from conftest import SYNONYMS
 
 
 @pytest.fixture
@@ -16,8 +15,13 @@ def server():
 
 
 def make_gateway(server, **overrides):
-    settings = dict(gateway_base_url=server.base_url, gateway_api_key=server.api_key,
-                    embed_model="embed", rerank_model="rerank", embed_batch_size=2)
+    settings = dict(
+        gateway_base_url=server.base_url,
+        gateway_api_key=server.api_key,
+        embed_model="embed",
+        rerank_model="rerank",
+        embed_batch_size=2,
+    )
     settings.update(overrides)
     return LiteLLMGateway.from_settings(Settings(**settings))
 
@@ -59,8 +63,9 @@ def test_embed_of_nothing_makes_no_request(server):
 def test_embed_query_returns_the_query_vector(server):
     gateway = make_gateway(server)
 
-    assert gateway.embed_query("vehicle refuses to ignite") == \
-        server.embedder.embed_query("vehicle refuses to ignite")
+    assert gateway.embed_query("vehicle refuses to ignite") == server.embedder.embed_query(
+        "vehicle refuses to ignite"
+    )
 
 
 def test_gateway_error_reports_status_and_message_without_the_api_key(server):
@@ -178,7 +183,8 @@ def test_a_query_instruction_goes_in_front_of_the_query_in_the_trained_format(se
 
     [request] = server.requests
     assert request["body"]["input"] == [
-        "Instruct: Find the passage that answers the question\nQuery: vehicle refuses to ignite"]
+        "Instruct: Find the passage that answers the question\nQuery: vehicle refuses to ignite"
+    ]
 
 
 def test_document_embeddings_never_get_the_query_instruction(server):

@@ -1,4 +1,5 @@
 """Generations record a new collection before it exists, so cleanup always knows it."""
+
 import pytest
 from qdrant_client import models
 
@@ -16,8 +17,9 @@ def test_a_new_generation_is_recorded_with_its_format_before_it_is_made(generati
     generation, written = generations.fresh_name(), IndexFormat.written_by(Settings(), 8)
     seen = []
 
-    generations.create(generation, written, make=lambda: seen.append(
-        generations.format_of(generation)))
+    generations.create(
+        generation, written, make=lambda: seen.append(generations.format_of(generation))
+    )
 
     assert seen == [written]
 
@@ -26,8 +28,9 @@ def test_a_generation_whose_making_failed_is_still_swept_up(client, generations)
     generation = generations.fresh_name()
 
     def half_made():
-        client.create_collection(generation, vectors_config=models.VectorParams(
-            size=1, distance=models.Distance.COSINE))
+        client.create_collection(
+            generation, vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE)
+        )
         raise ConnectionError("Qdrant went away")
 
     with pytest.raises(ConnectionError):
