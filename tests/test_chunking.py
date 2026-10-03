@@ -8,7 +8,7 @@ from local_rag.corpus import Document, InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from conftest import DOCUMENTS
 from index_states import NAMES
-from test_sync import CountingGateway, revised
+from test_sync import CountingGateway
 
 SMALL = Settings(chunk_tokens=40, chunk_overlap=5)
 

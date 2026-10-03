@@ -1,6 +1,7 @@
 """Code is split into Passages by lines, each knowing its line range."""
 import dataclasses
 import io
+import itertools
 
 import pytest
 from qdrant_client import QdrantClient
@@ -63,7 +64,7 @@ def test_code_passages_cover_the_whole_file_with_a_small_overlap():
         covered.update(range(passage.start_line, passage.end_line + 1))
     nonblank = {n for n, line in enumerate(text.split("\n"), 1) if line.strip()}
     assert nonblank <= covered
-    assert any(a.end_line >= b.start_line for a, b in zip(found, found[1:]))
+    assert any(a.end_line >= b.start_line for a, b in itertools.pairwise(found))
 
 
 def test_a_long_file_is_split_within_the_code_size_limit():

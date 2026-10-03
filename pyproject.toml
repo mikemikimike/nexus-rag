@@ -39,3 +39,14 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Errors and likely bugs, not style: pyflakes, pycodestyle's runtime errors, bugbear, pyupgrade.
+select = ["E4", "E7", "E9", "F", "B", "UP"]
+ignore = [
+    "E731",  # a lambda bound to a name, used for small test stand-ins
+    "E741",  # `l` as a loop variable
+]

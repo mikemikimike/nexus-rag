@@ -23,7 +23,7 @@ import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import cache
 from pathlib import Path, PurePosixPath
 
 from local_rag.corpus import (
@@ -329,7 +329,7 @@ def _excluded(path: str, globs: Sequence[str]) -> bool:
                for glob in globs)
 
 
-@lru_cache(maxsize=None)
+@cache
 def _glob(glob: str) -> re.Pattern:
     """``*`` and ``?`` stay within a directory, ``**`` crosses them (``a/**/b`` also matches
     ``a/b``, and a trailing ``/**`` everything below)."""

@@ -76,7 +76,7 @@ def test_the_package_still_offers_its_public_names():
     assert local_rag.Settings.__name__ == "Settings"
     assert "KnowledgeIndex" in dir(local_rag)
     with pytest.raises(AttributeError):
-        local_rag.NoSuchName
+        _ = local_rag.NoSuchName
 
 
 def snapshot(root):

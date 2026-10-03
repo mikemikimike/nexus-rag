@@ -17,7 +17,6 @@ from typing import TextIO
 
 from qdrant_client import QdrantClient
 
-from local_rag.corpus import Corpus
 from local_rag.declaration import Declaration, DeclarationError
 from local_rag.environment import (
     DEFAULT_CORPORA_FILE, Environment, environment_from, settings_from_environment)

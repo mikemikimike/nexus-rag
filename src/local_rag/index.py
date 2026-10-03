@@ -582,7 +582,7 @@ class KnowledgeIndex:
         self._ensure_collection(collection, None if dense[0] is None else len(dense[0]))
         self._store.write(collection, document, [
             Written(piece, self._sparse.encode_document(content), vector)
-            for piece, content, vector in zip(pieces, contents, dense)])
+            for piece, content, vector in zip(pieces, contents, dense, strict=True)])
 
     def list_spaces(self) -> list[str]:
         """The named Spaces (Confluence Spaces, GitLab groups, folders) that have at least one indexed Document, sorted."""

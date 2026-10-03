@@ -32,7 +32,7 @@ def legacy_index(client: QdrantClient, gateway: ModelGateway,
     contents = [f"{document.title}\n\n{document.text}" for document in documents]
     vectors = gateway.embed(contents)
     store.create(NAMES.plain, dimension=len(vectors[0]))
-    for document, content, vector in zip(documents, contents, vectors):
+    for document, content, vector in zip(documents, contents, vectors, strict=True):
         store.write(NAMES.plain, document,
                     [Written(Piece(document.text), sparse.encode_document(content), vector)])
 

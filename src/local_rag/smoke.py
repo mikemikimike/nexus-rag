@@ -11,6 +11,7 @@ sentence, reranks two texts, reads the Knowledge index's status and runs ``--ver
 commands. The README says how to run it on each route.
 """
 import argparse
+import functools
 import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -51,14 +52,14 @@ def main(argv: Sequence[str], environ: Mapping[str, str], *,
     try:
         environment = environment_from(environ)
     except SettingsError as error:
-        check("settings", lambda: _settings_error(error))
+        check("settings", functools.partial(_settings_error, error))
         report.summary()
         return 1
     check("MCP_TOKENS", lambda: _tokens(environment.mcp_tokens))
     try:
         settings = settings_from_environment(environ)
     except SettingsError as error:
-        check("settings", lambda: _settings_error(error))
+        check("settings", functools.partial(_settings_error, error))
         report.summary()
         return 1
 

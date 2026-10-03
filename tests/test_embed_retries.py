@@ -7,7 +7,7 @@ as scripted, so which failures count as transient is observed in the requests it
 import pytest
 
 from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import Document, InMemoryCorpus
+from local_rag.corpus import InMemoryCorpus
 from local_rag.fakes import FakeModelGateway
 from local_rag.gateway_litellm import GatewayError, LiteLLMGateway
 from conftest import DOCUMENTS

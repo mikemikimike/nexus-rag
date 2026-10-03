@@ -9,6 +9,15 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          version: "0.16.10"
+
   pytest:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -209,7 +209,7 @@ def test_every_configured_token_is_accepted(index, corpus):
 
 
 def test_an_unauthenticated_client_cannot_use_a_tool(server):
-    with pytest.raises(Exception):
+    with pytest.raises(ExceptionGroup):
         call(server, "search_docs", {"query": "ORA-00942"}, token="nope")
 
 
