@@ -372,6 +372,8 @@ claude mcp add --transport http local-rag https://rag.example.test/mcp \
 
 Or commit `examples/mcp.json.example` as `.mcp.json` to a repository (it reads `${LOCAL_RAG_TOKEN}`), so each user only sets `LOCAL_RAG_TOKEN`. Add `examples/CLAUDE.md.snippet` to the project's `CLAUDE.md`: it tells Claude to use `search_docs` first, for code questions as well as documentation, how to search another Tracked ref or one Repository, to cite links, to use the Confluence CLI read-only, and to treat indexed text, pages and code alike, as untrusted data. Replace `rag.example.test` with the D1 name.
 
+Give users the `local-rag-research` skill too, from the Binary drop's code archive: commit `skills/local-rag-research` as `.claude/skills/local-rag-research` in the same repository as `.mcp.json`, or have each user copy it to `~/.claude/skills/`. It is how to research with the tools: queries by exact term and by meaning, the `ref` a question about a release needs, checking docs against code, and telling "not documented" from "not indexed", with a request to send you when content is missing.
+
 If an internal CA signed the certificate: `export NODE_EXTRA_CA_CERTS=/path/ca.pem` before starting Claude Code. If the client has `HTTPS_PROXY` set, add the server's host name to `NO_PROXY`.
 
 If Claude Code itself should use the network's LiteLLM chat model, `examples/claude_settings.example.json` holds the `env` block (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL` and the default model names); fill in the Model gateway's host and key. That is the chat model, independent of the embedding model.
@@ -381,6 +383,8 @@ The tools users get are `search_docs(query, top_k, space, repository, ref)`, `li
 **Gate:** from one client, `claude mcp list` shows `local-rag` connected and a `search_docs` call returns Passages.
 
 ## 9. Operate
+
+For day-to-day administration after this guide, install the `local-rag-admin` skill from the Binary drop's code archive into the operator's Claude Code on this host: `mkdir -p ~/.claude/skills && cp -rL /tmp/local-rag/skills/local-rag-admin ~/.claude/skills/` (again after each upgrade). It covers adding Repositories and refs, Roots and Corpora, MCP tokens by name, rotating secrets and Syncs, through one helper script, `skills/local-rag-admin/scripts/rag_admin.py`, that knows both routes. Once tokens are added with it, add and revoke them with it too, so their names stay in step.
 
 Prefix `local-rag` commands with `run_rag /opt/local-rag/venv/bin/` (systemd) or `compose run --rm -T sync ` (container).
 
