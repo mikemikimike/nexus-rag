@@ -256,6 +256,25 @@ def test_an_unreadable_subfolder_reports_a_failure_and_leaves_its_documents_inta
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can read any file")
+def test_a_listable_but_not_searchable_subfolder_reports_a_failure_and_keeps_its_documents(
+    index, folder
+):
+    index.sync(FolderCorpus(folder))
+
+    sub = folder / "dba"
+    sub.chmod(0o444)
+    try:
+        report = index.sync(FolderCorpus(folder))
+
+        assert (report.unchanged, report.removed, report.failed) == (1, 0, 1)
+        assert "dba" in report.failures
+        assert index.get_document("folder:dba/ora-00942.md") is not None
+        assert index.get_document("folder:dba/failover.pdf") is not None
+    finally:
+        sub.chmod(0o755)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read any file")
 def test_an_unreadable_nested_subfolder_holds_back_only_documents_below_it(index, folder):
     nested = folder / "dba" / "nested"
     nested.mkdir()

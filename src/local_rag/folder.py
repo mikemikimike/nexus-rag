@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import stat
 from pathlib import Path
 
 from local_rag.corpus import DocumentRef, Listing, RawDocument, check_corpus_name
@@ -62,9 +63,15 @@ def _walk(root: Path) -> tuple[list[DocumentRef], dict[str, str]]:
             if path.suffix.lower() not in MEDIA_TYPES:
                 continue
             try:
-                if not path.is_file():
+                # os.stat, not Path.is_file(), which swallows PermissionError on newer Pythons.
+                if not stat.S_ISREG(os.stat(path).st_mode):
                     continue
-            except OSError:
+            except (FileNotFoundError, NotADirectoryError):
+                continue  # a dangling symlink, or gone since the listing
+            except OSError as error:
+                # Listed but not stat-able (a folder that is readable but not searchable):
+                # report the folder so its indexed Documents are held back, not removed.
+                failures.setdefault(Path(dirpath).relative_to(root).as_posix(), describe(error))
                 continue
             relative = path.relative_to(root)
             document_id = relative.as_posix()
