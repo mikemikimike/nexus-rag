@@ -1,20 +1,20 @@
-# local-rag as a compose stack: Qdrant, the MCP server, and (run on demand) a Sync.
+# nexus-rag as a compose stack: Qdrant, the MCP server, and (run on demand) a Sync.
 #
 # Works as a Portainer stack and with plain docker compose. Everything configurable comes
-# from variables, which the env file supplies (generated once by `local_rag.container start`
-# as /etc/local-rag/container.env):
-#   docker compose --env-file /etc/local-rag/container.env up -d
-# In Portainer, paste this file into a stack named "local-rag" and use "Load variables from
+# from variables, which the env file supplies (generated once by `nexus_rag.container start`
+# as /etc/nexus-rag/container.env):
+#   docker compose --env-file /etc/nexus-rag/container.env up -d
+# In Portainer, paste this file into a stack named "nexus-rag" and use "Load variables from
 # .env file" for the same env file. Never put a value in this file; it is the same for every
 # installation.
 #
-# The two image tags are the versions the repository records (src/local_rag/binary_drop.py);
-# `local_rag.container start` refuses images that are not those.
+# The two image tags are the versions the repository records (src/nexus_rag/binary_drop.py);
+# `nexus_rag.container start` refuses images that are not those.
 #
 # The system image can also be built by compose itself, from a checkout of this repository
 # (a clone from the network's own git mirror): `docker compose ... up -d --build` run on this
 # file in the checkout.
-name: local-rag
+name: nexus-rag
 
 services:
   qdrant:
@@ -29,12 +29,12 @@ services:
     # No published port: only the other services of this stack reach Qdrant.
 
   mcp:
-    image: local-rag:0.1.0
+    image: nexus-rag:0.1.0
     build: &build
       context: ../..  # the repository root, relative to this file
       dockerfile: deploy/container/Dockerfile
     restart: always
-    command: ["local-rag-mcp"]
+    command: ["nexus-rag-mcp"]
     depends_on: [qdrant]
     environment: &settings
       QDRANT_URL: http://qdrant:6333
@@ -48,7 +48,7 @@ services:
       RAG_EMBED_MODEL: ${RAG_EMBED_MODEL:-}
       RAG_RERANK_MODEL: ${RAG_RERANK_MODEL:-}
       RAG_QUERY_INSTRUCTION: ${RAG_QUERY_INSTRUCTION:-}
-      # Tuning: unset means the program's default (see src/local_rag/environment.py).
+      # Tuning: unset means the program's default (see src/nexus_rag/environment.py).
       RAG_COLLECTION: ${RAG_COLLECTION:-}
       RAG_TOP_K: ${RAG_TOP_K:-}
       RAG_HYBRID_CANDIDATES: ${RAG_HYBRID_CANDIDATES:-}
@@ -88,18 +88,18 @@ services:
   #   docker compose --env-file ... -f ... run --rm sync
   # Not part of `up`: it is in a profile, which `run` enables for the service it names.
   sync:
-    image: local-rag:0.1.0
+    image: nexus-rag:0.1.0
     build: *build
     profiles: [sync]
-    command: ["local-rag", "sync", "confluence"]
+    command: ["nexus-rag", "sync", "confluence"]
     depends_on: [qdrant]
     environment: *settings
     volumes:
       - rag-data:/data
-      - /etc/local-rag/corpora.toml:/etc/local-rag/corpora.toml:ro
+      - /etc/nexus-rag/corpora.toml:/etc/nexus-rag/corpora.toml:ro
       # An internal CA for Confluence's certificate: put the PEM here and set
-      # NODE_EXTRA_CA_CERTS=/etc/local-rag/certs/<file> in the env file.
-      - /etc/local-rag/certs:/etc/local-rag/certs:ro
+      # NODE_EXTRA_CA_CERTS=/etc/nexus-rag/certs/<file> in the env file.
+      - /etc/nexus-rag/certs:/etc/nexus-rag/certs:ro
 
 volumes:
   qdrant-storage:

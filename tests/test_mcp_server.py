@@ -20,13 +20,13 @@ import uvicorn
 from mcp import Client, StdioServerParameters
 from mcp.client.streamable_http import streamable_http_client
 
-from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import CodeFile, Document, InMemoryCorpus, TrackedRef
-from local_rag.fakes import FakeModelGateway
-from local_rag.gateway_litellm import GatewayError
-from local_rag.mcp_server import _format_passages, build_app, main
-from local_rag.passage_store import Passage
-from local_rag.settings import RetrievalMode
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.corpus import CodeFile, Document, InMemoryCorpus, TrackedRef
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.gateway_litellm import GatewayError
+from nexus_rag.mcp_server import _format_passages, build_app, main
+from nexus_rag.passage_store import Passage
+from nexus_rag.settings import RetrievalMode
 from test_health import UnreachableQdrant
 from test_index_state import lose_the_live_collection
 
@@ -344,7 +344,7 @@ def test_stdio_mode_serves_the_tools_without_tokens():
     async def run():
         params = StdioServerParameters(
             command=sys.executable,
-            args=["-m", "local_rag.mcp_server", "--stdio"],
+            args=["-m", "nexus_rag.mcp_server", "--stdio"],
             env={
                 **os.environ,
                 "QDRANT_URL": ":memory:",
@@ -430,7 +430,7 @@ def test_a_keyword_only_server_starts_with_no_embedding_model_and_no_gateway():
     async def run():
         params = StdioServerParameters(
             command=sys.executable,
-            args=["-m", "local_rag.mcp_server", "--stdio"],
+            args=["-m", "nexus_rag.mcp_server", "--stdio"],
             env={
                 **os.environ,
                 "QDRANT_URL": ":memory:",
@@ -454,7 +454,7 @@ def test_a_hybrid_server_without_an_embedding_model_refuses_to_start_and_says_wh
 
 
 def test_search_docs_narrows_to_a_repository_or_a_tracked_ref_and_shows_the_ref(index):
-    from local_rag.corpus import CodeFile, RawDocument, TrackedRef
+    from nexus_rag.corpus import CodeFile, RawDocument, TrackedRef
 
     def code(repository, ref, primary, text):
         return RawDocument(
@@ -540,7 +540,7 @@ def test_get_page_keeps_its_name_and_says_it_returns_a_page_or_a_file(server):
 
 def test_list_spaces_includes_the_gitlab_groups_and_not_an_empty_space(tmp_path, gateway):
     from fake_gitlab import FakeGitLab
-    from local_rag.gitlab import GitLabCorpus, Repository
+    from nexus_rag.gitlab import GitLabCorpus, Repository
 
     remote = FakeGitLab(tmp_path / "remote")
     remote.commit("platform/payments", {"a.py": "def a():\n    return 1\n"})

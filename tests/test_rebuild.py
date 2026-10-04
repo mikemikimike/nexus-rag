@@ -4,9 +4,9 @@ import pytest
 
 from conftest import DOCUMENTS
 from index_states import NAMES, collections, generations_in, legacy_index, take_over_the_lock
-from local_rag import IndexReadOnly, KnowledgeIndex, NoPreviousIndex, Settings, SyncInProgress
-from local_rag.corpus import InMemoryCorpus
-from local_rag.fakes import FakeModelGateway
+from nexus_rag import IndexReadOnly, KnowledgeIndex, NoPreviousIndex, Settings, SyncInProgress
+from nexus_rag.corpus import InMemoryCorpus
+from nexus_rag.fakes import FakeModelGateway
 from test_sync import CountingGateway, FlakyCorpus, revised
 
 
@@ -350,7 +350,7 @@ def test_a_rebuild_threshold_outside_zero_to_one_is_rejected(threshold):
 
 
 def test_a_rebuild_that_lost_the_lock_does_not_promote(index, client):
-    from local_rag.exclusive import LockLost
+    from nexus_rag.exclusive import LockLost
 
     index.sync(InMemoryCorpus(DOCUMENTS))
 

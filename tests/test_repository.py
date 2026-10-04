@@ -12,7 +12,7 @@ DOCS = [path for path in (REPO / "docs").glob("*.md")]
 
 
 def tracked_files():
-    skipped = {".git", ".venv", ".pytest_cache", "__pycache__", "local_rag.egg-info"}
+    skipped = {".git", ".venv", ".pytest_cache", "__pycache__", "nexus_rag.egg-info"}
     return [
         path
         for path in REPO.rglob("*")
@@ -23,7 +23,7 @@ def tracked_files():
 def test_no_legacy_module_script_or_requirements_file_remains():
     names = {path.relative_to(REPO).as_posix() for path in tracked_files()}
 
-    assert not (REPO / "local-rag").exists()
+    assert not (REPO / "nexus-rag").exists()
     assert "requirements.txt" not in names
     assert not [name for name in names if name.endswith(".sh")], "shell glue came back"
     assert not [name for name in names if name.startswith("scripts/")]
@@ -45,8 +45,8 @@ def test_the_readme_and_the_docs_name_only_files_that_exist(document):
 
 
 def test_the_readme_documents_both_delivery_routes_and_the_access_limit():
-    assert "local_rag.installer" in README and "Binary drop" in README and "Mirror" in README
-    assert "local_rag.container" in README
+    assert "nexus_rag.installer" in README and "Binary drop" in README and "Mirror" in README
+    assert "nexus_rag.container" in README
     assert "Every token sees everything" in README
 
 
@@ -78,6 +78,6 @@ def test_the_module_map_names_every_module_and_only_modules():
     table = development.split("| Module | Role |")[1].split("\n\n")[0]
     rows = [line.split("|")[1] for line in table.splitlines() if line.startswith("| `")]
     named = {name for row in rows for name in re.findall(r"`(\w+)`", row)}
-    modules = {path.stem for path in (REPO / "src/local_rag").glob("*.py")} - {"__init__"}
+    modules = {path.stem for path in (REPO / "src/nexus_rag").glob("*.py")} - {"__init__"}
 
     assert named == modules

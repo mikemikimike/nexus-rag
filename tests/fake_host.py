@@ -4,7 +4,7 @@ import sys
 from collections.abc import Collection, Sequence
 from pathlib import Path
 
-from local_rag.installer import CommandFailed
+from nexus_rag.installer import CommandFailed
 
 
 class FakeHost:

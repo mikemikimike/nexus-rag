@@ -21,12 +21,12 @@ On a connected machine, from a clean checkout of the commit to ship:
 
 ```bash
 VERSION=0.1.0          # `version` in pyproject.toml
-QDRANT_VERSION=1.19.1  # `QDRANT.version` in src/local_rag/binary_drop.py
+QDRANT_VERSION=1.19.1  # `QDRANT.version` in src/nexus_rag/binary_drop.py
 mkdir drop
-git archive --prefix=local-rag/ -o drop/local-rag-$VERSION.tar.gz HEAD
+git archive --prefix=nexus-rag/ -o drop/nexus-rag-$VERSION.tar.gz HEAD
 curl -fL -o drop/qdrant-x86_64-unknown-linux-gnu.tar.gz \
   https://github.com/qdrant/qdrant/releases/download/v$QDRANT_VERSION/qdrant-x86_64-unknown-linux-gnu.tar.gz
-(cd drop && sha256sum local-rag-$VERSION.tar.gz > SHA256SUMS)
+(cd drop && sha256sum nexus-rag-$VERSION.tar.gz > SHA256SUMS)
 ```
 
 The Qdrant tarball is verified against the checksum recorded in the repository, the code archive against `SHA256SUMS`. Carry `drop/` into the network.
@@ -36,8 +36,8 @@ The Qdrant tarball is verified against the checksum recorded in the repository, 
 On the host, unpack the code archive anywhere and run its **Installer**. It is the same command for the first install and every upgrade:
 
 ```bash
-tar -xzf drop/local-rag-$VERSION.tar.gz -C /tmp
-sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.installer --drop drop \
+tar -xzf drop/nexus-rag-$VERSION.tar.gz -C /tmp
+sudo PYTHONPATH=/tmp/nexus-rag/src python3.12 -m nexus_rag.installer --drop drop \
   [--index-url https://mirror.example.test/simple]
 ```
 
@@ -47,10 +47,10 @@ It checks the prerequisites and the drop, and refuses before changing anything i
 |---|---|
 | Service user | `ragsvc` |
 | Qdrant binary and data | `/opt/qdrant/qdrant`, `/var/lib/qdrant` |
-| Env file, with a **generated** Qdrant key and MCP token (0640, `root:ragsvc`) | `/etc/local-rag/local-rag.env` |
-| Corpus declaration file, commented | `/etc/local-rag/corpora.toml` |
-| venv: packages from the Mirror, then the code | `/opt/local-rag/venv` |
-| Units, from `deploy/systemd/` | `qdrant.service`, `local-rag-mcp.service`, the hourly timer (enabled); `local-rag-sync@.timer` (installed, not enabled) |
+| Env file, with a **generated** Qdrant key and MCP token (0640, `root:ragsvc`) | `/etc/nexus-rag/nexus-rag.env` |
+| Corpus declaration file, commented | `/etc/nexus-rag/corpora.toml` |
+| venv: packages from the Mirror, then the code | `/opt/nexus-rag/venv` |
+| Units, from `deploy/systemd/` | `qdrant.service`, `nexus-rag-mcp.service`, the hourly timer (enabled); `nexus-rag-sync@.timer` (installed, not enabled) |
 
 A second run changes nothing. An upgrade replaces the Qdrant binary, the code and the unit files, and restarts what changed; keep local changes to a unit in a drop-in (`systemctl edit`). It also stops and removes the weekly timer that earlier releases installed. It never touches an existing env file, declaration file, documents or Knowledge index.
 
@@ -58,26 +58,26 @@ Define this helper; every command below uses it. It runs a program as the servic
 
 ```bash
 run_rag() { sudo systemd-run --quiet --pipe --wait --collect -p User=ragsvc \
-  -p EnvironmentFile=/etc/local-rag/local-rag.env -p Environment=HOME=/var/lib/ragsvc \
+  -p EnvironmentFile=/etc/nexus-rag/nexus-rag.env -p Environment=HOME=/var/lib/ragsvc \
   -p Environment=PATH=/usr/local/bin:/usr/bin:/bin "$@"; }
-run_rag /opt/local-rag/venv/bin/local-rag status
+run_rag /opt/nexus-rag/venv/bin/nexus-rag status
 ```
 
 ## 3. Configure
 
-1. **Model gateway and Confluence.** Edit `/etc/local-rag/local-rag.env`:
+1. **Model gateway and Confluence.** Edit `/etc/nexus-rag/nexus-rag.env`:
    - `LITELLM_BASE_URL` (ends with `/v1`) and `LITELLM_API_KEY`
    - `RAG_EMBED_MODEL`, the `model_name` registered in LiteLLM (see `examples/litellm_config.yaml`). If the network has no embedding model, set `RAG_RETRIEVAL=keyword` instead ([why](how-it-works.md#keyword-only-mode))
    - optionally `RAG_RERANK_MODEL`
    - the `CONFLUENCE_*` block: bearer token, `CONFLUENCE_READ_ONLY=true`
 
    Other settings are in [configuration](configuration.md#settings).
-2. **Corpora.** Declare them in `/etc/local-rag/corpora.toml` ([format](configuration.md#declaring-corpora)). Name the Confluence Corpus `confluence`: the timers sync it by that name. A Space's home page as a Root covers the whole Space.
+2. **Corpora.** Declare them in `/etc/nexus-rag/corpora.toml` ([format](configuration.md#declaring-corpora)). Name the Confluence Corpus `confluence`: the timers sync it by that name. A Space's home page as a Root covers the whole Space.
 3. **TLS.** Either let the MCP server serve it (`MCP_TLS_CERT`, `MCP_TLS_KEY`), or put a proxy in front (`examples/nginx.conf.example`) and set `MCP_HOST=127.0.0.1`.
 4. **Apply.** Settings are read at start:
 
    ```bash
-   sudo systemctl restart local-rag-mcp
+   sudo systemctl restart nexus-rag-mcp
    ```
 
 ## 4. Smoke check and first Sync
@@ -85,22 +85,22 @@ run_rag /opt/local-rag/venv/bin/local-rag status
 The smoke check tests each real component and changes nothing ([reading its output](operations.md#smoke-check)):
 
 ```bash
-run_rag /opt/local-rag/venv/bin/python -m local_rag.smoke --systemd
+run_rag /opt/nexus-rag/venv/bin/python -m nexus_rag.smoke --systemd
 ```
 
 When it ends `SMOKE CHECK PASSED`, run the first Sync. It runs until done:
 
 ```bash
-sudo systemctl start local-rag-sync.service
-journalctl -fu local-rag-sync            # follow it
+sudo systemctl start nexus-rag-sync.service
+journalctl -fu nexus-rag-sync            # follow it
 curl http://HOST:8765/healthz            # answers ok
-sudo grep '^MCP_TOKENS=' /etc/local-rag/local-rag.env   # your first token
+sudo grep '^MCP_TOKENS=' /etc/nexus-rag/nexus-rag.env   # your first token
 ```
 
-From now on the hourly timer runs `local-rag sync confluence`, which compares every Document with the index each time. Any other Corpus syncs on its own templated timer, every 15 minutes, once you enable it. For a Corpus named `gitlab`:
+From now on the hourly timer runs `nexus-rag sync confluence`, which compares every Document with the index each time. Any other Corpus syncs on its own templated timer, every 15 minutes, once you enable it. For a Corpus named `gitlab`:
 
 ```bash
-sudo systemctl enable --now local-rag-sync@gitlab.timer
+sudo systemctl enable --now nexus-rag-sync@gitlab.timer
 ```
 
 ## 5. Accept the installation
@@ -108,7 +108,7 @@ sudo systemctl enable --now local-rag-sync@gitlab.timer
 When the first Sync is done, run the acceptance suite ([groups and output](operations.md#acceptance-suite)):
 
 ```bash
-run_rag /opt/local-rag/venv/bin/python -m local_rag.acceptance --systemd
+run_rag /opt/nexus-rag/venv/bin/python -m nexus_rag.acceptance --systemd
 ```
 
 The installation is accepted when it ends `ACCEPTANCE PASSED`.
@@ -119,15 +119,15 @@ Give each user a token and follow [connect Claude Code](../README.md#connect-cla
 
 ## Day to day
 
-Prefix every `local-rag` command with `run_rag /opt/local-rag/venv/bin/`:
+Prefix every `nexus-rag` command with `run_rag /opt/nexus-rag/venv/bin/`:
 
 ```bash
-run_rag /opt/local-rag/venv/bin/local-rag status
-run_rag /opt/local-rag/venv/bin/local-rag search "ORA-00942"
-sudo systemctl start local-rag-sync.service   # Sync now
-sudo systemctl restart local-rag-mcp          # apply an env file edit, or a new MCP_TOKENS
-journalctl -u local-rag-mcp -f                # MCP server log
-journalctl -u local-rag-sync                  # Sync log
+run_rag /opt/nexus-rag/venv/bin/nexus-rag status
+run_rag /opt/nexus-rag/venv/bin/nexus-rag search "ORA-00942"
+sudo systemctl start nexus-rag-sync.service   # Sync now
+sudo systemctl restart nexus-rag-mcp          # apply an env file edit, or a new MCP_TOKENS
+journalctl -u nexus-rag-mcp -f                # MCP server log
+journalctl -u nexus-rag-sync                  # Sync log
 ```
 
 All commands, and what to do when something breaks: [operations](operations.md).

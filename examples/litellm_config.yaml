@@ -1,4 +1,4 @@
-# The network already runs LiteLLM (the Model gateway). This only shows what local-rag needs registered in it.
+# The network already runs LiteLLM (the Model gateway). This only shows what nexus-rag needs registered in it.
 model_list:
   # 1) Chat model for Claude Code (name must match ANTHROPIC_MODEL in claude_settings.example.json)
   - model_name: local-main

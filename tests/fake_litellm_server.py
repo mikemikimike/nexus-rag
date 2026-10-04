@@ -4,8 +4,8 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from local_rag.fakes import FakeModelGateway
-from local_rag.sparse import tokenize
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.sparse import tokenize
 
 
 class FakeLiteLLM:

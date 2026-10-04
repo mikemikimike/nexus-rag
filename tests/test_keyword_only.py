@@ -7,10 +7,10 @@ import pytest
 
 from conftest import SYNONYMS
 from index_states import record_format
-from local_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
-from local_rag.fakes import FakeModelGateway
-from local_rag.gateway_litellm import GatewayError
-from local_rag.settings import RetrievalMode
+from nexus_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.gateway_litellm import GatewayError
+from nexus_rag.settings import RetrievalMode
 from test_index_format import after_an_upgrade
 
 KEYWORD = RetrievalMode.KEYWORD

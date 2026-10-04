@@ -4,15 +4,15 @@ index, naming collections through ``IndexNames`` rather than spelling them out."
 
 from qdrant_client import QdrantClient, models
 
-from local_rag import Settings
-from local_rag.chunker import Piece
-from local_rag.corpus import Document
-from local_rag.gateway import ModelGateway
-from local_rag.generations import Generations
-from local_rag.index_format import IndexFormat
-from local_rag.index_names import IndexNames
-from local_rag.passage_store import PassageStore, Written
-from local_rag.sparse import SparseEncoder
+from nexus_rag import Settings
+from nexus_rag.chunker import Piece
+from nexus_rag.corpus import Document
+from nexus_rag.gateway import ModelGateway
+from nexus_rag.generations import Generations
+from nexus_rag.index_format import IndexFormat
+from nexus_rag.index_names import IndexNames
+from nexus_rag.passage_store import PassageStore, Written
+from nexus_rag.sparse import SparseEncoder
 
 NAMES = IndexNames(Settings().collection)
 

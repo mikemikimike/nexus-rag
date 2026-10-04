@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "local-rag": {
+    "nexus-rag": {
       "type": "http",
       "url": "https://rag.example.test/mcp",
-      "headers": { "Authorization": "Bearer ${LOCAL_RAG_TOKEN}" }
+      "headers": { "Authorization": "Bearer ${NEXUS_RAG_TOKEN}" }
     }
   }
 }

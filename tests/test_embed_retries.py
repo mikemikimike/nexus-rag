@@ -9,10 +9,10 @@ import pytest
 
 from conftest import DOCUMENTS
 from fake_litellm_server import FakeLiteLLM
-from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import InMemoryCorpus
-from local_rag.fakes import FakeModelGateway
-from local_rag.gateway_litellm import GatewayError, LiteLLMGateway
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.corpus import InMemoryCorpus
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.gateway_litellm import GatewayError, LiteLLMGateway
 
 ONE = InMemoryCorpus(DOCUMENTS[:1])
 

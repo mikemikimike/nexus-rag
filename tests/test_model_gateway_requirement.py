@@ -9,11 +9,11 @@ import itertools
 import pytest
 from qdrant_client import QdrantClient
 
-from local_rag import KnowledgeIndex, Settings
-from local_rag.environment import SettingsError, settings_from_environment
-from local_rag.fakes import FakeModelGateway
-from local_rag.gateway_litellm import LiteLLMGateway, gateway_from_settings
-from local_rag.settings import RetrievalMode
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.environment import SettingsError, settings_from_environment
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.gateway_litellm import LiteLLMGateway, gateway_from_settings
+from nexus_rag.settings import RetrievalMode
 
 ADDRESS = "http://gateway.example.test:4000/v1"
 

@@ -8,7 +8,7 @@ import subprocess
 import pytest
 
 from fake_drop import REPO
-from local_rag import acceptance, cli, container, installer, smoke
+from nexus_rag import acceptance, cli, container, installer, smoke
 
 GUIDE_PATH = REPO / "docs/agents/closed-network-setup.md"
 GUIDE = GUIDE_PATH.read_text()
@@ -41,14 +41,14 @@ SHELL_VARIABLES = {
 }
 NOT_SETTINGS = {"CONFLUENCE_URL", "CONFLUENCE_TOKEN"}
 # A file of an earlier release that the guide names only to migrate away from it.
-LEGACY_PATHS = {"/etc/local-rag/confluence_roots.txt"}
-VENV = "/opt/local-rag/venv"
+LEGACY_PATHS = {"/etc/nexus-rag/confluence_roots.txt"}
+VENV = "/opt/nexus-rag/venv"
 
 
 def sources() -> str:
     """Everything the guide may name: the code, the deployment files and the examples. Not
     what an install leaves in the tree: the egg-info holds a copy of the README."""
-    generated = {"local_rag.egg-info", "__pycache__"}
+    generated = {"nexus_rag.egg-info", "__pycache__"}
     return "\n".join(
         path.read_text(errors="ignore")
         for folder in ("src", "deploy", "examples")
@@ -120,7 +120,7 @@ def test_every_unit_the_guide_names_is_a_file_in_deploy():
         for folder in ("systemd", "container")
         for path in (REPO / "deploy" / folder).iterdir()
     }
-    units = set(re.findall(r"\b(?:local-rag|qdrant)[\w-]*\.(?:service|timer)\b", GUIDE))
+    units = set(re.findall(r"\b(?:nexus-rag|qdrant)[\w-]*\.(?:service|timer)\b", GUIDE))
 
     assert units
     assert [unit for unit in sorted(units) if unit not in deployed] == []
@@ -128,10 +128,10 @@ def test_every_unit_the_guide_names_is_a_file_in_deploy():
 
 
 def test_every_module_the_guide_runs_exists():
-    modules = set(re.findall(r"-m local_rag\.(\w+)", GUIDE))
+    modules = set(re.findall(r"-m nexus_rag\.(\w+)", GUIDE))
 
     assert modules == {"installer", "container", "smoke", "acceptance"}
-    assert [m for m in modules if not (REPO / "src/local_rag" / f"{m}.py").exists()] == []
+    assert [m for m in modules if not (REPO / "src/nexus_rag" / f"{m}.py").exists()] == []
 
 
 def parsers() -> dict[str, argparse.ArgumentParser]:
@@ -140,7 +140,7 @@ def parsers() -> dict[str, argparse.ArgumentParser]:
         return action.choices
 
     return {
-        **{f"local-rag {name}": sub for name, sub in subcommands(cli._parser()).items()},
+        **{f"nexus-rag {name}": sub for name, sub in subcommands(cli._parser()).items()},
         **{f"container {name}": sub for name, sub in subcommands(container._parser()).items()},
         "installer": installer._parser(),
         "smoke": smoke._parser(),
@@ -152,20 +152,20 @@ def flags_of(parser: argparse.ArgumentParser) -> set[str]:
     return {flag for action in parser._actions for flag in action.option_strings}
 
 
-def test_every_local_rag_command_and_flag_in_the_guide_exists():
+def test_every_nexus_rag_command_and_flag_in_the_guide_exists():
     known = parsers()
     commands = set(
-        re.findall(r"local-rag (sync|rebuild|forget|switch-back|search|status)\b", GUIDE)
+        re.findall(r"nexus-rag (sync|rebuild|forget|switch-back|search|status)\b", GUIDE)
     )
-    assert commands == {name.split()[1] for name in known if name.startswith("local-rag")}
+    assert commands == {name.split()[1] for name in known if name.startswith("nexus-rag")}
 
     for line in "\n".join(code_spans()).splitlines():
         for name in ("sync", "rebuild", "forget", "search", "status", "switch-back"):
-            if re.search(rf"local-rag {name}\b", line):
+            if re.search(rf"nexus-rag {name}\b", line):
                 unknown = set(
-                    re.findall(r"(?<![\w-])--?[a-z][\w-]*", line.split(f"local-rag {name}")[1])
+                    re.findall(r"(?<![\w-])--?[a-z][\w-]*", line.split(f"nexus-rag {name}")[1])
                 )
-                allowed = flags_of(known[f"local-rag {name}"]) | {"-m"}
+                allowed = flags_of(known[f"nexus-rag {name}"]) | {"-m"}
                 assert unknown <= allowed | {"--index-url"}, (line, unknown - allowed)
 
 
@@ -179,9 +179,9 @@ def test_every_flag_of_the_installer_container_and_smoke_commands_exists():
             ("acceptance", "acceptance"),
         ):
             word = module.split()[0]
-            if f"-m local_rag.{word}" in line:
+            if f"-m nexus_rag.{word}" in line:
                 flags = set(
-                    re.findall(r"(?<![\w-])--[a-z][\w-]*", line.split(f"-m local_rag.{word}")[1])
+                    re.findall(r"(?<![\w-])--[a-z][\w-]*", line.split(f"-m nexus_rag.{word}")[1])
                 )
                 assert flags <= flags_of(known[parser]), (line, flags - flags_of(known[parser]))
 
@@ -193,7 +193,7 @@ def test_the_acceptance_groups_and_check_names_the_guide_gives_exist():
     )
     names = {n for n in names if not n.endswith((".service", ".timer"))}  # units, not checks
     source = "\n".join(
-        (REPO / "src/local_rag" / f"acceptance_{m}.py").read_text()
+        (REPO / "src/nexus_rag" / f"acceptance_{m}.py").read_text()
         for m in ("stack", "index", "mcp", "host")
     )
 
@@ -325,5 +325,5 @@ def test_set_env_refuses_a_value_the_env_file_syntax_would_misread(tmp_path):
 def test_both_install_guides_send_the_operator_to_the_acceptance_suite(route):
     guide = INSTALL_GUIDES[route]
 
-    assert "local_rag.acceptance" in guide and "ACCEPTANCE PASSED" in guide, route
+    assert "nexus_rag.acceptance" in guide and "ACCEPTANCE PASSED" in guide, route
     assert f"docs/install-{route}.md" in README

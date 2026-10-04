@@ -5,10 +5,10 @@ import io
 
 from qdrant_client import QdrantClient
 
-from local_rag import Access, KnowledgeIndex
-from local_rag.cli import main
-from local_rag.corpus import InMemoryCorpus
-from local_rag.tokens import count_tokens
+from nexus_rag import Access, KnowledgeIndex
+from nexus_rag.cli import main
+from nexus_rag.corpus import InMemoryCorpus
+from nexus_rag.tokens import count_tokens
 from test_code_passages import SMALL, code, indexed, passages
 from test_mcp_server import call, serving
 
@@ -180,7 +180,7 @@ def test_the_syntax_split_languages_are_recorded_in_the_index_format():
 
 
 def test_an_index_that_did_not_record_syntax_languages_is_read_only(monkeypatch):
-    from local_rag.index_format import IndexFormat
+    from nexus_rag.index_format import IndexFormat
 
     original = IndexFormat.to_payload
 
@@ -199,7 +199,7 @@ def test_an_index_that_did_not_record_syntax_languages_is_read_only(monkeypatch)
 
 
 def test_adding_a_language_makes_an_index_read_only_until_a_rebuild(monkeypatch):
-    from local_rag import languages
+    from nexus_rag import languages
 
     client = QdrantClient(location=":memory:")
     monkeypatch.setattr(languages, "MEDIA_TYPE_LANGUAGES", {"text/x-python": "python"})

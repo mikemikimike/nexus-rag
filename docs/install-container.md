@@ -22,10 +22,10 @@ Then: [build on the closed network](#build-on-the-closed-network), [day to day](
 On a connected machine, from a **clean checkout of the commit to ship**. `save` builds the system image from the working tree but archives `HEAD`, so uncommitted changes would end up in the image and not in the archive.
 
 ```bash
-PYTHONPATH=src python3.12 -m local_rag.container save --out drop
+PYTHONPATH=src python3.12 -m nexus_rag.container save --out drop
 ```
 
-`drop/` then holds `qdrant-image-<version>.tar`, `local-rag-image-<version>.tar`, `local-rag-<version>.tar.gz` (the compose file and timers) and `SHA256SUMS`. Carry it into the network.
+`drop/` then holds `qdrant-image-<version>.tar`, `nexus-rag-image-<version>.tar`, `nexus-rag-<version>.tar.gz` (the compose file and timers) and `SHA256SUMS`. Carry it into the network.
 
 ## 2. Start the stack
 
@@ -33,15 +33,15 @@ On the host, unpack the code archive and run its copy of the command. It is also
 
 ```bash
 VERSION=0.1.0          # `version` in pyproject.toml
-tar -xzf drop/local-rag-$VERSION.tar.gz -C /tmp
-sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.container start --drop drop
+tar -xzf drop/nexus-rag-$VERSION.tar.gz -C /tmp
+sudo PYTHONPATH=/tmp/nexus-rag/src python3.12 -m nexus_rag.container start --drop drop
 ```
 
 It verifies the checksums, the image tags and the versions the images report, and refuses before changing anything if one is wrong. Then it:
 
 - loads the images;
-- writes, only if missing, the env file `/etc/local-rag/container.env` with generated secrets (0600) and the Corpus declaration file `/etc/local-rag/corpora.toml`;
-- installs the compose file in `/opt/local-rag/container/` and the container timers from `deploy/container/`;
+- writes, only if missing, the env file `/etc/nexus-rag/container.env` with generated secrets (0600) and the Corpus declaration file `/etc/nexus-rag/corpora.toml`;
+- installs the compose file in `/opt/nexus-rag/container/` and the container timers from `deploy/container/`;
 - runs `docker compose up -d`.
 
 Data and the index live in Docker volumes, which an upgrade does not touch.
@@ -49,24 +49,24 @@ Data and the index live in Docker volumes, which an upgrade does not touch.
 Define this helper; every command below uses it:
 
 ```bash
-compose() { sudo docker compose --project-name local-rag --env-file /etc/local-rag/container.env \
-  -f /opt/local-rag/container/compose.yaml "$@"; }
+compose() { sudo docker compose --project-name nexus-rag --env-file /etc/nexus-rag/container.env \
+  -f /opt/nexus-rag/container/compose.yaml "$@"; }
 compose up -d                              # apply an env file edit
-compose run --rm -T sync local-rag status  # run any local-rag command
+compose run --rm -T sync nexus-rag status  # run any nexus-rag command
 compose run --rm -T sync                   # one Sync (what the timers do)
 ```
 
 ## 3. Configure
 
-1. **Model gateway and Confluence.** Edit `/etc/local-rag/container.env`:
+1. **Model gateway and Confluence.** Edit `/etc/nexus-rag/container.env`:
    - `LITELLM_BASE_URL` (ends with `/v1`) and `LITELLM_API_KEY`
    - `RAG_EMBED_MODEL`, the `model_name` registered in LiteLLM (see `examples/litellm_config.yaml`). If the network has no embedding model, set `RAG_RETRIEVAL=keyword` instead ([why](how-it-works.md#keyword-only-mode))
    - optionally `RAG_RERANK_MODEL`
    - the `CONFLUENCE_*` block: bearer token, `CONFLUENCE_READ_ONLY=true`
-   - if an internal CA signed Confluence's certificate (`unable to verify the first certificate`): copy its PEM, with any intermediate certificates, to `/etc/local-rag/certs/` and set `NODE_EXTRA_CA_CERTS=/etc/local-rag/certs/ca.pem`
+   - if an internal CA signed Confluence's certificate (`unable to verify the first certificate`): copy its PEM, with any intermediate certificates, to `/etc/nexus-rag/certs/` and set `NODE_EXTRA_CA_CERTS=/etc/nexus-rag/certs/ca.pem`
 
    Other settings are in [configuration](configuration.md#settings).
-2. **Corpora.** Declare them in `/etc/local-rag/corpora.toml` ([format](configuration.md#declaring-corpora)). Name the Confluence Corpus `confluence`: the timers sync it by that name.
+2. **Corpora.** Declare them in `/etc/nexus-rag/corpora.toml` ([format](configuration.md#declaring-corpora)). Name the Confluence Corpus `confluence`: the timers sync it by that name.
 3. **Apply:**
 
    ```bash
@@ -78,20 +78,20 @@ compose run --rm -T sync                   # one Sync (what the timers do)
 The smoke check tests each real component and changes nothing ([reading its output](operations.md#smoke-check)):
 
 ```bash
-compose run --rm -T sync python -m local_rag.smoke
+compose run --rm -T sync python -m nexus_rag.smoke
 ```
 
 When it ends `SMOKE CHECK PASSED`, run the first Sync and find your first token:
 
 ```bash
 compose run --rm -T sync
-sudo grep '^MCP_TOKENS=' /etc/local-rag/container.env
+sudo grep '^MCP_TOKENS=' /etc/nexus-rag/container.env
 ```
 
 From now on the container timers sync the `confluence` Corpus hourly. Any other Corpus syncs on its own templated timer, every 15 minutes, once you enable it. For a Corpus named `gitlab`:
 
 ```bash
-sudo systemctl enable --now local-rag-container-sync@gitlab.timer
+sudo systemctl enable --now nexus-rag-container-sync@gitlab.timer
 ```
 
 ## 5. Accept the installation
@@ -99,13 +99,13 @@ sudo systemctl enable --now local-rag-container-sync@gitlab.timer
 After the first Sync, run the acceptance suite ([groups and output](operations.md#acceptance-suite)) in two parts. Inside the stack (set the port if you changed `MCP_PORT`):
 
 ```bash
-compose run --rm -T sync python -m local_rag.acceptance --skip install --mcp-url http://mcp:8765
+compose run --rm -T sync python -m nexus_rag.acceptance --skip install --mcp-url http://mcp:8765
 ```
 
 Then its `install` group on the host, which needs `docker` and `systemctl`:
 
 ```bash
-sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.acceptance --container --only install
+sudo PYTHONPATH=/tmp/nexus-rag/src python3.12 -m nexus_rag.acceptance --container --only install
 ```
 
 The installation is accepted when both end `ACCEPTANCE PASSED`.
@@ -123,15 +123,15 @@ Instead of carrying the system image in, the host can build it from the network'
 On the connected machine (or anywhere with the repository: `git archive` needs no network), from a clean checkout of the commit to ship, save only the code:
 
 ```bash
-PYTHONPATH=src python3.12 -m local_rag.container save --code-only --out drop
+PYTHONPATH=src python3.12 -m nexus_rag.container save --code-only --out drop
 ```
 
-`drop/` holds `local-rag-<version>.tar.gz` and `SHA256SUMS`. On the host, unpack the archive as in step 2 and start with `--build`:
+`drop/` holds `nexus-rag-<version>.tar.gz` and `SHA256SUMS`. On the host, unpack the archive as in step 2 and start with `--build`:
 
 ```bash
 VERSION=0.1.0
-tar -xzf drop/local-rag-$VERSION.tar.gz -C /tmp
-sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.container start --drop drop --build \
+tar -xzf drop/nexus-rag-$VERSION.tar.gz -C /tmp
+sudo PYTHONPATH=/tmp/nexus-rag/src python3.12 -m nexus_rag.container start --drop drop --build \
   --base-image registry.example.test/library/python:3.12-slim \
   --qdrant-image registry.example.test/qdrant/qdrant:v1.19.1 \
   --apt-mirror http://apt.example.test \
@@ -143,7 +143,7 @@ Each option is optional: what you leave out is the public source, which a Docker
 
 - verifies the code archive against `SHA256SUMS`, as before, and refuses before touching Docker if it differs;
 - pulls the Qdrant image and tags it as the compose file names it (`qdrant/qdrant:v<version>`);
-- builds `local-rag:<version>` from the verified code with `deploy/container/Dockerfile`, passing the options as its build arguments (`BASE_IMAGE`, `APT_MIRROR`, `PIP_INDEX_URL`, `NPM_CONFIG_REGISTRY`);
+- builds `nexus-rag:<version>` from the verified code with `deploy/container/Dockerfile`, passing the options as its build arguments (`BASE_IMAGE`, `APT_MIRROR`, `PIP_INDEX_URL`, `NPM_CONFIG_REGISTRY`);
 - checks the versions the two images report, which must be the ones the repository records, and then continues exactly as step 2 does.
 
 `--apt-mirror` is the base URL of a mirror that serves `/debian` and `/debian-security`. The build arguments are visible in `docker history`: give URLs without credentials. An upgrade is the same command with a new code archive; the Qdrant image and the packages are pulled again, so keep the mirrors' contents in step with `requirements.lock`.
@@ -153,33 +153,33 @@ Each option is optional: what you leave out is the public source, which a Docker
 If the network mirrors this repository, skip the drop: clone it and let compose build the image on the host, with the host's own apt, pip and npm configuration. You write what `start` would have written (the env file, the Corpus declaration file); none of the drop's checksums apply, so the clone is only as trustworthy as the mirror.
 
 ```bash
-git clone https://git.example.test/mirror/local-rag.git && cd local-rag    # a clean checkout of the commit to ship
-sudo install -d -m 0755 /etc/local-rag && sudo touch /etc/local-rag/corpora.toml   # the sync service mounts it: it must be a file
-sudo install -m 0600 /dev/null /etc/local-rag/container.env
+git clone https://git.example.test/mirror/nexus-rag.git && cd nexus-rag    # a clean checkout of the commit to ship
+sudo install -d -m 0755 /etc/nexus-rag && sudo touch /etc/nexus-rag/corpora.toml   # the sync service mounts it: it must be a file
+sudo install -m 0600 /dev/null /etc/nexus-rag/container.env
 ```
 
-Put `QDRANT_API_KEY=<secret>` and `MCP_TOKENS=<token>` in `/etc/local-rag/container.env` (generate each with `python3 -c 'import secrets; print(secrets.token_hex(24))'`), then the settings of [step 3](#3-configure). The compose file defaults `CONFLUENCE_DOMAIN` to `confluence` and `GITLAB_URL` to `https://gitlab.org`; set them in the env file to override. The images the build and the stack start from must be present under their public names, `python:3.12-slim` and `qdrant/qdrant:v1.19.1`; if your registry names them otherwise, `docker pull` and `docker tag` them. Then build and start from the checkout:
+Put `QDRANT_API_KEY=<secret>` and `MCP_TOKENS=<token>` in `/etc/nexus-rag/container.env` (generate each with `python3 -c 'import secrets; print(secrets.token_hex(24))'`), then the settings of [step 3](#3-configure). The compose file defaults `CONFLUENCE_DOMAIN` to `confluence` and `GITLAB_URL` to `https://gitlab.org`; set them in the env file to override. The images the build and the stack start from must be present under their public names, `python:3.12-slim` and `qdrant/qdrant:v1.19.1`; if your registry names them otherwise, `docker pull` and `docker tag` them. Then build and start from the checkout:
 
 ```bash
-sudo docker compose --project-name local-rag --env-file /etc/local-rag/container.env \
+sudo docker compose --project-name nexus-rag --env-file /etc/nexus-rag/container.env \
   -f deploy/container/compose.yaml up -d --build
 ```
 
 Define `compose()` as in step 2, with `-f` pointing at this checkout's `deploy/container/compose.yaml`. [Upgrading](#upgrades) is `git pull` and the same command.
 
-This path does not check the image's version, write the Corpus template or install the timers; `start --build` does those. For the timers, copy `deploy/container/*.service` and `*.timer` to `/etc/systemd/system/` and the compose file to `/opt/local-rag/container/compose.yaml` (the units name that path; the image is already built, so the build context is not used there), then `systemctl daemon-reload` and `systemctl enable --now local-rag-container-sync.timer`.
+This path does not check the image's version, write the Corpus template or install the timers; `start --build` does those. For the timers, copy `deploy/container/*.service` and `*.timer` to `/etc/systemd/system/` and the compose file to `/opt/nexus-rag/container/compose.yaml` (the units name that path; the image is already built, so the build context is not used there), then `systemctl daemon-reload` and `systemctl enable --now nexus-rag-container-sync.timer`.
 
 ## Day to day
 
-Prefix every `local-rag` command with `compose run --rm -T sync`:
+Prefix every `nexus-rag` command with `compose run --rm -T sync`:
 
 ```bash
-compose run --rm -T sync local-rag status
-compose run --rm -T sync local-rag search "ORA-00942"
+compose run --rm -T sync nexus-rag status
+compose run --rm -T sync nexus-rag search "ORA-00942"
 compose run --rm -T sync        # Sync now
 compose up -d                   # apply an env file edit, or a new MCP_TOKENS
 compose logs -f mcp             # MCP server log
-journalctl -u local-rag-container-sync   # Sync log
+journalctl -u nexus-rag-container-sync   # Sync log
 ```
 
 All commands, and what to do when something breaks: [operations](operations.md).
@@ -195,11 +195,11 @@ With a drop (step 1), build a new one and run `container start` again (step 2). 
 ```bash
 git pull                                       # or check out the tag you ship
 git diff ORIG_HEAD HEAD -- deploy/container/compose.yaml | grep qdrant/qdrant   # a new Qdrant release?
-sudo docker compose --project-name local-rag --env-file /etc/local-rag/container.env \
+sudo docker compose --project-name nexus-rag --env-file /etc/nexus-rag/container.env \
   -f deploy/container/compose.yaml up -d --build
 ```
 
 1. If the `grep` prints a changed Qdrant tag, `docker pull` the new release from your registry and `docker tag` it to the name in the compose file first (see above); otherwise compose cannot find it.
 2. `up -d --build` rebuilds the system image and recreates the `mcp` container, and `qdrant` only when its image changed. The env file, the volumes and the index are not touched. The Sync timers run the new image from their next run.
-3. If you installed the timers by hand, refresh their files too, since the units and the compose file they name are copies: `sudo cp deploy/container/compose.yaml /opt/local-rag/container/` and `sudo cp deploy/container/*.service deploy/container/*.timer /etc/systemd/system/`, then `sudo systemctl daemon-reload`.
-4. Run the smoke check ([step 4](#4-smoke-check-and-first-sync)). A release that changes the Index format makes the old index read-only until a Rebuild: `upgrading.md` says when, and `local-rag status` shows `access: read-only`.
+3. If you installed the timers by hand, refresh their files too, since the units and the compose file they name are copies: `sudo cp deploy/container/compose.yaml /opt/nexus-rag/container/` and `sudo cp deploy/container/*.service deploy/container/*.timer /etc/systemd/system/`, then `sudo systemctl daemon-reload`.
+4. Run the smoke check ([step 4](#4-smoke-check-and-first-sync)). A release that changes the Index format makes the old index read-only until a Rebuild: `upgrading.md` says when, and `nexus-rag status` shows `access: read-only`.

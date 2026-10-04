@@ -1,8 +1,8 @@
 import pytest
 
-from local_rag import Settings
-from local_rag.chunker import Chunker
-from local_rag.fakes import FakeModelGateway
+from nexus_rag import Settings
+from nexus_rag.chunker import Chunker
+from nexus_rag.fakes import FakeModelGateway
 
 
 def words(text: str) -> int:

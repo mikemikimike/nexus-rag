@@ -2,9 +2,9 @@ import pytest
 
 from conftest import SYNONYMS
 from fake_litellm_server import FakeLiteLLM
-from local_rag import Settings
-from local_rag.fakes import FakeModelGateway
-from local_rag.gateway_litellm import GatewayError, LiteLLMGateway
+from nexus_rag import Settings
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.gateway_litellm import GatewayError, LiteLLMGateway
 
 
 @pytest.fixture

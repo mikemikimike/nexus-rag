@@ -2,8 +2,8 @@
 
 import pytest
 
-from local_rag.corpus import Document, InMemoryCorpus
-from local_rag.declaration import Declaration, DeclarationError
+from nexus_rag.corpus import Document, InMemoryCorpus
+from nexus_rag.declaration import Declaration, DeclarationError
 
 
 def doc(id, text, version="1"):
@@ -192,7 +192,7 @@ def test_documents_of_an_undeclared_corpus_stay_searchable_and_status_names_it(i
 
 
 def test_forget_is_refused_while_a_sync_of_that_corpus_runs_and_removes_nothing(index):
-    from local_rag import SyncInProgress
+    from nexus_rag import SyncInProgress
 
     index.sync(InMemoryCorpus([doc("a1", "alpha ZX-1")], name="a"))
     refused = []
@@ -212,7 +212,7 @@ def test_forget_is_refused_while_a_sync_of_that_corpus_runs_and_removes_nothing(
 
 
 def test_forget_is_refused_while_a_rebuild_runs(index):
-    from local_rag import SyncInProgress
+    from nexus_rag import SyncInProgress
 
     index.sync(InMemoryCorpus([doc("a1", "alpha ZX-1")], name="a"))
     refused = []

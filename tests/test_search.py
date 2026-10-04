@@ -1,7 +1,7 @@
 import pytest
 
-from local_rag import KnowledgeIndex, Settings
-from local_rag.sparse import tokenize
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.sparse import tokenize
 
 
 def test_exact_identifier_search_returns_the_passage_containing_it(index, corpus):

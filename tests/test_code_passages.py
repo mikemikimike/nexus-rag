@@ -7,13 +7,13 @@ import itertools
 import pytest
 from qdrant_client import QdrantClient
 
-from local_rag import Access, KnowledgeIndex, Settings
-from local_rag.chunker import Chunker
-from local_rag.cli import main
-from local_rag.corpus import CodeFile, InMemoryCorpus, RawDocument, TrackedRef
-from local_rag.environment import SettingsError, settings_from_environment
-from local_rag.settings import RetrievalMode
-from local_rag.tokens import count_tokens
+from nexus_rag import Access, KnowledgeIndex, Settings
+from nexus_rag.chunker import Chunker
+from nexus_rag.cli import main
+from nexus_rag.corpus import CodeFile, InMemoryCorpus, RawDocument, TrackedRef
+from nexus_rag.environment import SettingsError, settings_from_environment
+from nexus_rag.settings import RetrievalMode
+from nexus_rag.tokens import count_tokens
 from test_mcp_server import call, serving
 
 URL = "https://gitlab.example.test/platform/payments/-/blob/main/src/ledger.py"
@@ -200,7 +200,7 @@ def test_the_code_size_limit_and_splitting_method_are_recorded():
 
 
 def test_an_index_that_did_not_record_code_splitting_is_read_only(monkeypatch):
-    from local_rag.index_format import IndexFormat
+    from nexus_rag.index_format import IndexFormat
 
     original = IndexFormat.to_payload
 

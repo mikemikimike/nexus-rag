@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues and specs live as GitHub issues in the private repo AvielBerko/local-rag (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+Issues and specs live as GitHub issues in the private repo AvielBerko/nexus-rag (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -14,4 +14,4 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 
 ### Operator setup
 
-Installing, configuring, verifying or operating local-rag on a closed network, or collecting an operator's settings and tokens: `docs/agents/closed-network-setup.md`.
+Installing, configuring, verifying or operating nexus-rag on a closed network, or collecting an operator's settings and tokens: `docs/agents/closed-network-setup.md`.

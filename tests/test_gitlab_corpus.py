@@ -4,13 +4,13 @@ import pytest
 
 from fake_gitlab import FakeGitLab
 from index_states import NAMES
-from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import CodeFile, TrackedRef, listing_failures
-from local_rag.declaration import Declaration
-from local_rag.environment import Environment
-from local_rag.fakes import FakeModelGateway
-from local_rag.gitlab import GitLabCorpus, Repository
-from local_rag.settings import RetrievalMode
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.corpus import CodeFile, TrackedRef, listing_failures
+from nexus_rag.declaration import Declaration
+from nexus_rag.environment import Environment
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.gitlab import GitLabCorpus, Repository
+from nexus_rag.settings import RetrievalMode
 
 REPOSITORY = "platform/payments"
 TOKEN = "glpat-s3cr3t-t0ken"
@@ -353,7 +353,7 @@ def test_with_no_ref_a_search_sees_only_primary_refs_and_a_ref_or_repository_nar
 
 
 def test_a_search_with_no_ref_leaves_non_code_corpora_alone(gitlab, cache):
-    from local_rag.corpus import Document, InMemoryCorpus
+    from nexus_rag.corpus import Document, InMemoryCorpus
 
     tracked(gitlab)
     index = KnowledgeIndex(Settings(), FakeModelGateway())
@@ -421,7 +421,7 @@ def test_the_declaration_can_mark_another_ref_primary(gitlab, cache, tmp_path):
     ],
 )
 def test_the_declaration_rejects_unusable_refs(tmp_path, refs):
-    from local_rag.declaration import DeclarationError
+    from nexus_rag.declaration import DeclarationError
 
     with pytest.raises(DeclarationError):
         declared_code(tmp_path, tmp_path / "c", refs).corpus(

@@ -1,5 +1,5 @@
-from local_rag import KnowledgeIndex, Settings
-from local_rag.fakes import FakeModelGateway
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.fakes import FakeModelGateway
 
 
 def test_get_document_returns_the_full_text_by_document_id(index, corpus):

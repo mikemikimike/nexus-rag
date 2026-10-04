@@ -4,10 +4,10 @@ from qdrant_client import QdrantClient, models
 
 from conftest import DOCUMENTS
 from index_states import NAMES
-from local_rag import KnowledgeIndex, Settings
-from local_rag.chunker import Chunker
-from local_rag.corpus import Document, InMemoryCorpus
-from local_rag.fakes import FakeModelGateway
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.chunker import Chunker
+from nexus_rag.corpus import Document, InMemoryCorpus
+from nexus_rag.fakes import FakeModelGateway
 from test_sync import CountingGateway
 
 SMALL = Settings(chunk_tokens=40, chunk_overlap=5)
