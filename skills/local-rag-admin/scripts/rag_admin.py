@@ -571,7 +571,7 @@ def apply(target: Path, route: Route) -> int:
         print(
             f"new       corpus {name}: run `sync {name}`; for a schedule, `timer enable {name}`"
             if name != "confluence"
-            else "new       corpus confluence: the hourly and weekly timers sync it"
+            else "new       corpus confluence: the hourly timer syncs it"
         )
     for name in before.keys() - after.keys():
         print(

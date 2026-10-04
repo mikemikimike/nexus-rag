@@ -25,7 +25,7 @@ How to check, run and repair an installation. Commands are route-neutral: prefix
 | Undo a bad Rebuild | `local-rag switch-back` |
 | Add or revoke a user | edit `MCP_TOKENS`, restart the MCP server |
 
-Exit codes of `local-rag`: `0` success; `1` failure or refusal (a Sync with failed Documents, a refused Rebuild, another run in progress, an unusable index); `2` a command line that cannot be used. Only one Sync or Rebuild runs at a time.
+Exit codes of `local-rag`: `0` success; `1` failure or refusal (a Sync with failed Documents, a refused Rebuild, an unusable index); `2` a command line that cannot be used; `75` another run holds the lock, so this one did nothing (the timer units treat it as success, so an overlap does not leave a failed unit). Only one Sync or Rebuild runs at a time.
 
 A Rebuild can run for hours: detach it as in section 9 of [the closed-network setup guide](agents/closed-network-setup.md#9-operate), which also covers changing the embedding model without downtime.
 

@@ -265,7 +265,6 @@ def test_each_systemd_unit_must_be_active(smoke):
         "qdrant.service",
         "local-rag-mcp.service",
         "local-rag-sync.timer",
-        "local-rag-full.timer",
     }
 
 

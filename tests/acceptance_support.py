@@ -108,17 +108,14 @@ def line(output: str, name: str) -> str:
     return found[0]
 
 
-TIMERS = (
-    "Thu 2026-10-01 13:00:00 UTC  40min left Thu 2026-10-01 12:00:01 UTC  19min ago {sync}.timer {sync}.service\n"
-    "Sun 2026-10-04 03:00:00 UTC  2 days left n/a                          n/a      {full}.timer {full}.service\n"
-)
+TIMERS = "Thu 2026-10-01 13:00:00 UTC  40min left Thu 2026-10-01 12:00:01 UTC  19min ago {sync}.timer {sync}.service\n"
 
 
 def systemd_host(**kwargs) -> Host:
     return Host(
         {
             "stat -c %a": "640\n",
-            "list-timers": TIMERS.format(sync="local-rag-sync", full="local-rag-full"),
+            "list-timers": TIMERS.format(sync="local-rag-sync"),
         },
         **kwargs,
     )
@@ -129,9 +126,7 @@ def container_host(**kwargs) -> Host:
         {
             "stat -c %a": "600\n",
             "docker ps": "mcp Up 3 hours (healthy)\nqdrant Up 3 hours\n",
-            "list-timers": TIMERS.format(
-                sync="local-rag-container-sync", full="local-rag-container-full"
-            ),
+            "list-timers": TIMERS.format(sync="local-rag-container-sync"),
         },
         **kwargs,
     )

@@ -11,3 +11,4 @@ Environment=HOME=/var/lib/ragsvc
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ExecStart=/opt/local-rag/venv/bin/local-rag sync %i
 TimeoutStartSec=6h
+SuccessExitStatus=75

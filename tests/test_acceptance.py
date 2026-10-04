@@ -673,9 +673,9 @@ def test_a_world_readable_env_file_fails_without_printing_a_secret():
 
 def test_a_timer_without_a_next_run_is_not_scheduled():
     host = systemd_host()
-    host.answers["list-timers"] = TIMERS.format(
-        sync="local-rag-sync", full="local-rag-full"
-    ).replace("Thu 2026-10-01 13:00:00 UTC  40min left", "n/a  n/a")
+    host.answers["list-timers"] = TIMERS.format(sync="local-rag-sync").replace(
+        "Thu 2026-10-01 13:00:00 UTC  40min left", "n/a  n/a"
+    )
 
     code, out, _ = install_only("--systemd", host=host)
 
@@ -688,7 +688,7 @@ def test_a_complete_container_installation_passes():
     assert code == 0, out
     assert "qdrant and mcp are up" in line(out, "install.stack")
     assert "container.env" in line(out, "install.env-file")
-    assert "2 timers are scheduled" in line(out, "install.timers")
+    assert "1 timer scheduled" in line(out, "install.timers")
 
 
 def test_a_stopped_or_unhealthy_container_fails():

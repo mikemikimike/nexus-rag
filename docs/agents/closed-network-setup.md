@@ -9,7 +9,7 @@ Work the sections in order. Each ends with a **Gate**: do not start the next sec
 - **Secrets stay out of output.** Never `cat` an env file, echo a token or paste one into a log line. Show an env file masked:
   `sudo sed -E 's/^([A-Z0-9_]*(KEY|TOKENS?))=.*/\1=<hidden>/' "$ENV_FILE" | grep -v '^#'`
   Values the operator gives you pass through this session; offer them the alternative of editing the env file themselves and letting you verify with the smoke check.
-- **Existing state is never overwritten.** The Installer and `local_rag.container start` create the env file, the Corpus declaration file, the volumes and the Knowledge index once and never touch them again. Do not delete or regenerate them, do not clear Qdrant's storage, and do not run a **Rebuild** unless the operator asked for one: a Rebuild is never automatic, and the weekly timer runs the same `local-rag sync` as the hourly one.
+- **Existing state is never overwritten.** The Installer and `local_rag.container start` create the env file, the Corpus declaration file, the volumes and the Knowledge index once and never touch them again. Do not delete or regenerate them, do not clear Qdrant's storage, and do not run a **Rebuild** unless the operator asked for one: a Rebuild is never automatic, and the hourly timer is the only scheduled Sync of the Confluence Corpus.
 - **Every MCP token sees every indexed Document.** Page permissions in Confluence and Repository permissions in GitLab are not enforced: every MCP token can read every listed Repository, whoever the GitLab token's owner is. Say this to the operator in section 3 and get an explicit yes.
 - **Stop and ask** when: a command fails and the troubleshooting table (section 10) does not name the cause; the Installer or `container start` refuses (it changes nothing when it refuses, so read the message to the operator and ask); an answer cannot pass its validation after one retry; you would need to leave the paths this guide uses.
 - **Where commands run.** Everything runs on the target host, as a user with `sudo`, except section 8 (the operators' clients) and the connected-machine build, which is not part of this guide (step 1 of `docs/install-systemd.md` and `docs/install-container.md` has it, and its ship-from-a-clean-checkout rule: `container save` builds from the working tree but archives `HEAD`).
@@ -222,7 +222,7 @@ systemd route (adds `--index-url "$MIRROR_URL"` unless pip is configured for the
 sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.installer --drop "$DROP" --index-url "$MIRROR_URL"
 ```
 
-It creates the `ragsvc` user, `/opt/qdrant/qdrant`, `/var/lib/qdrant`, `/etc/local-rag/local-rag.env` (with a generated Qdrant key and one MCP token, `kept` if it exists), a commented `/etc/local-rag/corpora.toml`, the venv `/opt/local-rag/venv` (packages from the Mirror), and the units, and it enables `qdrant.service`, `local-rag-mcp.service`, `local-rag-sync.timer` and `local-rag-full.timer`. A Mirror failure happens after the user, the Qdrant binary and the env file exist: fix the Mirror and run the same command again.
+It creates the `ragsvc` user, `/opt/qdrant/qdrant`, `/var/lib/qdrant`, `/etc/local-rag/local-rag.env` (with a generated Qdrant key and one MCP token, `kept` if it exists), a commented `/etc/local-rag/corpora.toml`, the venv `/opt/local-rag/venv` (packages from the Mirror), and the units, and it enables `qdrant.service`, `local-rag-mcp.service` and `local-rag-sync.timer`. A Mirror failure happens after the user, the Qdrant binary and the env file exist: fix the Mirror and run the same command again.
 
 Container route:
 
@@ -230,7 +230,7 @@ Container route:
 sudo PYTHONPATH=/tmp/local-rag/src python3.12 -m local_rag.container start --drop "$DROP"
 ```
 
-It loads the images, writes `/etc/local-rag/container.env` (generated secrets, `kept` if it exists) and the Corpus declaration file, installs `/opt/local-rag/container/compose.yaml` and the timers `local-rag-container-sync.timer` and `local-rag-container-full.timer`, and runs `docker compose up -d`. Data lives in Docker volumes that an upgrade does not touch.
+It loads the images, writes `/etc/local-rag/container.env` (generated secrets, `kept` if it exists) and the Corpus declaration file, installs `/opt/local-rag/container/compose.yaml` and the timer `local-rag-container-sync.timer`, and runs `docker compose up -d`. Data lives in Docker volumes that an upgrade does not touch.
 
 **Gate:** the command exited 0, and the env file and the Corpus declaration file exist (`sudo ls -l /etc/local-rag/`).
 
@@ -289,7 +289,7 @@ EOF
 
 Leave out the tables that do not apply. The GitLab Corpus must be named `gitlab` to match the timer below. A Repository's `refs` may mix plain names and `{name, primary, exclude}` tables; a ref that no longer exists (a merged and deleted branch) fails alone, and a Sync holds back removals only under that ref. If the operator already edited the file, show it to them instead of overwriting it.
 
-GitLab Corpus on its own 15-minute timer (the hourly and weekly timers sync only `confluence`). The Installer and `container start` install the templated units but enable no instance, so opt in once the Corpus is declared:
+GitLab Corpus on its own 15-minute timer (the hourly timer syncs only `confluence`). The Installer and `container start` install the templated units but enable no instance, so opt in once the Corpus is declared:
 
 ```bash
 sudo systemctl enable --now local-rag-sync@gitlab.timer              # systemd route
@@ -317,9 +317,9 @@ run_rag /opt/local-rag/venv/bin/local-rag sync gitlab       # a GitLab Corpus
 
 Container route: `compose run --rm -T sync local-rag sync gitlab`. The first Sync of a GitLab Corpus fetches every listed Repository in full into the mirror cache and can take long; later Syncs fetch only what changed.
 
-Read the result: `Sync: N added, ...` and exit 0 is complete. Exit 1 lists `failed <id>: <why>` per Document, and the rest is indexed: show the list to the operator (a scanned PDF without OCR is a typical cause; see the troubleshooting table). Exit 2 is a command line that cannot be used (a Corpus name that is not declared, or a declaration that cannot be read, names what is wrong). `sync` on an empty Knowledge index makes the index live with the first Document that succeeds. A **Rebuild** is not part of a first install; the operator asks for one when the embedding model or chunking changes.
+Read the result: `Sync: N added, ...` and exit 0 is complete. Exit 1 lists `failed <id>: <why>` per Document, and the rest is indexed: show the list to the operator (a scanned PDF without OCR is a typical cause; see the troubleshooting table). Exit 75 means another Sync or Rebuild holds the lock and this run did nothing: wait for it, do not delete the lock. Exit 2 is a command line that cannot be used (a Corpus name that is not declared, or a declaration that cannot be read, names what is wrong). `sync` on an empty Knowledge index makes the index live with the first Document that succeeds. A **Rebuild** is not part of a first install; the operator asks for one when the embedding model or chunking changes.
 
-**Gate:** exit 0, or exit 1 with a failure list the operator has seen and accepted.
+**Gate:** exit 0, or exit 1 with a failure list the operator has seen and accepted, or exit 75 followed by a rerun once the other run has finished.
 
 ## 7. Verify
 
@@ -330,7 +330,7 @@ run_rag /opt/local-rag/venv/bin/python -m local_rag.smoke --systemd   # systemd 
 compose run --rm -T sync python -m local_rag.smoke                    # container route
 ```
 
-Pass is exit code 0 and the last line `SMOKE CHECK PASSED`; on a failure it is `SMOKE CHECK FAILED:` and the failed checks, and each `[FAIL]` line states the likely cause and the section of this guide to read. Its checks: `MCP_TOKENS`, `Model gateway (embeddings)` (model answers, with its dimension; `[SKIP]` in `keyword` mode), `Rerank` (ranks a relevant text first; `[SKIP]` when `RAG_RERANK_MODEL` is unset, or when the embedding check did not pass), `Knowledge index` (Qdrant reachable, document and passage counts), `LiteParse`, `Confluence CLI` (`[SKIP]` for a folder Corpus), `GitLab (git)` (`[SKIP]` unless `GITLAB_URL` is set), and with `--systemd` the four units (`qdrant.service`, `local-rag-mcp.service`, `local-rag-sync.timer`, `local-rag-full.timer`). A `[WARN]` does not fail the check, but it is not something to pass over: read it and tell the operator (a read-only index, for example).
+Pass is exit code 0 and the last line `SMOKE CHECK PASSED`; on a failure it is `SMOKE CHECK FAILED:` and the failed checks, and each `[FAIL]` line states the likely cause and the section of this guide to read. Its checks: `MCP_TOKENS`, `Model gateway (embeddings)` (model answers, with its dimension; `[SKIP]` in `keyword` mode), `Rerank` (ranks a relevant text first; `[SKIP]` when `RAG_RERANK_MODEL` is unset, or when the embedding check did not pass), `Knowledge index` (Qdrant reachable, document and passage counts), `LiteParse`, `Confluence CLI` (`[SKIP]` for a folder Corpus), `GitLab (git)` (`[SKIP]` unless `GITLAB_URL` is set), and with `--systemd` the three units (`qdrant.service`, `local-rag-mcp.service`, `local-rag-sync.timer`). A `[WARN]` does not fail the check, but it is not something to pass over: read it and tell the operator (a read-only index, for example).
 
 Then run the acceptance suite, the end-to-end proof that the stack works (it builds its own throwaway collection and temp folder and removes them, so it is safe next to the Live index; the MCP and Confluence groups only read):
 
@@ -352,7 +352,7 @@ Then the rest:
 | Health | `curl -sS -w '\nHTTP %{http_code}\n' http://127.0.0.1:$MCP_PORT/healthz` | `ok`, `HTTP 200` (`unavailable` with notes and 503 means Qdrant or the Knowledge index is not reachable) |
 | Auth | `curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:$MCP_PORT/mcp` | `401` |
 | A token | the same with `-H "Authorization: Bearer $TOKEN"` | any code other than `401` |
-| Timers | systemd: `systemctl list-timers 'local-rag-*'`; container: `systemctl list-timers 'local-rag-container-*'` | the sync timer hourly, the full timer Sundays 03:00; both run `local-rag sync confluence`; with a GitLab Corpus also the `@gitlab` instance every 15 minutes |
+| Timers | systemd: `systemctl list-timers 'local-rag-*'`; container: `systemctl list-timers 'local-rag-container-*'` | the sync timer hourly, running `local-rag sync confluence`; with a GitLab Corpus also the `@gitlab` instance every 15 minutes |
 | Containers | `compose ps` | `qdrant` and `mcp` up, `mcp` healthy |
 | From a client | `curl -sS --noproxy '*' https://$HOST/healthz` (the URL clients will use) | `ok`; a certificate error is group D5 |
 
@@ -403,7 +403,7 @@ Changing `RAG_RETRIEVAL`: the index records its Retrieval mode. A `keyword` inde
 
 When the embedding model cannot be reached while a `hybrid` index is running, searches fall back to keywords for that query and start with `Note: Results are keyword-only ...`; `/healthz` stays `200` and says so in its body, and `local-rag status` reports the dimension check as unreachable. During a Sync or Rebuild, an embedding call that failed for a reason that may pass (a timeout, a busy gateway, a 5xx) is tried `RAG_EMBED_ATTEMPTS` times (default 3), waiting `RAG_EMBED_RETRY_BACKOFF` seconds (default 0.5) before the second and twice as long before each later one; a wrong key or model name is not retried. A Document that still fails counts as failed: `sync` exits 1 and lists it, and a Rebuild is promoted only within `RAG_REBUILD_FAILURE_THRESHOLD`. If the gateway will be down for long, switch to `keyword` and run a Rebuild.
 
-Changing `RAG_EMBED_MODEL` (or its dimension): the index records the model and its dimension, and a mismatch makes it read-only (Sync refused) or, for a different dimension, refused (search too) until a Rebuild promotes. A running MCP server keeps the settings it started with, so edit the env file with the new model but **do not restart the MCP server yet**; run the Rebuild, which reads the new settings, and restart the server once it reports `promoted`. The hourly and weekly Syncs fail harmlessly in between. A Rebuild can run for hours: detach it,
+Changing `RAG_EMBED_MODEL` (or its dimension): the index records the model and its dimension, and a mismatch makes it read-only (Sync refused) or, for a different dimension, refused (search too) until a Rebuild promotes. A running MCP server keeps the settings it started with, so edit the env file with the new model but **do not restart the MCP server yet**; run the Rebuild, which reads the new settings, and restart the server once it reports `promoted`. The hourly Syncs fail harmlessly in between. A Rebuild can run for hours: detach it,
 
 ```bash
 sudo systemd-run --unit=local-rag-rebuild -p User=ragsvc -p EnvironmentFile=/etc/local-rag/local-rag.env \
@@ -456,7 +456,7 @@ Diagnose from the symptom; check the cause with the command before changing anyt
 | Clients stall on streaming through a proxy | proxy buffering | `examples/nginx.conf.example` (`proxy_buffering off`) |
 | `search_docs` says `No results.` | nothing indexed, or a Space filter that does not exist | `local-rag status` and `list_spaces`; run a Sync |
 | A Rebuild is refused | failure rate above the threshold, no Documents, or an incomplete listing | the printed reason; the Live index is untouched; fix the cause, retry |
-| Sync exit 1, another run | `Sync` or `Rebuild` already in progress | wait; do not delete the lock (one left by a crashed run frees itself about two minutes later) |
+| Sync exit 75, another run | `Sync` or `Rebuild` already in progress (a timer unit counts it as success) | wait; do not delete the lock (one left by a crashed run frees itself about two minutes later) |
 | Documents fail: empty text, scanned PDFs | no OCR | `RAG_OCR=1` once OCR language data is installed; `lit: command not found`: `LIT_BIN=/opt/local-rag/venv/bin/lit` |
 | `refused:` from the Installer or `container start` | wrong Qdrant version or checksum, a missing or mismatched file, a missing prerequisite | the message names it; nothing was changed; fix the Binary drop |
 | `set QDRANT_API_KEY in the env file` from compose | the container env file lacks a required variable | it is generated by `container start`; do not recreate it, restore it from backup |

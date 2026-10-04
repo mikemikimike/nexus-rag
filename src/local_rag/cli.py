@@ -4,7 +4,8 @@ Settings come from the environment (see ``environment``). The Corpora come from 
 declaration file (see ``declaration``): ``--corpora FILE``, else ``RAG_CORPORA_FILE``, else
 ``/etc/local-rag/corpora.toml``. Each command prints what
 happened and returns a process exit code: 0 on success, 1 on failure or refusal, 2 for a
-command line that cannot be understood.
+command line that cannot be understood, and 75 (``EX_TEMPFAIL``) when another run holds the
+lock, which the timer units accept as success: a skipped run is not a failed unit.
 """
 
 import argparse
@@ -26,11 +27,14 @@ from local_rag.environment import (
     settings_from_environment,
 )
 from local_rag.errors import describe
+from local_rag.exclusive import SyncInProgress
 from local_rag.gateway import ModelGateway
 from local_rag.gateway_litellm import gateway_from_settings
 from local_rag.index import IndexStatus, KnowledgeIndex, Passage, RebuildReport, SyncReport
 from local_rag.index_format import Access
 from local_rag.settings import RetrievalMode
+
+ANOTHER_RUN_HOLDS_THE_LOCK = 75
 
 
 @dataclass(frozen=True)
@@ -82,6 +86,9 @@ def main(
     except UsageError as error:
         print(f"error: {error}", file=err)
         return 2
+    except SyncInProgress as error:
+        print(f"error: {describe(error)}", file=err)
+        return ANOTHER_RUN_HOLDS_THE_LOCK
     except Exception as error:
         print(f"error: {describe(error)}", file=err)
         return 1

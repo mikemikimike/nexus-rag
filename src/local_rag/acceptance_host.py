@@ -13,7 +13,7 @@ from local_rag.installer import Layout
 
 SYSTEMD_ENV_FILE = str(Layout(Path("/")).env_file)
 CONTAINER_ENV_FILE = str(ContainerLayout(Path("/")).env_file)
-CONTAINER_TIMERS = ("local-rag-container-sync.timer", "local-rag-container-full.timer")
+CONTAINER_TIMERS = ("local-rag-container-sync.timer",)
 CONTAINER_SERVICES = ("qdrant", "mcp")
 COMPOSE_PROJECT = "local-rag"
 
@@ -178,7 +178,7 @@ def _timers_scheduled(ctx: Context, timers: list[str]) -> str:
             cause="the timer is not started: `systemctl enable --now` it",
             see="section 7 (Verify)",
         )
-    return f"{len(timers)} timers are scheduled"
+    return f"{len(timers)} timer{'' if len(timers) == 1 else 's'} scheduled"
 
 
 def run_confluence(ctx: Context) -> None:

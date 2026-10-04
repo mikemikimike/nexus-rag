@@ -84,7 +84,7 @@ To remove a Repository, delete its whole `[[corpus.gitlab.repositories]]` table.
 
 - **A Confluence Root**: stage, add the page id or URL to `roots` of `[corpus.confluence]`, apply. Prove it with `rag-admin run confluence info ROOT --json`, which prints its `id`, `title` and `spaceKey`. Then `sync confluence`. A Space's home page covers the whole Space.
 - **A folder Corpus** (systemd route only; the container stack mounts no folder): stage, add `[corpus.NAME]` with `kind = "folder"` and `path = "/abs/path"`, apply, `sync NAME`, `timer enable NAME`. The `ragsvc` user must be able to read the folder.
-- **Remove a Corpus**: dropping its table removes nothing from the index. After `apply`, run `rag-admin run local-rag forget NAME` (only after the operator confirms) and `rag-admin timer disable NAME`. The `confluence` Corpus is synced by the built-in hourly and weekly timers, by that name.
+- **Remove a Corpus**: dropping its table removes nothing from the index. After `apply`, run `rag-admin run local-rag forget NAME` (only after the operator confirms) and `rag-admin timer disable NAME`. The `confluence` Corpus is synced by the built-in hourly timer, by that name.
 
 **Done when** `rag-admin run local-rag status` shows the Corpus as expected and has no `warning:` line about undeclared Corpora.
 
@@ -124,7 +124,7 @@ A token is valid or revoked only from the next `restart`. **Done when** `token l
 | Schedules | `rag-admin timer list` |
 | Undo a bad Rebuild | `rag-admin run local-rag switch-back` (only when the operator asks) |
 
-Read a Sync's result: exit 0 is complete. Exit 1 lists `failed <id>: <why>`, and the rest was indexed, so show the list to the operator. Exit 1 with no list can mean another Sync is running: wait, and leave the lock alone. Exit 2 means the Corpus name or the declaration is unusable, and the message says which.
+Read a Sync's result: exit 0 is complete. Exit 1 lists `failed <id>: <why>`, and the rest was indexed, so show the list to the operator. Exit 75 means another Sync or Rebuild holds the lock and this run did nothing: wait, and leave the lock alone. Exit 2 means the Corpus name or the declaration is unusable, and the message says which.
 
 For any failure, match the symptom in the troubleshooting table, section 10 of `references/closed-network-setup.md`, and run its check before you change anything. A `[FAIL]` line from `smoke` or `acceptance` names the setup guide section to read. A `[SKIP]` is not a pass: report it.
 

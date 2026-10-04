@@ -30,7 +30,6 @@ SYSTEMD_UNITS = (
     "qdrant.service",
     "local-rag-mcp.service",
     "local-rag-sync.timer",
-    "local-rag-full.timer",
 )  # what the systemd route runs
 KEYWORD_ONLY = "RAG_RETRIEVAL=keyword, so no embedding model is used"
 _LABELS = {"ok": "[ OK ]", "warn": "[WARN]", "fail": "[FAIL]", "skip": "[SKIP]"}

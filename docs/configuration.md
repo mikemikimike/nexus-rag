@@ -11,7 +11,7 @@ Settings are read at start: after an edit, restart the MCP server (`sudo systemc
 
 ## Declaring Corpora
 
-Every Corpus is declared by name in the TOML file. The table's key is the Corpus's name (letters, digits, `-`, `_`). Name the Confluence Corpus `confluence`: the hourly and weekly timers sync it by that name. Any other Corpus syncs on the templated `@` timer of its name (see your route's install guide).
+Every Corpus is declared by name in the TOML file. The table's key is the Corpus's name (letters, digits, `-`, `_`). Name the Confluence Corpus `confluence`: the hourly timer syncs it by that name. Any other Corpus syncs on the templated `@` timer of its name (see your route's install guide).
 
 ### Confluence
 

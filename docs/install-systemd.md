@@ -50,9 +50,9 @@ It checks the prerequisites and the drop, and refuses before changing anything i
 | Env file, with a **generated** Qdrant key and MCP token (0640, `root:ragsvc`) | `/etc/local-rag/local-rag.env` |
 | Corpus declaration file, commented | `/etc/local-rag/corpora.toml` |
 | venv: packages from the Mirror, then the code | `/opt/local-rag/venv` |
-| Units, from `deploy/systemd/` | `qdrant.service`, `local-rag-mcp.service`, the hourly and weekly timers (enabled); `local-rag-sync@.timer` (installed, not enabled) |
+| Units, from `deploy/systemd/` | `qdrant.service`, `local-rag-mcp.service`, the hourly timer (enabled); `local-rag-sync@.timer` (installed, not enabled) |
 
-A second run changes nothing. An upgrade replaces the Qdrant binary, the code and the unit files, and restarts what changed; keep local changes to a unit in a drop-in (`systemctl edit`). It never touches an existing env file, declaration file, documents or Knowledge index.
+A second run changes nothing. An upgrade replaces the Qdrant binary, the code and the unit files, and restarts what changed; keep local changes to a unit in a drop-in (`systemctl edit`). It also stops and removes the weekly timer that earlier releases installed. It never touches an existing env file, declaration file, documents or Knowledge index.
 
 Define this helper; every command below uses it. It runs a program as the service user with the services' own settings:
 
@@ -97,7 +97,7 @@ curl http://HOST:8765/healthz            # answers ok
 sudo grep '^MCP_TOKENS=' /etc/local-rag/local-rag.env   # your first token
 ```
 
-From now on the hourly timer runs an incremental Sync and the weekly timer runs the same Sync as a safety net; both run `local-rag sync confluence`. Any other Corpus syncs on its own templated timer, every 15 minutes, once you enable it. For a Corpus named `gitlab`:
+From now on the hourly timer runs `local-rag sync confluence`, which compares every Document with the index each time. Any other Corpus syncs on its own templated timer, every 15 minutes, once you enable it. For a Corpus named `gitlab`:
 
 ```bash
 sudo systemctl enable --now local-rag-sync@gitlab.timer

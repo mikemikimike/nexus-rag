@@ -189,12 +189,27 @@ def test_start_installs_the_timers_that_run_sync_through_docker_compose(host):
     code, out, err = host.start()
 
     assert code == 0, err
-    for name in ("sync", "full"):
-        service = host.path(f"/etc/systemd/system/local-rag-container-{name}.service").read_text()
-        assert "docker compose" in service and " run " in service and "sync" in service
-        assert host.path(f"/etc/systemd/system/local-rag-container-{name}.timer").exists()
+    service = host.path("/etc/systemd/system/local-rag-container-sync.service").read_text()
+    assert "docker compose" in service and " run " in service and "sync" in service
+    assert host.path("/etc/systemd/system/local-rag-container-sync.timer").exists()
     (enable,) = host.docker.ran_matching("systemctl", "enable")
-    assert "local-rag-container-sync.timer" in enable and "local-rag-container-full.timer" in enable
+    assert "local-rag-container-sync.timer" in enable and "container-full" not in " ".join(enable)
+
+
+def test_start_retires_the_weekly_timer_an_earlier_release_installed(host):
+    host.start()
+    units = host.path("/etc/systemd/system")
+    for name in ("local-rag-container-full.service", "local-rag-container-full.timer"):
+        (units / name).write_text("[Unit]\n")
+
+    code, _, err = host.start()
+
+    assert code == 0, err
+    assert host.docker.ran_matching(
+        "systemctl", "disable", "--now", "local-rag-container-full.timer"
+    )
+    assert not (units / "local-rag-container-full.service").exists()
+    assert not (units / "local-rag-container-full.timer").exists()
 
 
 def test_start_installs_the_templated_timer_but_enables_no_instance(host):
@@ -320,15 +335,14 @@ def test_the_image_is_single_purpose_and_does_not_run_as_root():
 def test_the_timer_units_call_compose_run_with_the_files_the_start_command_places():
     units = fake_drop.REPO / "deploy/container"
 
-    for name in ("sync", "full"):
-        service = (units / f"local-rag-container-{name}.service").read_text()
-        (command,) = [line for line in service.splitlines() if line.startswith("ExecStart=")]
-        assert command.split()[0] == "ExecStart=/usr/bin/docker"
-        assert command.split()[1:3] == ["compose", "--project-name"]
-        assert "--env-file /etc/local-rag/container.env" in command
-        assert "-f /opt/local-rag/container/compose.yaml" in command
-        assert command.endswith(" run --rm -T sync")
-        assert "OnCalendar=" in (units / f"local-rag-container-{name}.timer").read_text()
+    service = (units / "local-rag-container-sync.service").read_text()
+    (command,) = [line for line in service.splitlines() if line.startswith("ExecStart=")]
+    assert command.split()[0] == "ExecStart=/usr/bin/docker"
+    assert command.split()[1:3] == ["compose", "--project-name"]
+    assert "--env-file /etc/local-rag/container.env" in command
+    assert "-f /opt/local-rag/container/compose.yaml" in command
+    assert command.endswith(" run --rm -T sync")
+    assert "OnCalendar=" in (units / "local-rag-container-sync.timer").read_text()
 
 
 def test_the_templated_unit_syncs_the_corpus_named_by_its_instance():
@@ -339,6 +353,13 @@ def test_the_templated_unit_syncs_the_corpus_named_by_its_instance():
     assert "--env-file /etc/local-rag/container.env" in command
     assert command.endswith(" run --rm -T sync local-rag sync %i")
     assert "OnCalendar=*:0/15" in (units / "local-rag-container-sync@.timer").read_text()
+
+
+def test_the_container_sync_units_accept_the_exit_code_of_a_run_that_was_skipped():
+    units = fake_drop.REPO / "deploy/container"
+
+    for name in ("local-rag-container-sync", "local-rag-container-sync@"):
+        assert "SuccessExitStatus=75" in (units / f"{name}.service").read_text().splitlines()
 
 
 def test_the_command_runs_on_a_machine_with_only_the_standard_library():

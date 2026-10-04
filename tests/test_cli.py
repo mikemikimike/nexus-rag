@@ -370,7 +370,14 @@ def test_a_second_run_while_one_is_running_is_refused(cli, folder):
     with ExclusiveRun(cli.client, NAMES.lock).hold("Sync"):
         code, _, err = cli("sync", "docs")
 
-    assert code == 1 and "another run holds the lock" in err
+    assert code == 75 and "another run holds the lock" in err  # not 1: a unit can accept 75
+
+
+def test_a_rebuild_while_a_sync_is_running_is_refused_with_the_same_code(cli, folder):
+    with ExclusiveRun(cli.client, NAMES.lock).hold("Sync"):
+        code, _, err = cli("rebuild")
+
+    assert code == 75
 
 
 def test_a_confluence_corpus_is_synced_from_roots(cli, tmp_path):

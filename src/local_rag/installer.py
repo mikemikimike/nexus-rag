@@ -58,6 +58,7 @@ PREREQUISITE_COMMANDS = {
 }
 LOCKFILE = "requirements.lock"
 UNITS_DIRECTORY = "deploy/systemd"
+RETIRED_UNITS = ("local-rag-full.timer", "local-rag-full.service")  # the weekly Sync, removed
 
 
 class Layout:
@@ -258,7 +259,7 @@ class _Install:
         layout = self.layout
         sources = sorted(path for path in units.iterdir() if path.suffix in (".service", ".timer"))
         layout.units_directory.mkdir(parents=True, exist_ok=True)
-        rewritten = False
+        rewritten = retire_units(self.host, layout.units_directory, RETIRED_UNITS, self.done)
         for source in sources:
             installed = layout.units_directory / source.name
             if not installed.exists() or installed.read_bytes() != source.read_bytes():
@@ -282,7 +283,6 @@ class _Install:
                     "--now",
                     "local-rag-mcp.service",
                     "local-rag-sync.timer",
-                    "local-rag-full.timer",
                 ]
             )
             self._remember(units=registered)
@@ -396,6 +396,20 @@ CORPORA_FILE = """\
 # kind = "folder"
 # path = "/srv/docs"
 """
+
+
+def retire_units(host, directory: Path, names: Sequence[str], done) -> bool:
+    """Stop and remove the units an earlier release installed and this one no longer ships.
+
+    Without it an upgrade would leave their timers running. True if any was removed.
+    """
+    present = [name for name in names if (directory / name).exists()]
+    for name in present:
+        if name.endswith(".timer"):
+            host.run(["systemctl", "disable", "--now", name])
+        (directory / name).unlink()
+        done("removed", directory / name)
+    return bool(present)
 
 
 def _create_env_file(path: Path, prepare: Callable[[Path], None] = lambda staged: None) -> bool:
