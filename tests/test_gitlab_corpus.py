@@ -211,6 +211,140 @@ def test_a_shared_mirror_is_reused_and_another_corpus_does_not_fetch_it_again_fr
     assert "init" not in log.read_text().split()
 
 
+# The verdict memory: forgets blobs that no complete listing still has
+
+
+def verdict_lines(cache):
+    return (cache / ".verdicts-1").read_text(encoding="ascii").splitlines()
+
+
+def remembered_blobs(cache):
+    return {line.split()[0] for line in verdict_lines(cache)}
+
+
+def blobs_at(gitlab, repository, ref):
+    listed = gitlab.git(repository, "ls-tree", "-r", ref).splitlines()
+    return {line.split("\t")[0].split()[2] for line in listed}
+
+
+def edit_ledger(gitlab, n, repository=REPOSITORY):
+    gitlab.commit(repository, {"src/ledger.py": f"def post_entry():\n    return {n}\n"})
+
+
+def test_after_a_complete_listing_only_the_verdicts_of_listed_blobs_are_remembered(gitlab, cache):
+    for n in range(5):
+        edit_ledger(gitlab, n)
+        document_ids(corpus(gitlab, cache))
+
+    assert len(verdict_lines(cache)) == 2 * len(FILES)  # as code and as prose, per live blob
+    assert remembered_blobs(cache) == blobs_at(gitlab, REPOSITORY, "main")
+
+
+def test_a_listing_with_a_failed_ref_forgets_no_verdict(gitlab, cache):
+    tracked(gitlab)
+    document_ids(feature_corpus(gitlab, cache))
+    before = remembered_blobs(cache)
+    gitlab.git(REPOSITORY, "branch", "-D", "feature/x")
+    edit_ledger(gitlab, 2)
+
+    listing = feature_corpus(gitlab, cache).list()
+
+    assert list(listing_failures(listing)) == [f"{REPOSITORY}@feature/x"]
+    assert remembered_blobs(cache) == before | blobs_at(gitlab, REPOSITORY, "main")
+
+
+def test_verdicts_of_blobs_still_at_another_ref_or_repository_of_the_corpus_are_kept(gitlab, cache):
+    tracked(gitlab)
+    gitlab.commit("platform/other", {"lib.py": "x = 1\n"})
+    repositories = (
+        Repository(REPOSITORY, ("main", "feature/x")),
+        Repository("platform/other", ("main",)),
+    )
+    for n in range(3):
+        edit_ledger(gitlab, n)
+        document_ids(corpus(gitlab, cache, *repositories))
+
+    assert remembered_blobs(cache) == (
+        blobs_at(gitlab, REPOSITORY, "main")
+        | blobs_at(gitlab, REPOSITORY, "feature/x")
+        | blobs_at(gitlab, "platform/other", "main")
+    )
+
+
+def test_corpora_sharing_a_cache_keep_each_others_verdicts(gitlab, cache):
+    tracked(gitlab)
+    document_ids(corpus(gitlab, cache, Repository(REPOSITORY, ("feature/x",)), name="features"))
+    for n in range(3):
+        edit_ledger(gitlab, n)
+        document_ids(corpus(gitlab, cache, name="code"))
+
+    assert remembered_blobs(cache) == (
+        blobs_at(gitlab, REPOSITORY, "main") | blobs_at(gitlab, REPOSITORY, "feature/x")
+    )
+
+
+def test_the_memory_is_left_alone_with_nothing_to_forget_and_otherwise_replaced_whole(
+    gitlab, cache
+):
+    document_ids(corpus(gitlab, cache))
+    memory = cache / ".verdicts-1"
+    before = memory.stat()
+
+    document_ids(corpus(gitlab, cache))
+    assert (memory.stat().st_ino, memory.stat().st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+
+    edit_ledger(gitlab, 1)
+    document_ids(corpus(gitlab, cache))
+    assert memory.stat().st_ino != before.st_ino  # a new file renamed over, never truncated
+    assert not [p for p in cache.rglob("*") if p.name.endswith(".tmp")]
+
+
+def test_a_rewrite_that_fails_leaves_the_old_memory_whole(gitlab, cache, monkeypatch):
+    document_ids(corpus(gitlab, cache))
+    edit_ledger(gitlab, 1)
+    before = verdict_lines(cache)
+
+    def crash(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("nexus_rag.gitlab.os.replace", crash)
+    found = document_ids(corpus(gitlab, cache))
+
+    assert found == ids(*FILES)
+    assert verdict_lines(cache)[: len(before)] == before
+    assert not [p for p in cache.rglob("*") if p.name.endswith(".tmp")]
+
+
+def test_a_damaged_memory_is_tolerated_and_rewritten_whole(gitlab, cache):
+    document_ids(corpus(gitlab, cache))
+    (cache / ".verdicts-1").write_bytes(b"\xff\xfe damaged\nnot a verdict\n")
+
+    assert document_ids(corpus(gitlab, cache)) == ids(*FILES)
+    assert remembered_blobs(cache) == blobs_at(gitlab, REPOSITORY, "main")
+    assert all(re.fullmatch(r"[0-9a-f]{40} [01] [01]", line) for line in verdict_lines(cache))
+
+
+def test_corpora_forgetting_and_learning_at_once_lose_no_live_verdict(gitlab, tmp_path):
+    cache = tmp_path / "shared"
+    for r in "ab":
+        gitlab.commit(f"platform/{r}", {f"src/{r}{n}.py": f"V = {n}\n" for n in range(300)})
+    first, second = (
+        corpus(gitlab, cache, Repository(f"platform/{r}", ("main",)), name=r) for r in "ab"
+    )
+    list_at_once(first, second)
+
+    for round in range(3):  # each forgets the blobs it replaced while the other learns its own
+        for r in "ab":
+            changed = {f"src/{r}{n}.py": f"V = {n} + {round}\n" for n in range(0, 300, 2)}
+            gitlab.commit(f"platform/{r}", changed)
+        list_at_once(first, second)
+
+    assert remembered_blobs(cache) == (
+        blobs_at(gitlab, "platform/a", "main") | blobs_at(gitlab, "platform/b", "main")
+    )
+    assert all(re.fullmatch(r"[0-9a-f]{40} [01] [01]", line) for line in verdict_lines(cache))
+
+
 def test_code_is_searchable_together_with_the_docs_end_to_end(gitlab, cache):
     index = KnowledgeIndex(Settings(), FakeModelGateway())
     index.sync(corpus(gitlab, cache, name="code"))
@@ -745,3 +879,9 @@ def test_a_repositorys_first_ref_is_primary_unless_another_is_named():
 def test_a_repository_refuses_refs_that_cannot_be_tracked(refs, options):
     with pytest.raises(ValueError):
         Repository(REPOSITORY, refs, **options)
+
+
+def test_a_corpus_with_nothing_to_list_completes_without_waiting_on_its_own_lock(cache):
+    assert (
+        list(GitLabCorpus([], url="https://gitlab.example", token=TOKEN, cache=cache).list()) == []
+    )
