@@ -1,3 +1,5 @@
+import logging
+import os
 import re
 import shutil
 import threading
@@ -507,6 +509,59 @@ def test_a_file_that_is_not_utf_8_or_has_a_nul_anywhere_is_left_out(gitlab, cach
 
     assert f"{REPOSITORY}@main:utf8.py" in found
     assert not found & {f"{REPOSITORY}@main:legacy.py", f"{REPOSITORY}@main:late_nul.py"}
+
+
+LATIN_1_NAME = os.fsdecode(b"caf\xe9.py")  # the raw bytes of a legacy Latin-1 file name
+
+
+def test_a_file_whose_path_is_not_utf_8_is_left_out_logged_and_fails_nothing(gitlab, cache, caplog):
+    gitlab.commit(
+        REPOSITORY,
+        {
+            LATIN_1_NAME: "x = 1\n",
+            os.fsdecode(b"legacy\xff/notes.md"): "# Notes\n",
+            os.fsdecode(b"logo\xe9.png"): "not code",  # left out anyway: not worth a mention
+        },
+    )
+    index = KnowledgeIndex(Settings(), FakeModelGateway())
+
+    with caplog.at_level(logging.WARNING, logger="nexus_rag.gitlab"):
+        listing = corpus(gitlab, cache).list()
+    logged = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    report = index.sync(corpus(gitlab, cache))
+
+    assert {ref.id for ref in listing} == ids(*FILES)
+    assert listing_failures(listing) == {}
+    assert (report.added, report.failed) == (len(FILES), 0)
+    [line] = logged
+    assert f"{REPOSITORY}@main" in line
+    assert "left out 2 " in line and "caf\ufffd.py" in line and "logo" not in line
+    assert index.rebuild([corpus(gitlab, cache)]).promoted
+
+
+def test_a_path_that_is_not_utf_8_does_not_hold_back_removals(gitlab, cache):
+    index = KnowledgeIndex(Settings(), FakeModelGateway())
+    index.sync(corpus(gitlab, cache))
+    gitlab.commit(REPOSITORY, {LATIN_1_NAME: "x = 1\n", "Makefile": None})
+
+    report = index.sync(corpus(gitlab, cache))
+
+    assert (report.removed, report.failed) == (1, 0)
+    assert index.get_document(f"gitlab:{REPOSITORY}@main:Makefile") is None
+
+
+def test_utf_8_paths_in_any_script_are_listed_and_fetched_under_their_own_names(gitlab, cache):
+    hebrew = "\u05e1\u05e4\u05e8.py"  # a Hebrew file name
+    nested = "\u05de\u05e1\u05de\u05db\u05d9\u05dd/\u05de\u05d3\u05e8\u05d9\u05da.md"  # in a Hebrew directory
+    gitlab.commit(REPOSITORY, {hebrew: "def book(): pass\n", nested: "# Guide\n"})
+    gitlab_corpus = corpus(gitlab, cache)
+
+    found = document_ids(gitlab_corpus)
+
+    assert found == ids(*FILES, hebrew, nested)
+    raw = gitlab_corpus.fetch(f"{REPOSITORY}@main:{hebrew}")
+    assert (raw.content, raw.title) == (b"def book(): pass\n", f"payments/{hebrew}")
+    assert gitlab_corpus.fetch(f"{REPOSITORY}@main:{nested}").content == b"# Guide\n"
 
 
 def test_a_listing_of_unchanged_files_reads_no_blob_again_even_in_a_new_process(
