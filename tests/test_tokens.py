@@ -25,6 +25,8 @@ def test_words_and_punctuation_count_one_each():
         "これはテストです",  # Japanese, kana and kanji
         "이것은시험입니다",  # Korean
         "นี่คือการทดสอบ",  # Thai: no separators either
+        "ﾃｽﾄﾃｽﾄﾃｽﾄ",  # halfwidth Katakana
+        "ㅌㅔㅅㅡㅌㅡㅌㅔㅅㅡㅌㅡ",  # Hangul compatibility Jamo
     ],
 )
 def test_each_character_of_a_script_without_word_separators_counts(text):
