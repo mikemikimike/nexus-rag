@@ -1,5 +1,4 @@
 import dataclasses
-import time
 
 import pytest
 
@@ -224,6 +223,41 @@ def test_a_failed_listing_removes_nothing(index):
     assert index.search("ORA-00942")[0].document_id == "default:dba/ora-00942"
 
 
+class FakeClock:
+    """A clock that moves only when told to, starting at a plausible wall-clock time."""
+
+    def __init__(self):
+        self.now = 1_700_000_000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture
+def clock():
+    return FakeClock()
+
+
+@pytest.fixture
+def crashed_holder():
+    """Starts a holder that never exits, as if its process died; stops its heartbeat
+    thread when the test ends."""
+    holders = []
+
+    def crash(run):
+        holder = run.hold()
+        holder.__enter__()
+        holders.append(holder)
+        return holder
+
+    yield crash
+    for holder in holders:
+        holder.__exit__(None, None, None)  # no-op on a lock that was taken over
+
+
 def test_exclusive_run_is_shared_by_holders_of_the_same_qdrant():
     from qdrant_client import QdrantClient
 
@@ -242,34 +276,57 @@ def test_exclusive_run_is_shared_by_holders_of_the_same_qdrant():
         pass
 
 
-def test_exclusive_run_takes_over_the_lock_of_a_crashed_holder():
+def test_exclusive_run_takes_over_the_lock_of_a_crashed_holder(clock, crashed_holder):
     from qdrant_client import QdrantClient
 
+    from local_rag import SyncInProgress
     from local_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
-    crashed = ExclusiveRun(client, "lock", stale_after=0.05, heartbeat_every=3600)
-    survivor = ExclusiveRun(client, "lock", stale_after=0.05)
-    holder = crashed.hold()
-    holder.__enter__()  # never exits: the process died, and no heartbeat is left
-    time.sleep(0.1)
+    crashed = ExclusiveRun(client, "lock", heartbeat_every=3600, now=clock)
+    survivor = ExclusiveRun(client, "lock", now=clock)
+    crashed_holder(crashed)  # no heartbeat is left
 
+    clock.advance(119)
+    with pytest.raises(SyncInProgress):
+        with survivor.hold():
+            pytest.fail("a lock not yet stale must hold")
+
+    clock.advance(2)
     with survivor.hold():
         pass
 
 
-def test_a_holder_that_was_taken_over_neither_frees_nor_stamps_over_the_new_lock():
+def test_a_marker_never_stamped_goes_stale_by_the_same_clock(clock):
+    from qdrant_client import QdrantClient
+
+    from local_rag import SyncInProgress
+    from local_rag.exclusive import ExclusiveRun
+
+    client = QdrantClient(location=":memory:")
+    ExclusiveRun(client, "lock", now=clock)._try_create()  # its creator died before stamping
+    run = ExclusiveRun(client, "lock", now=clock)
+
+    with pytest.raises(SyncInProgress):
+        with run.hold():
+            pytest.fail("a lock not yet stale must hold")
+    clock.advance(121)
+    with run.hold():
+        pass
+
+
+def test_a_holder_that_was_taken_over_neither_frees_nor_stamps_over_the_new_lock(clock):
     from qdrant_client import QdrantClient
 
     from local_rag import SyncInProgress
     from local_rag.exclusive import ExclusiveRun, LockLost
 
     client = QdrantClient(location=":memory:")
-    stalled = ExclusiveRun(client, "lock", stale_after=0.05, heartbeat_every=3600)
-    newcomer = ExclusiveRun(client, "lock", stale_after=0.05, heartbeat_every=3600)
+    stalled = ExclusiveRun(client, "lock", heartbeat_every=3600, now=clock)
+    newcomer = ExclusiveRun(client, "lock", heartbeat_every=3600, now=clock)
     holder = stalled.hold()
     lease = holder.__enter__()
-    time.sleep(0.1)
+    clock.advance(121)
 
     with newcomer.hold() as taken_over:
         with pytest.raises(LockLost):
@@ -278,7 +335,7 @@ def test_a_holder_that_was_taken_over_neither_frees_nor_stamps_over_the_new_lock
         holder.__exit__(None, None, None)  # the stalled holder wakes up and finishes
         taken_over.check()
         with pytest.raises(SyncInProgress):
-            with ExclusiveRun(client, "lock", stale_after=0.05).hold():
+            with ExclusiveRun(client, "lock", now=clock).hold():
                 pytest.fail("the new holder's lock must still stand")
 
 
@@ -378,24 +435,23 @@ def test_a_second_sync_of_the_same_corpus_is_refused_while_other_corpora_sync_fr
     assert outcome == [1]
 
 
-def test_a_corpus_whose_sync_crashed_can_be_synced_once_its_lock_is_stale():
+def test_a_corpus_whose_sync_crashed_can_be_synced_once_its_lock_is_stale(clock, crashed_holder):
     from qdrant_client import QdrantClient
 
     from local_rag import SyncInProgress
     from local_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
-    settings = Settings(sync_lock_stale_after=0.2)
-    index = KnowledgeIndex(settings, FakeModelGateway(), client=client)
+    settings = Settings()
+    index = KnowledgeIndex(settings, FakeModelGateway(), client=client, lock_clock=clock)
     crashed = ExclusiveRun(
-        client, f"{settings.collection}.sync-lock.code", stale_after=0.2, heartbeat_every=3600
+        client, f"{settings.collection}.sync-lock.code", heartbeat_every=3600, now=clock
     )
-    holder = crashed.hold()
-    holder.__enter__()  # never exits: the process died, and no heartbeat is left
+    crashed_holder(crashed)  # no heartbeat is left
 
     with pytest.raises(SyncInProgress):
         index.sync(named("code", DOCUMENTS))
     assert index.sync(named("confluence", DOCUMENTS)).added == 3  # another Corpus is unaffected
-    time.sleep(0.3)
+    clock.advance(settings.sync_lock_stale_after + 1)
 
     assert index.sync(named("code", DOCUMENTS)).added == 3

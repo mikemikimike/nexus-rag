@@ -12,7 +12,7 @@ taken over once it is older than ``stale_after`` seconds.
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
 from qdrant_client import QdrantClient, models
@@ -48,11 +48,19 @@ class ExclusiveRun:
         *,
         stale_after: float = 120.0,
         heartbeat_every: float | None = None,
+        now: Callable[[], float] | None = None,
     ):
+        """``now`` replaces the clock every age decision reads, for tests.
+
+        By default a stamped heartbeat is compared against the wall clock, which other
+        processes share, and a marker never stamped against a monotonic reading.
+        """
         self._client = client
         self._name = name
         self._stale_after = stale_after
         self._heartbeat_every = stale_after / 4 if heartbeat_every is None else heartbeat_every
+        self._wall_clock = now or time.time
+        self._elapsed_clock = now or time.monotonic
         self._local = threading.Lock()
         self._unstamped_since: float | None = None
 
@@ -119,7 +127,7 @@ class ExclusiveRun:
                 models.PointStruct(
                     id=_HEARTBEAT_POINT,
                     vector=[1.0],
-                    payload={"owner": owner, "heartbeat": time.time()},
+                    payload={"owner": owner, "heartbeat": self._wall_clock()},
                 )
             ],
             wait=True,
@@ -129,11 +137,11 @@ class ExclusiveRun:
         points = self._client.retrieve(self._name, ids=[_HEARTBEAT_POINT])
         if points:
             self._unstamped_since = None
-            return time.time() - (points[0].payload or {})["heartbeat"]
+            return self._wall_clock() - (points[0].payload or {})["heartbeat"]
         # Created but not yet stamped: the creator is starting up, or died in between.
         if self._unstamped_since is None:
-            self._unstamped_since = time.monotonic()
-        return time.monotonic() - self._unstamped_since
+            self._unstamped_since = self._elapsed_clock()
+        return self._elapsed_clock() - self._unstamped_since
 
     def _beat(self, owner: str, stop: threading.Event) -> None:
         while not stop.wait(self._heartbeat_every):

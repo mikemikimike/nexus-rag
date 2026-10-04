@@ -113,8 +113,11 @@ class KnowledgeIndex:
         gateway: ModelGateway | None,
         *,
         client: QdrantClient | None = None,
+        lock_clock: Callable[[], float] | None = None,
     ):
         """``client`` lets several instances (processes, in effect) share one Qdrant.
+
+        ``lock_clock`` replaces the clock the exclusive-run locks age by, for tests.
 
         ``gateway`` may be None for Keyword-only retrieval without a reranker: nothing then
         reaches the Model gateway.
@@ -123,6 +126,7 @@ class KnowledgeIndex:
             raise ValueError("this Retrieval mode and these settings need a Model gateway")
         self._settings = settings
         self._gateway = gateway
+        self._lock_clock = lock_clock
         self._sparse = SparseEncoder(settings.sparse)
         self._extractor = Extractor.from_settings(settings)
         self._chunker = Chunker.from_settings(settings, gateway)
@@ -141,7 +145,12 @@ class KnowledgeIndex:
         self._exclusive = self._lock(self._names.lock)
 
     def _lock(self, name: str) -> ExclusiveRun:
-        return ExclusiveRun(self._client, name, stale_after=self._settings.sync_lock_stale_after)
+        return ExclusiveRun(
+            self._client,
+            name,
+            stale_after=self._settings.sync_lock_stale_after,
+            now=self._lock_clock,
+        )
 
     @contextmanager
     def _syncing(self, corpus: str) -> Iterator[Lease]:
