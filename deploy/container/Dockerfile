@@ -1,9 +1,9 @@
-# The system's image: the local-rag package and what it runs (the `confluence` command and
-# LiteParse), nothing else. It does one thing, run one local-rag program; the MCP server is its
+# The system's image: the nexus-rag package and what it runs (the `confluence` command and
+# LiteParse), nothing else. It does one thing, run one nexus-rag program; the MCP server is its
 # default command, a Sync is the same image run with another command by a host timer.
 # Built on the connected machine, from the repository root:
-#   python3.12 -m local_rag.container save --out DIR     (or docker build -f deploy/container/Dockerfile .)
-# or on the closed network from the mirrors, by `local_rag.container start --build`, which sets
+#   python3.12 -m nexus_rag.container save --out DIR     (or docker build -f deploy/container/Dockerfile .)
+# or on the closed network from the mirrors, by `nexus_rag.container start --build`, which sets
 # the build arguments below.
 ARG BASE_IMAGE=python:3.12-slim
 FROM ${BASE_IMAGE}
@@ -38,4 +38,4 @@ WORKDIR /data
 ENV HOME=/data
 
 EXPOSE 8765
-CMD ["local-rag-mcp"]
+CMD ["nexus-rag-mcp"]

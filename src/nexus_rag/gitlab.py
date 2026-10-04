@@ -1,0 +1,538 @@
+"""A Corpus over the code in GitLab Repositories, read through a local ``git`` mirror.
+
+Each Repository is fetched into a bare mirror under a cache directory (deleting the cache is
+safe: the next Sync fetches everything again) and every file at the Repository's ref becomes
+a Document. Only plain ``git`` is used. The token reaches git in its environment, as a header
+scoped to the GitLab URL, so it is in no command line, no remote URL and no file of the mirror;
+it is also scrubbed from every message that is raised.
+
+A Document's id is ``<repository path>@<ref>:<file path>``, its version the file's git blob
+SHA, its Space the Repository's parent group (empty for a top-level project) and its title
+``<repository name>/<file path>``. A Repository that cannot be read is a failure of its part
+of the listing, ``<repository path>@<ref>``, never an empty Repository.
+
+Several Corpora may share one cache, and their Syncs may run at once (ADR 0004), so the cache
+has several writers. Each mirror is made and fetched only while holding an exclusive
+``flock`` on its lock file, ``<repository path>.git.lock`` beside it (outside the mirror, so
+the half-made-mirror cleanup cannot remove it). The kernel releases a lock when its holder
+exits, however it exits, so a crashed Sync never leaves one behind. Reading a mirror takes no
+lock: git moves refs atomically and a fetch never removes the objects of a pinned commit.
+The verdicts file has its own lock, described at ``_verdicts_lock``.
+
+A Repository may have several Tracked refs, one of them its Primary ref: the same file at two
+of them is two Documents. A Tracked ref that no longer exists (a merged and deleted branch)
+fails alone. Each ref may add exclude globs to the defaults.
+"""
+
+import base64
+import fcntl
+import fnmatch
+import os
+import re
+import shutil
+import subprocess
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from functools import cache
+from pathlib import Path, PurePosixPath
+
+from nexus_rag.corpus import (
+    CodeFile,
+    DocumentRef,
+    Listing,
+    RawDocument,
+    TrackedRef,
+    check_corpus_name,
+    is_code,
+)
+
+DEFAULT_MAX_SIZE = 200_000  # bytes; a larger file is data or generated, not something to read
+_MAX_ERROR_LENGTH = 500
+_VERDICTS_FILE = ".verdicts-1"  # in the cache; its suffix changes with the rules of a verdict
+_VERDICTS_LOCK = ".verdicts.lock"  # in the cache; guards the verdicts file, see _verdicts_lock
+_GENERATED_HEAD = 1024
+_BATCH = 200
+
+# What the Corpus indexes, by file name and then by suffix, with the Media type each is given.
+# These are the Corpus's own: code types are not in the folder and Confluence suffix table.
+# ``.html`` is source here, a page in a folder, so it is never ``text/html``: that is prose,
+# which is not judged "generated" (see ``is_code``), and generated HTML would slip in.
+_NAMES = {
+    "Makefile": "text/x-makefile",
+    "GNUmakefile": "text/x-makefile",
+    "Dockerfile": "text/x-dockerfile",
+    "Containerfile": "text/x-dockerfile",
+    "Jenkinsfile": "text/x-groovy",
+    "Vagrantfile": "text/x-ruby",
+    "Rakefile": "text/x-ruby",
+    "Gemfile": "text/x-ruby",
+    "CMakeLists.txt": "text/x-cmake",
+}
+_SUFFIXES = {
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".rst": "text/x-rst",
+    ".txt": "text/plain",
+    ".adoc": "text/plain",
+    ".py": "text/x-python",
+    ".pyi": "text/x-python",
+    ".c": "text/x-c",
+    ".h": "text/x-c",
+    ".cc": "text/x-c++",
+    ".cpp": "text/x-c++",
+    ".cxx": "text/x-c++",
+    ".hpp": "text/x-c++",
+    ".hh": "text/x-c++",
+    ".java": "text/x-java",
+    ".kt": "text/x-kotlin",
+    ".scala": "text/x-scala",
+    ".go": "text/x-go",
+    ".rs": "text/x-rust",
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".cjs": "text/javascript",
+    ".jsx": "text/javascript",
+    ".ts": "text/typescript",
+    ".tsx": "text/typescript",
+    ".rb": "text/x-ruby",
+    ".php": "text/x-php",
+    ".cs": "text/x-csharp",
+    ".swift": "text/x-swift",
+    ".pl": "text/x-perl",
+    ".lua": "text/x-lua",
+    ".r": "text/x-r",
+    ".sh": "text/x-shellscript",
+    ".bash": "text/x-shellscript",
+    ".zsh": "text/x-shellscript",
+    ".ps1": "text/x-powershell",
+    ".bat": "text/x-batch",
+    ".sql": "text/x-sql",
+    ".proto": "text/x-protobuf",
+    ".graphql": "text/x-graphql",
+    ".css": "text/css",
+    ".scss": "text/x-scss",
+    ".html": "text/x-html-source",
+    ".htm": "text/x-html-source",
+    ".json": "text/x-json",
+    ".yaml": "text/x-yaml",
+    ".yml": "text/x-yaml",
+    ".toml": "text/x-toml",
+    ".ini": "text/x-ini",
+    ".cfg": "text/x-ini",
+    ".xml": "text/xml",
+    ".tf": "text/x-terraform",
+    ".gradle": "text/x-groovy",
+    ".cmake": "text/x-cmake",
+    ".mk": "text/x-makefile",
+}
+
+# Left out by default. Tests are not on these lists: they are code too.
+_EXCLUDED_DIRECTORIES = frozenset(
+    {
+        "vendor",
+        "node_modules",
+        "third_party",
+        "third-party",
+        "thirdparty",
+        "bower_components",
+        "site-packages",
+        "__pycache__",
+        "dist",
+        "build",
+        "out",
+        "target",
+        ".git",
+    }
+)
+_EXCLUDED_NAMES = (
+    "*.lock",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "go.sum",
+    "*.min.js",
+    "*.min.css",
+    "*.min.*",
+    "*.map",
+    "*_pb2.py",
+    "*_pb2_grpc.py",
+    "*.pb.go",
+    "*.pb.cc",
+    "*.pb.h",
+    "*_generated.*",
+    "*.generated.*",
+    "*.g.dart",
+    "*.designer.cs",
+)
+_GENERATED_MARKERS = (
+    b"@generated",
+    b"DO NOT EDIT",
+    b"Code generated",
+    b"auto-generated",
+    b"autogenerated",
+)
+
+
+class GitLabError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class Repository:
+    """A GitLab project's git repository, and the Tracked refs whose files are indexed."""
+
+    path: str  # the project's full path, ``platform/payments``
+    refs: tuple[str, ...]  # branches or tags
+    primary: str | None = None  # the Primary ref, one of ``refs``; the first if not named
+    # Per ref, globs left out besides the defaults: a path or a file name.
+    exclude: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def __post_init__(self):
+        refs = tuple(self.refs)
+        if not refs or not all(refs):
+            raise ValueError(f"{self.path} must name at least one ref, and no empty one")
+        if len(set(refs)) != len(refs):
+            raise ValueError(f"{self.path} lists a ref twice")
+        primary = refs[0] if self.primary is None else self.primary
+        if primary not in refs:
+            raise ValueError(f"{self.path}: the Primary ref {primary!r} is not one of its refs")
+        unknown = sorted(set(self.exclude) - set(refs))
+        if unknown:
+            raise ValueError(
+                f"{self.path} excludes files of refs it does not list: {', '.join(unknown)}"
+            )
+        object.__setattr__(self, "refs", refs)
+        object.__setattr__(self, "primary", primary)
+        object.__setattr__(self, "exclude", {r: tuple(g) for r, g in self.exclude.items()})
+
+    @property
+    def tracked_refs(self) -> tuple[TrackedRef, ...]:
+        return tuple(TrackedRef(self.path, ref, ref == self.primary) for ref in self.refs)
+
+    def excluded(self, ref: str) -> tuple[str, ...]:
+        """The globs this ref leaves out besides the defaults."""
+        return self.exclude.get(ref, ())
+
+
+@dataclass(frozen=True)
+class _File:
+    blob: str
+    path: str
+    media_type: str
+
+
+class GitLabCorpus:
+    def __init__(
+        self,
+        repositories: Sequence[Repository],
+        *,
+        url: str,
+        token: str,
+        cache: Path | str,
+        name: str = "gitlab",
+        git_bin: str = "git",
+        max_size: int = DEFAULT_MAX_SIZE,
+        timeout: float = 600.0,
+    ):
+        self.name = check_corpus_name(name)
+        self._repositories = list(repositories)
+        self._tracked = {t.part: t for r in self._repositories for t in r.tracked_refs}
+        self._url = url.rstrip("/")
+        self._token = token
+        self._cache = Path(cache)
+        self._git_bin = git_bin
+        self._max_size = max_size
+        self._timeout = timeout
+        self._pinned: dict[str, str] = {}  # part -> the commit its listing was taken at
+        self._verdicts: dict[tuple[str, bool], bool] | None = None  # loaded when first needed
+
+    def list(self) -> Listing:
+        refs, failures = [], {}
+        fetched: dict[str, str | None] = {}  # repository path -> why it could not be fetched
+        for repository in self._repositories:
+            if repository.path not in fetched:
+                fetched[repository.path] = self._fetched(repository)
+            for tracked in repository.tracked_refs:
+                try:
+                    if fetched[repository.path]:
+                        raise GitLabError(fetched[repository.path])
+                    files = [
+                        (CodeFile(tracked, path), blob)
+                        for path, blob in self._files(repository, tracked)
+                    ]
+                except GitLabError as error:
+                    failures[tracked.part] = str(error)
+                    continue
+                refs += [
+                    DocumentRef(code.document_id, blob, (tracked.part,), code.placement(self._url))
+                    for code, blob in files
+                ]
+        return Listing(refs, failures)
+
+    def _fetched(self, repository: Repository) -> str | None:
+        """Brings the Repository's mirror up to date once for all its refs; None, or why not."""
+        try:
+            self._update(repository.path)
+        except GitLabError as error:
+            return str(error)
+        return None
+
+    def fetch(self, document_id: str) -> RawDocument:
+        try:
+            part, path = CodeFile.split_id(document_id)
+            tracked = self._tracked[part]
+        except (ValueError, KeyError):
+            raise KeyError(document_id) from None
+        code = CodeFile(tracked, path)
+        mirror = self._mirror(tracked.repository)
+        commit = self._pinned.get(tracked.part)
+        if commit is None:  # fetched without a listing: read the ref as the mirror has it
+            self._update(tracked.repository)
+            commit = self._commit(tracked)
+            self._pinned[tracked.part] = commit
+        blob = self._git("rev-parse", f"{commit}:{path}", cwd=mirror).strip()
+        content = self._git("cat-file", "blob", blob, cwd=mirror, binary=True)
+        parent, _, name = tracked.repository.rpartition("/")
+        return RawDocument(
+            id=document_id,
+            title=f"{name}/{path}",
+            space=parent,
+            version=blob,
+            url=code.link(self._url),
+            content=content,
+            media_type=_media_type(path),
+            code=code,
+        )
+
+    def _files(self, repository: Repository, tracked: TrackedRef) -> Sequence[tuple[str, str]]:
+        """The files worth indexing at a Tracked ref, as (path, blob)."""
+        mirror = self._mirror(repository.path)
+        commit = self._commit(tracked)
+        self._pinned[tracked.part] = commit
+        listed = self._git("ls-tree", "-r", "-l", "-z", commit, cwd=mirror, binary=True)
+        candidates = []
+        for entry in listed.decode("utf-8", errors="replace").split("\0"):
+            meta, _, path = entry.partition("\t")
+            fields = meta.split()
+            if len(fields) != 4 or fields[1] != "blob" or fields[0] == "120000":
+                continue  # not a regular file: a symlink or a submodule
+            if int(fields[3]) > self._max_size or int(fields[3]) == 0:
+                continue
+            media_type = _wanted(path)
+            if media_type and not _excluded(path, repository.excluded(tracked.ref)):
+                candidates.append(_File(fields[2], path, media_type))
+        verdicts = self._sniff(candidates, mirror)
+        return [(f.path, f.blob) for f in candidates if verdicts[f.blob, is_code(f.media_type)]]
+
+    def _sniff(self, files: Sequence[_File], mirror: Path) -> dict[tuple[str, bool], bool]:
+        """Whether each blob is text worth indexing: not binary, not blank and, as code, not
+        generated. A blob's verdict never changes, so it is remembered in the cache and a blob
+        is only ever read once."""
+        verdicts = self._remembered()
+        wanted = {(f.blob, is_code(f.media_type)) for f in files}
+        unknown = sorted({blob for blob, as_code in wanted if (blob, as_code) not in verdicts})
+        learned = []
+        for start in range(0, len(unknown), _BATCH):
+            batch = unknown[start : start + _BATCH]
+            output = self._git(
+                "cat-file",
+                "--batch",
+                cwd=mirror,
+                binary=True,
+                stdin="".join(f"{b}\n" for b in batch).encode(),
+            )
+            offset = 0
+            for blob in batch:
+                header_end = output.index(b"\n", offset)
+                size = int(output[offset:header_end].split()[2])
+                content = output[header_end + 1 : header_end + 1 + size]
+                offset = header_end + 1 + size + 1
+                for as_code in (True, False):
+                    verdicts[blob, as_code] = _is_worth_indexing(content, code=as_code)
+                    learned.append(f"{blob} {int(as_code)} {int(verdicts[blob, as_code])}\n")
+        if learned:
+            with self._verdicts_lock(exclusive=True):
+                with open(self._cache / _VERDICTS_FILE, "a", encoding="ascii") as file:
+                    file.write("".join(learned))
+        return {key: verdicts[key] for key in wanted}
+
+    def _remembered(self) -> dict[tuple[str, bool], bool]:
+        if self._verdicts is None:
+            self._verdicts = {}
+            try:
+                with self._verdicts_lock(exclusive=False):
+                    text = (self._cache / _VERDICTS_FILE).read_text(encoding="ascii")
+                lines = text.splitlines()
+            except (OSError, UnicodeDecodeError):
+                lines = []  # no memory yet, or a damaged one: blobs are read again
+            for line in lines:
+                fields = line.split()
+                if len(fields) == 3 and fields[1] in ("0", "1") and fields[2] in ("0", "1"):
+                    self._verdicts[fields[0], fields[1] == "1"] = fields[2] == "1"
+        return self._verdicts
+
+    @contextmanager
+    def _verdicts_lock(self, *, exclusive: bool) -> Iterator[None]:
+        """Holds the cache's verdicts lock: shared to read the verdicts file, exclusive to
+        change it. Every Corpus using the cache appends to the one file, so an append must
+        never interleave with another's, nor a reader see one half-written.
+
+        The lock is a file of its own, never the verdicts file, so that a holder of the
+        exclusive lock may also replace the verdicts file whole (write a new one, then rename
+        it over the old): a lock taken on the old file would not cover the new one."""
+        with _flock(self._cache / _VERDICTS_LOCK, exclusive=exclusive):
+            yield
+
+    def _mirror(self, repository: str) -> Path:
+        return self._cache / f"{repository}.git"
+
+    def _update(self, repository: str) -> None:
+        """Makes the mirror if it is missing or half-made, then fetches into it, holding the
+        mirror's lock throughout: another Corpus sharing the cache may be updating the same
+        Repository, and must neither fetch alongside nor remove a mirror being made."""
+        mirror = self._mirror(repository)
+        with _flock(mirror.with_name(f"{mirror.name}.lock"), exclusive=True):
+            self._make_and_fetch(repository, mirror)
+
+    def _make_and_fetch(self, repository: str, mirror: Path) -> None:
+        if not (mirror / "HEAD").is_file():
+            shutil.rmtree(mirror, ignore_errors=True)  # a half-made mirror is made again
+            mirror.parent.mkdir(parents=True, exist_ok=True)
+            self._git("init", "--quiet", "--bare", str(mirror))
+        # Fetched from the URL itself, with no remote recorded: the mirror holds no address.
+        self._git(
+            "fetch",
+            "--quiet",
+            "--prune",
+            "--force",
+            f"{self._url}/{repository}.git",
+            "+refs/heads/*:refs/heads/*",
+            "+refs/tags/*:refs/tags/*",
+            cwd=mirror,
+            authenticated=True,
+        )
+
+    def _commit(self, tracked: TrackedRef) -> str:
+        mirror = self._mirror(tracked.repository)
+        for prefix in ("refs/heads/", "refs/tags/"):
+            try:
+                return self._git(
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    f"{prefix}{tracked.ref}^{{commit}}",
+                    cwd=mirror,
+                ).strip()
+            except GitLabError:
+                continue
+        raise GitLabError(f"{tracked.repository} has no branch or tag {tracked.ref!r}")
+
+    def _git(
+        self,
+        *args: str,
+        cwd: Path | None = None,
+        binary: bool = False,
+        stdin: bytes | None = None,
+        authenticated: bool = False,
+    ):
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        if authenticated and self._token:
+            basic = base64.b64encode(f"oauth2:{self._token}".encode()).decode()
+            env |= {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": f"http.{self._url}/.extraHeader",
+                "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
+            }
+        try:
+            result = subprocess.run(
+                [self._git_bin, *args],
+                cwd=cwd,
+                env=env,
+                input=stdin,
+                capture_output=True,
+                timeout=self._timeout,
+            )
+        except FileNotFoundError:
+            raise GitLabError(f"git not found (looked for {self._git_bin!r})") from None
+        except subprocess.TimeoutExpired:
+            raise GitLabError(f"git {args[0]} timed out after {self._timeout:g}s") from None
+        if result.returncode != 0:
+            message = result.stderr.decode("utf-8", errors="replace").strip()
+            raise GitLabError(
+                f"git {args[0]} failed ({result.returncode}): "
+                f"{self._scrub(message)[:_MAX_ERROR_LENGTH]}"
+            )
+        return result.stdout if binary else result.stdout.decode("utf-8", errors="replace")
+
+    def _scrub(self, message: str) -> str:
+        if self._token:
+            basic = base64.b64encode(f"oauth2:{self._token}".encode()).decode()
+            for secret in (self._token, basic):
+                message = message.replace(secret, "***")
+        return message
+
+
+@contextmanager
+def _flock(path: Path, *, exclusive: bool) -> Iterator[None]:
+    """Holds an ``flock`` on ``path`` (made if missing) until the ``with`` body ends, waiting
+    for it. The kernel releases it when the file is closed or its process ends, so it never
+    outlives a crashed holder."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a") as file:
+        fcntl.flock(file, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        yield
+
+
+def _media_type(path: str) -> str:
+    pure = PurePosixPath(path)
+    return _NAMES.get(pure.name) or _SUFFIXES[pure.suffix.lower()]
+
+
+def _wanted(path: str) -> str | None:
+    """The Media type of a file the Corpus indexes, or None for one it leaves out."""
+    pure = PurePosixPath(path)
+    if any(part in _EXCLUDED_DIRECTORIES for part in pure.parent.parts):
+        return None
+    if any(fnmatch.fnmatchcase(pure.name, pattern) for pattern in _EXCLUDED_NAMES):
+        return None
+    return _NAMES.get(pure.name) or _SUFFIXES.get(pure.suffix.lower())
+
+
+def _excluded(path: str, globs: Sequence[str]) -> bool:
+    """Whether a file matches one of the Tracked ref's globs: ``docs/**`` or ``src/*_gen.py``
+    against its path, or a glob with no ``/`` (``*.sql``) against its name at any depth."""
+    name = PurePosixPath(path).name
+    return any(
+        _glob(glob).fullmatch(path) or ("/" not in glob and fnmatch.fnmatchcase(name, glob))
+        for glob in globs
+    )
+
+
+@cache
+def _glob(glob: str) -> re.Pattern:
+    """``*`` and ``?`` stay within a directory, ``**`` crosses them (``a/**/b`` also matches
+    ``a/b``, and a trailing ``/**`` everything below)."""
+    out, i = "", 0
+    while i < len(glob):
+        if glob.startswith("**/", i):
+            out, i = out + "(?:.*/)?", i + 3
+        elif glob.startswith("**", i):
+            out, i = out + ".*", i + 2
+        elif glob[i] == "*":
+            out, i = out + "[^/]*", i + 1
+        elif glob[i] == "?":
+            out, i = out + "[^/]", i + 1
+        else:
+            out, i = out + re.escape(glob[i]), i + 1
+    return re.compile(out)
+
+
+def _is_worth_indexing(content: bytes, *, code: bool) -> bool:
+    if b"\0" in content or not content.strip():
+        return False
+    try:
+        content.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return not code or not any(marker in content[:_GENERATED_HEAD] for marker in _GENERATED_MARKERS)

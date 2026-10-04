@@ -26,4 +26,4 @@ def test_the_lockfile_covers_every_runtime_dependency_and_the_build_tool():
 
     assert wanted <= pinned, wanted - pinned
     assert "setuptools" in pinned  # the installer builds the code without build isolation
-    assert "local-rag" not in pinned  # the system's own code comes from the Binary drop
+    assert "nexus-rag" not in pinned  # the system's own code comes from the Binary drop

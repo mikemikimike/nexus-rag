@@ -2,10 +2,10 @@
 
 import pytest
 
-from local_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
-from local_rag.corpus import Document, InMemoryCorpus
-from local_rag.fakes import FakeModelGateway
-from local_rag.settings import RetrievalMode
+from nexus_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
+from nexus_rag.corpus import Document, InMemoryCorpus
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.settings import RetrievalMode
 from test_index_format import after_an_upgrade
 
 

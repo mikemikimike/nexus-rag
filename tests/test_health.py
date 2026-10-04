@@ -1,7 +1,7 @@
 from conftest import DOCUMENTS
-from local_rag import KnowledgeIndex, Settings, index_format
-from local_rag.corpus import InMemoryCorpus
-from local_rag.fakes import FakeModelGateway
+from nexus_rag import KnowledgeIndex, Settings, index_format
+from nexus_rag.corpus import InMemoryCorpus
+from nexus_rag.fakes import FakeModelGateway
 from test_index_format import after_an_upgrade
 from test_index_state import lose_the_live_collection
 

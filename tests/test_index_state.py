@@ -12,8 +12,8 @@ from index_states import (
     replace_with_a_non_index,
     strip_from_every_point,
 )
-from local_rag import Access, CorruptIndex, KnowledgeIndex, Settings
-from local_rag.corpus import InMemoryCorpus
+from nexus_rag import Access, CorruptIndex, KnowledgeIndex, Settings
+from nexus_rag.corpus import InMemoryCorpus
 from test_sync import CountingGateway
 
 

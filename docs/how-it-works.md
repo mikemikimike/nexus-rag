@@ -21,19 +21,19 @@ The reasons are in [ADR 0003](adr/0003-retrieval-mode-is-explicit-and-never-mixe
 
 ## Safe Rebuilds
 
-A **Rebuild** re-embeds every Document into a fresh index and makes it the **Live index** only if its failure rate is within `RAG_REBUILD_FAILURE_THRESHOLD` (default `0`); otherwise the current Live index stays and the refusal says why. The **Previous index** is kept for one generation and `local-rag switch-back` returns to it. Searches keep working during a Sync or Rebuild. Only one Sync or Rebuild runs at a time; the Knowledge index enforces it.
+A **Rebuild** re-embeds every Document into a fresh index and makes it the **Live index** only if its failure rate is within `RAG_REBUILD_FAILURE_THRESHOLD` (default `0`); otherwise the current Live index stays and the refusal says why. The **Previous index** is kept for one generation and `nexus-rag switch-back` returns to it. Searches keep working during a Sync or Rebuild. Only one Sync or Rebuild runs at a time; the Knowledge index enforces it.
 
 ## Corpora share one index
 
-`local-rag sync NAME` syncs one **Corpus** and touches only its Documents, so Corpora share one Knowledge index. `local-rag rebuild` re-embeds every declared Corpus. A Document's id is its Corpus's name and its own id (`confluence:12345`), and Status shows the last Sync of each Corpus.
+`nexus-rag sync NAME` syncs one **Corpus** and touches only its Documents, so Corpora share one Knowledge index. `nexus-rag rebuild` re-embeds every declared Corpus. A Document's id is its Corpus's name and its own id (`confluence:12345`), and Status shows the last Sync of each Corpus.
 
 On an empty index, the first Syncs of several Corpora may start at once. Each builds an index of its own until its first Document is in; the first to finish makes its index live, and the others discard theirs and carry on in the Live index. Each change to the record of index generations holds a short lock of its own (`<collection>.registry-lock`), so these Syncs cannot lose one another's changes. A Sync waits for that lock, and for the one around the first promotion (`<collection>.promote-lock`), only while another run makes such a change, never for the length of a Sync.
 
-Removing a Corpus from the declaration does not remove its Documents: they stay searchable and Status warns about them until `local-rag forget NAME` removes them (a Rebuild leaves them out too). A Corpus named that is not declared is a usage error (exit 2). See [ADR 0004](adr/0004-each-corpus-owns-its-documents-and-syncs-on-its-own.md).
+Removing a Corpus from the declaration does not remove its Documents: they stay searchable and Status warns about them until `nexus-rag forget NAME` removes them (a Rebuild leaves them out too). A Corpus named that is not declared is a usage error (exit 2). See [ADR 0004](adr/0004-each-corpus-owns-its-documents-and-syncs-on-its-own.md).
 
 ## Index format
 
-The index records how it was built: schema version, Retrieval mode, sparse encoder parameters, chunk size and overlap for prose and for code, the languages whose code is split by its syntax, the version of the token counter that sized the Passages, and for a hybrid index the embedding model name and dimension. After an upgrade, a model change, a change of `RAG_RETRIEVAL` or a change of `RAG_CHUNK_TOKENS` or `RAG_CHUNK_OVERLAP`, `local-rag status` tells whether it still matches.
+The index records how it was built: schema version, Retrieval mode, sparse encoder parameters, chunk size and overlap for prose and for code, the languages whose code is split by its syntax, the version of the token counter that sized the Passages, and for a hybrid index the embedding model name and dimension. After an upgrade, a model change, a change of `RAG_RETRIEVAL` or a change of `RAG_CHUNK_TOKENS` or `RAG_CHUNK_OVERLAP`, `nexus-rag status` tells whether it still matches.
 
 - A mismatching index that can still be searched is served as a **Read-only index** with a warning, and refuses Sync until you run a Rebuild.
 - An unusable one is refused.

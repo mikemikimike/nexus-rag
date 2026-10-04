@@ -1,4 +1,4 @@
-from local_rag.errors import describe
+from nexus_rag.errors import describe
 
 
 def test_an_error_is_described_by_its_message():

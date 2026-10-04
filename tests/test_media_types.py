@@ -1,9 +1,9 @@
 """Pins what a Media type is: prose or code, and the language a code type is split as."""
 
-from local_rag.corpus import PROSE_MEDIA_TYPES, is_code
-from local_rag.extraction import MEDIA_TYPES
-from local_rag.gitlab import _NAMES, _SUFFIXES
-from local_rag.languages import MEDIA_TYPE_LANGUAGES
+from nexus_rag.corpus import PROSE_MEDIA_TYPES, is_code
+from nexus_rag.extraction import MEDIA_TYPES
+from nexus_rag.gitlab import _NAMES, _SUFFIXES
+from nexus_rag.languages import MEDIA_TYPE_LANGUAGES
 
 
 def test_the_prose_types_are_the_text_types_that_are_not_code():

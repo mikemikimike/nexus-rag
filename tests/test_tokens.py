@@ -1,12 +1,12 @@
 import pytest
 
 from conftest import DOCUMENTS
-from local_rag import Access, IndexFormat, KnowledgeIndex, Settings
-from local_rag.chunker import Chunker
-from local_rag.corpus import InMemoryCorpus
-from local_rag.index_format import TOKEN_COUNTER
-from local_rag.settings import RetrievalMode
-from local_rag.tokens import count_tokens
+from nexus_rag import Access, IndexFormat, KnowledgeIndex, Settings
+from nexus_rag.chunker import Chunker
+from nexus_rag.corpus import InMemoryCorpus
+from nexus_rag.index_format import TOKEN_COUNTER
+from nexus_rag.settings import RetrievalMode
+from nexus_rag.tokens import count_tokens
 
 CJK = "这是一个测试句子" * 40  # 320 characters, no separators
 HEX = "ab12" * 1250  # 5,000 characters in one run

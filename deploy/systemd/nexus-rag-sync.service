@@ -1,0 +1,14 @@
+[Unit]
+Description=nexus-rag: incremental Sync of the Confluence Corpus
+After=qdrant.service
+
+[Service]
+Type=oneshot
+User=ragsvc
+Group=ragsvc
+EnvironmentFile=/etc/nexus-rag/nexus-rag.env
+Environment=HOME=/var/lib/ragsvc
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/nexus-rag/venv/bin/nexus-rag sync confluence
+TimeoutStartSec=6h
+SuccessExitStatus=75

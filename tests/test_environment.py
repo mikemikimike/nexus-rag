@@ -3,15 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from local_rag import Settings
-from local_rag.environment import (
+from nexus_rag import Settings
+from nexus_rag.environment import (
     Environment,
     SettingsError,
     environment_from,
     settings_from_environment,
 )
-from local_rag.settings import RetrievalMode
-from local_rag.sparse import SparseParams
+from nexus_rag.settings import RetrievalMode
+from nexus_rag.sparse import SparseParams
 
 EMBEDDING = {
     "RAG_EMBED_MODEL": "embed",  # Hybrid retrieval, the default, needs these named
@@ -185,7 +185,7 @@ def test_an_empty_environment_gives_the_wiring_defaults():
         mcp_port=8765,
         mcp_tls_cert=None,
         mcp_tls_key=None,
-        corpora_file=Path("/etc/local-rag/corpora.toml"),
+        corpora_file=Path("/etc/nexus-rag/corpora.toml"),
         confluence_bin="confluence",
         confluence_domain=None,
         gitlab_url=None,

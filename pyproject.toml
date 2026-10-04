@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "local-rag"
+name = "nexus-rag"
 version = "0.1.0"
 description = "Retrieval over internal documentation for a team's Claude Code on an air-gapped network."
 readme = "README.md"
@@ -25,8 +25,8 @@ dependencies = [
 ]
 
 [project.scripts]
-local-rag = "local_rag.cli:run"
-local-rag-mcp = "local_rag.mcp_server:run"
+nexus-rag = "nexus_rag.cli:run"
+nexus-rag-mcp = "nexus_rag.mcp_server:run"
 
 [dependency-groups]
 dev = [

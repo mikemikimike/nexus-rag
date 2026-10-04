@@ -1,7 +1,7 @@
 from dataclasses import replace
 
-from local_rag.index import Passage
-from local_rag.ranking import cap_per_document
+from nexus_rag.index import Passage
+from nexus_rag.ranking import cap_per_document
 
 BASE = Passage(document_id="", title="", url="", space="S", text="", score=0.0)
 

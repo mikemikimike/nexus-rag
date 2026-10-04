@@ -1,10 +1,10 @@
 # Operations
 
-How to check, run and repair an installation. Commands are route-neutral: prefix `local-rag` and `python -m` commands with the helper of your route, defined in its install guide:
+How to check, run and repair an installation. Commands are route-neutral: prefix `nexus-rag` and `python -m` commands with the helper of your route, defined in its install guide:
 
 | Route | Prefix |
 |---|---|
-| [systemd](install-systemd.md#2-run-the-installer) | `run_rag /opt/local-rag/venv/bin/` |
+| [systemd](install-systemd.md#2-run-the-installer) | `run_rag /opt/nexus-rag/venv/bin/` |
 | [container](install-container.md#2-start-the-stack) | `compose run --rm -T sync ` |
 
 - [Commands](#commands)
@@ -17,15 +17,15 @@ How to check, run and repair an installation. Commands are route-neutral: prefix
 
 | Task | Command |
 |---|---|
-| Status: Live index generation, Documents, Passages, Index format, last Sync of each Corpus | `local-rag status` |
-| Try a query | `local-rag search "ORA-00942" [--space ENG] [-k 5]` |
-| Sync now | `local-rag sync confluence` (any declared Corpus by its name), or `systemctl start local-rag-sync.service` |
-| Rebuild (new embedding model, `RAG_RETRIEVAL` or chunk settings changed) | `local-rag rebuild` (re-embeds every declared Corpus) |
-| Remove a Corpus no longer wanted | `local-rag forget NAME` |
-| Undo a bad Rebuild | `local-rag switch-back` |
+| Status: Live index generation, Documents, Passages, Index format, last Sync of each Corpus | `nexus-rag status` |
+| Try a query | `nexus-rag search "ORA-00942" [--space ENG] [-k 5]` |
+| Sync now | `nexus-rag sync confluence` (any declared Corpus by its name), or `systemctl start nexus-rag-sync.service` |
+| Rebuild (new embedding model, `RAG_RETRIEVAL` or chunk settings changed) | `nexus-rag rebuild` (re-embeds every declared Corpus) |
+| Remove a Corpus no longer wanted | `nexus-rag forget NAME` |
+| Undo a bad Rebuild | `nexus-rag switch-back` |
 | Add or revoke a user | edit `MCP_TOKENS`, restart the MCP server |
 
-Exit codes of `local-rag`: `0` success; `1` failure or refusal (a Sync with failed Documents, a refused Rebuild, an unusable index); `2` a command line that cannot be used; `75` another run holds the lock, so this one did nothing (the timer units treat it as success, so an overlap does not leave a failed unit). Only one Sync or Rebuild runs at a time.
+Exit codes of `nexus-rag`: `0` success; `1` failure or refusal (a Sync with failed Documents, a refused Rebuild, an unusable index); `2` a command line that cannot be used; `75` another run holds the lock, so this one did nothing (the timer units treat it as success, so an overlap does not leave a failed unit). Only one Sync or Rebuild runs at a time.
 
 A Rebuild can run for hours: detach it as in section 9 of [the closed-network setup guide](agents/closed-network-setup.md#9-operate), which also covers changing the embedding model without downtime.
 
@@ -34,8 +34,8 @@ A Rebuild can run for hours: detach it as in section 9 of [the closed-network se
 The manual test against the real Model gateway, Qdrant, LiteParse, Confluence CLI and (systemd route) units. It changes nothing and is safe before the first Sync.
 
 ```bash
-python -m local_rag.smoke --systemd   # systemd route
-python -m local_rag.smoke             # container route
+python -m nexus_rag.smoke --systemd   # systemd route
+python -m nexus_rag.smoke             # container route
 ```
 
 Each check prints one line:
@@ -82,7 +82,7 @@ The Knowledge index can be rebuilt from the Corpora and the Model gateway. Back 
 
 | Symptom | Fix |
 |---|---|
-| `/healthz` answers 503 | Qdrant is down or `QDRANT_API_KEY` differs from `QDRANT__SERVICE__API_KEY` (the systemd env file keeps them equal), or the Live index is unusable: `local-rag status` |
+| `/healthz` answers 503 | Qdrant is down or `QDRANT_API_KEY` differs from `QDRANT__SERVICE__API_KEY` (the systemd env file keeps them equal), or the Live index is unusable: `nexus-rag status` |
 | `search_docs` says "No results" | Nothing indexed yet: run a Sync and read its output or the journal |
 | Embedding errors, 401 or 404 | `LITELLM_BASE_URL` must end with `/v1`; `RAG_EMBED_MODEL` is the LiteLLM `model_name`; the gateway is always contacted directly, ignoring proxy variables. The smoke check shows the gateway's answer |
 | `status` warns about the embedding dimension or Index format | The model, `RAG_RETRIEVAL`, the chunk settings or the code changed since the index was built: run a Rebuild ([why](how-it-works.md#index-format)) |
@@ -94,8 +94,8 @@ The Knowledge index can be rebuilt from the Corpora and the Model gateway. Back 
 | Streaming timeouts through nginx | Use `examples/nginx.conf.example` (`proxy_buffering off`) |
 | Sync fails with 401/403 or `confluence: not found` | Token and auth type; the service user needs the CLI on its `PATH` (or `CONFLUENCE_BIN`) and `HOME=/var/lib/ragsvc` |
 | Rerank ignored | Look for "rerank failed" in the MCP log; the Model gateway must serve `/v1/rerank` for `RAG_RERANK_MODEL`; unset it to disable |
-| `lit: command not found` | `LIT_BIN=/opt/local-rag/venv/bin/lit` (the Installer's venv is found automatically) |
+| `lit: command not found` | `LIT_BIN=/opt/nexus-rag/venv/bin/lit` (the Installer's venv is found automatically) |
 | Scanned PDFs are empty (counted as failed Documents) | Enable OCR (`RAG_OCR=1`) once the language data is available offline |
 | The Installer or `container start` refuses | Read the message: wrong Qdrant version or checksum, a missing or mismatching file in the Binary drop, or a missing prerequisite. Nothing was changed |
 
-Logs: `journalctl -u local-rag-mcp -f` and `journalctl -u local-rag-sync` (systemd route); `compose logs -f mcp` and the journal of the `local-rag-container-*` units (container route).
+Logs: `journalctl -u nexus-rag-mcp -f` and `journalctl -u nexus-rag-sync` (systemd route); `compose logs -f mcp` and the journal of the `nexus-rag-container-*` units (container route).

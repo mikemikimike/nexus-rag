@@ -24,11 +24,11 @@ from acceptance_support import (
     systemd_host,
 )
 from fake_drop import REPO
-from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import Document, InMemoryCorpus
-from local_rag.fakes import FakeModelGateway
-from local_rag.gateway_litellm import GatewayError
-from local_rag.mcp_server import build_server
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.corpus import Document, InMemoryCorpus
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.gateway_litellm import GatewayError
+from nexus_rag.mcp_server import build_server
 from test_health import UnreachableQdrant
 from test_mcp_server import serving, serving_app
 
@@ -627,7 +627,7 @@ def test_a_complete_systemd_installation_passes():
         "install.timers",
     ):
         assert line(out, name).startswith("[ OK ]"), out
-    assert ["systemctl", "is-active", "--quiet", "local-rag-mcp.service"] in host.calls
+    assert ["systemctl", "is-active", "--quiet", "nexus-rag-mcp.service"] in host.calls
     assert "not world-readable" in line(out, "install.env-file")
 
 
@@ -644,19 +644,19 @@ def test_a_missing_unit_fails_and_points_at_the_installer():
 
 def test_an_inactive_unit_is_named():
     code, out, _ = install_only(
-        "--systemd", host=systemd_host(failing=["is-active --quiet local-rag-mcp.service"])
+        "--systemd", host=systemd_host(failing=["is-active --quiet nexus-rag-mcp.service"])
     )
 
     failed = line(out, "install.active")
-    assert code == 1 and "local-rag-mcp.service" in failed and "qdrant.service" not in failed
+    assert code == 1 and "nexus-rag-mcp.service" in failed and "qdrant.service" not in failed
 
 
 def test_a_disabled_unit_is_named():
     code, out, _ = install_only(
-        "--systemd", host=systemd_host(failing=["is-enabled --quiet local-rag-sync.timer"])
+        "--systemd", host=systemd_host(failing=["is-enabled --quiet nexus-rag-sync.timer"])
     )
 
-    assert code == 1 and "local-rag-sync.timer" in line(out, "install.enabled")
+    assert code == 1 and "nexus-rag-sync.timer" in line(out, "install.enabled")
 
 
 def test_a_world_readable_env_file_fails_without_printing_a_secret():
@@ -667,19 +667,19 @@ def test_a_world_readable_env_file_fails_without_printing_a_secret():
 
     failed = line(out, "install.env-file")
     assert code == 1 and failed.startswith("[FAIL]") and "644" in failed
-    assert "/etc/local-rag/local-rag.env" in failed
+    assert "/etc/nexus-rag/nexus-rag.env" in failed
     assert not any(secret in out + err for secret in SECRETS)
 
 
 def test_a_timer_without_a_next_run_is_not_scheduled():
     host = systemd_host()
-    host.answers["list-timers"] = TIMERS.format(sync="local-rag-sync").replace(
+    host.answers["list-timers"] = TIMERS.format(sync="nexus-rag-sync").replace(
         "Thu 2026-10-01 13:00:00 UTC  40min left", "n/a  n/a"
     )
 
     code, out, _ = install_only("--systemd", host=host)
 
-    assert code == 1 and "local-rag-sync.timer" in line(out, "install.timers")
+    assert code == 1 and "nexus-rag-sync.timer" in line(out, "install.timers")
 
 
 def test_a_complete_container_installation_passes():
@@ -878,7 +878,7 @@ class Block:
                                   "nltk", "markdownify", "uvicorn"}:
             raise ImportError("blocked: " + name)
 sys.meta_path.insert(0, Block())
-from local_rag import acceptance
+from nexus_rag import acceptance
 code = acceptance.main(["--only", "install", "--systemd"], {}, run=lambda command: "640\\n")
 sys.exit(0 if code in (0, 1) else 9)
 """
@@ -897,8 +897,8 @@ sys.exit(0 if code in (0, 1) else 9)
 
 
 def test_the_marker_sits_at_the_end_of_a_nearly_full_passage():
-    from local_rag import acceptance_corpus as corpus_files
-    from local_rag.chunker import Chunker
+    from nexus_rag import acceptance_corpus as corpus_files
+    from nexus_rag.chunker import Chunker
 
     gateway = good_gateway()
     chunker = Chunker(gateway.count_tokens, size=400, overlap=60)
@@ -1103,8 +1103,8 @@ def test_the_suite_says_which_retrieval_mode_it_ran_in():
 
 
 def test_the_identifiers_of_a_run_are_never_split_into_parts_by_keyword_search():
-    from local_rag.acceptance_corpus import Run
-    from local_rag.sparse import tokenize
+    from nexus_rag.acceptance_corpus import Run
+    from nexus_rag.sparse import tokenize
 
     for run in (Run.new() for _ in range(200)):
         for identifier in (run.keyword, run.replacement, run.tail):

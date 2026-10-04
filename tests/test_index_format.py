@@ -4,7 +4,7 @@ import pytest
 
 from conftest import DOCUMENTS
 from index_states import NAMES, collections, generations_in, legacy_index
-from local_rag import (
+from nexus_rag import (
     Access,
     IndexFormat,
     IndexReadOnly,
@@ -13,9 +13,9 @@ from local_rag import (
     Settings,
     index_format,
 )
-from local_rag.corpus import InMemoryCorpus
-from local_rag.fakes import FakeModelGateway
-from local_rag.sparse import SparseParams
+from nexus_rag.corpus import InMemoryCorpus
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.sparse import SparseParams
 from test_sync import CountingGateway, revised
 
 

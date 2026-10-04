@@ -3,9 +3,9 @@
 import pytest
 from qdrant_client import models
 
-from local_rag import IndexFormat, Settings
-from local_rag.generations import Generations
-from local_rag.index_names import IndexNames
+from nexus_rag import IndexFormat, Settings
+from nexus_rag.generations import Generations
+from nexus_rag.index_names import IndexNames
 
 
 @pytest.fixture

@@ -8,11 +8,11 @@ import pytest
 from qdrant_client import QdrantClient
 
 from conftest import DOCUMENTS
-from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import InMemoryCorpus
-from local_rag.fakes import FakeModelGateway
-from local_rag.gateway_litellm import GatewayError
-from local_rag.smoke import main
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.corpus import InMemoryCorpus
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.gateway_litellm import GatewayError
+from nexus_rag.smoke import main
 from test_health import UnreachableQdrant
 
 ENVIRONMENT = {
@@ -263,8 +263,8 @@ def test_each_systemd_unit_must_be_active(smoke):
     asked = {call[-1] for call in host.calls if call[0] == "systemctl"}
     assert asked == {
         "qdrant.service",
-        "local-rag-mcp.service",
-        "local-rag-sync.timer",
+        "nexus-rag-mcp.service",
+        "nexus-rag-sync.timer",
     }
 
 
@@ -272,7 +272,7 @@ def test_an_inactive_systemd_unit_fails(smoke):
     code, out, _ = smoke("--systemd", host=Host(failing=["systemctl"]))
 
     assert code == 1
-    assert line(out, "local-rag-mcp.service").startswith("[FAIL]")
+    assert line(out, "nexus-rag-mcp.service").startswith("[FAIL]")
 
 
 def test_an_unusable_setting_fails_the_check_instead_of_crashing(smoke):
@@ -443,7 +443,7 @@ def test_every_failure_of_its_own_says_its_likely_cause(smoke):
         "--systemd", MCP_TOKENS="", client=UnreachableQdrant(), host=Host(failing=["systemctl"])
     )
 
-    for name in ("MCP_TOKENS", "Knowledge index", "local-rag-mcp.service"):
+    for name in ("MCP_TOKENS", "Knowledge index", "nexus-rag-mcp.service"):
         assert "Likely cause:" in line(out, name), name
 
     _, out, _ = smoke(LITELLM_BASE_URL="")

@@ -1,4 +1,4 @@
-# local-rag
+# nexus-rag
 
 A retrieval system that lets a team's Claude Code search internal documentation on a fully air-gapped network, using models served by a gateway on that network.
 

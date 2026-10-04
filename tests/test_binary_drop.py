@@ -4,7 +4,7 @@ import tarfile
 import pytest
 
 import fake_drop
-from local_rag.binary_drop import (
+from nexus_rag.binary_drop import (
     QDRANT,
     Artifact,
     DropRefused,
@@ -63,7 +63,7 @@ def test_a_tarball_without_the_qdrant_binary_is_refused(tmp_path):
 
 
 def test_a_file_is_checked_against_the_drops_sha256sums(tmp_path):
-    archive = tmp_path / "local-rag-0.1.0.tar.gz"
+    archive = tmp_path / "nexus-rag-0.1.0.tar.gz"
     archive.write_bytes(b"code")
     sums = tmp_path / "SHA256SUMS"
     sums.write_text(f"{fake_drop.sha256(archive)}  {archive.name}\n")
@@ -76,7 +76,7 @@ def test_a_file_is_checked_against_the_drops_sha256sums(tmp_path):
 
 
 def test_a_file_the_sha256sums_do_not_list_is_refused(tmp_path):
-    archive = tmp_path / "local-rag-0.1.0.tar.gz"
+    archive = tmp_path / "nexus-rag-0.1.0.tar.gz"
     archive.write_bytes(b"code")
     sums = tmp_path / "SHA256SUMS"
     sums.write_text(f"{'0' * 64}  something-else.tar.gz\n")
@@ -105,7 +105,7 @@ def test_the_repository_records_the_system_version_it_ships_as_an_image():
     import tomllib
     from pathlib import Path
 
-    from local_rag.binary_drop import SYSTEM_VERSION
+    from nexus_rag.binary_drop import SYSTEM_VERSION
 
     pyproject = tomllib.loads((Path(fake_drop.REPO) / "pyproject.toml").read_text())
     assert SYSTEM_VERSION == pyproject["project"]["version"]

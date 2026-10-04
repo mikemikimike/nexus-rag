@@ -4,9 +4,9 @@ import zlib
 
 import pytest
 
-from local_rag import KnowledgeIndex, Settings
-from local_rag.fakes import FakeModelGateway
-from local_rag.folder import FolderCorpus
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.folder import FolderCorpus
 
 MODEL = """<mxGraphModel><root>
   <mxCell id="0"/><mxCell id="1" parent="0"/>

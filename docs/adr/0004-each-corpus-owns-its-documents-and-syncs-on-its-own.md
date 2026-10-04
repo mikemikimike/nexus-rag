@@ -6,7 +6,7 @@ The Knowledge index used to hold one Corpus: a Sync removed every Document its C
 - **Locking is per Corpus for Syncs.** Syncs of different Corpora touch disjoint Documents and may run at once; a Sync of the same Corpus is refused as in progress. A Rebuild still holds the whole index. This amends the locking in ADR 0002.
 - **An Incomplete listing holds back removals only in the part that failed** (a Root, a page's Attachments, a Tracked ref), so a deleted feature branch does not freeze removals everywhere. A missing ref is a failure, never an empty Repository.
 - **A Rebuild covers every declared Corpus.** A fresh generation built from one Corpus would drop the others' Documents on promotion.
-- **Removing a Corpus is explicit.** Documents of a Corpus no longer declared stay searchable, with a Status warning, until `local-rag forget <corpus>` or the next Rebuild.
+- **Removing a Corpus is explicit.** Documents of a Corpus no longer declared stay searchable, with a Status warning, until `nexus-rag forget <corpus>` or the next Rebuild.
 
 ## Considered options
 

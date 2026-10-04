@@ -1,16 +1,19 @@
+import re
 import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from fake_gitlab import FakeGitLab
 from index_states import NAMES
-from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import CodeFile, TrackedRef, listing_failures
-from local_rag.declaration import Declaration
-from local_rag.environment import Environment
-from local_rag.fakes import FakeModelGateway
-from local_rag.gitlab import GitLabCorpus, Repository
-from local_rag.settings import RetrievalMode
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.corpus import CodeFile, TrackedRef, listing_failures
+from nexus_rag.declaration import Declaration
+from nexus_rag.environment import Environment
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.gitlab import GitLabCorpus, Repository
+from nexus_rag.settings import RetrievalMode
 
 REPOSITORY = "platform/payments"
 TOKEN = "glpat-s3cr3t-t0ken"
@@ -143,6 +146,67 @@ def test_deleting_the_cache_is_safe(gitlab, cache):
     shutil.rmtree(cache)
 
     assert document_ids(corpus(gitlab, cache)) == first
+
+
+# Corpora sharing a cache: Syncs of different Corpora may run at once (ADR 0004)
+
+
+def list_at_once(*corpora):
+    """Lists every Corpus in its own thread, all started together; their listings in order."""
+    start = threading.Barrier(len(corpora))
+
+    def listed(gitlab_corpus):
+        start.wait()
+        return gitlab_corpus.list()
+
+    with ThreadPoolExecutor(len(corpora)) as pool:
+        return list(pool.map(listed, corpora))
+
+
+def test_two_corpora_listing_one_repository_into_a_fresh_shared_cache_both_complete(
+    gitlab, tmp_path
+):
+    gitlab.commit(REPOSITORY, {"src/hook.py": "def notify(): pass\n"}, branch="feature/x")
+    for attempt in range(25):  # unlocked, one of the two failed in about 4 runs of 5
+        cache = tmp_path / f"shared-{attempt}"
+        main = corpus(gitlab, cache, name="code")
+        features = corpus(gitlab, cache, Repository(REPOSITORY, ("feature/x",)), name="features")
+
+        listings = list_at_once(main, features)
+
+        assert [listing_failures(listing) for listing in listings] == [{}, {}]
+        assert {ref.id for ref in listings[0]} == ids(*FILES)
+
+
+def test_corpora_sharing_a_cache_keep_every_remembered_verdict_whole(gitlab, tmp_path):
+    # Enough new blobs at once that each Corpus appends far more than one write buffer.
+    gitlab.commit("platform/a", {f"src/a{n}.py": f"A = {n}\n" for n in range(400)})
+    gitlab.commit("platform/b", {f"src/b{n}.py": f"B = {n}\n" for n in range(400)})
+    cache = tmp_path / "shared"
+    first, second = (
+        corpus(gitlab, cache, Repository(f"platform/{r}", ("main",)), name=r) for r in "ab"
+    )
+
+    list_at_once(first, second)
+
+    lines = next(cache.glob(".verdicts-*")).read_text(encoding="ascii").splitlines()
+    assert len(lines) == 2 * 2 * 400  # two verdicts (as code, as prose) per blob
+    assert all(re.fullmatch(r"[0-9a-f]{40} [01] [01]", line) for line in lines)
+
+
+def test_a_shared_mirror_is_reused_and_another_corpus_does_not_fetch_it_again_from_scratch(
+    gitlab, cache, tmp_path
+):
+    log = tmp_path / "tool.log"
+    wrapper = tmp_path / "tool-logged"
+    wrapper.write_text(f'#!/bin/sh\necho "$@" >> {log}\nexec git "$@"\n')
+    wrapper.chmod(0o755)
+    document_ids(corpus(gitlab, cache, name="code", git_bin=str(wrapper)))
+    log.unlink()
+
+    document_ids(corpus(gitlab, cache, name="other", git_bin=str(wrapper)))
+
+    assert "init" not in log.read_text().split()
 
 
 def test_code_is_searchable_together_with_the_docs_end_to_end(gitlab, cache):
@@ -353,7 +417,7 @@ def test_with_no_ref_a_search_sees_only_primary_refs_and_a_ref_or_repository_nar
 
 
 def test_a_search_with_no_ref_leaves_non_code_corpora_alone(gitlab, cache):
-    from local_rag.corpus import Document, InMemoryCorpus
+    from nexus_rag.corpus import Document, InMemoryCorpus
 
     tracked(gitlab)
     index = KnowledgeIndex(Settings(), FakeModelGateway())
@@ -421,7 +485,7 @@ def test_the_declaration_can_mark_another_ref_primary(gitlab, cache, tmp_path):
     ],
 )
 def test_the_declaration_rejects_unusable_refs(tmp_path, refs):
-    from local_rag.declaration import DeclarationError
+    from nexus_rag.declaration import DeclarationError
 
     with pytest.raises(DeclarationError):
         declared_code(tmp_path, tmp_path / "c", refs).corpus(

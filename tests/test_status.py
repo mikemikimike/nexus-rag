@@ -4,9 +4,9 @@ import pytest
 
 from conftest import DOCUMENTS
 from index_states import collections, overwrite_the_last_sync
-from local_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
-from local_rag.corpus import InMemoryCorpus
-from local_rag.sparse import SparseParams
+from nexus_rag import Access, IndexFormat, IndexReadOnly, KnowledgeIndex, Settings
+from nexus_rag.corpus import InMemoryCorpus
+from nexus_rag.sparse import SparseParams
 from test_index_format import after_an_upgrade
 from test_sync import FlakyCorpus
 

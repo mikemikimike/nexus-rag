@@ -1,6 +1,6 @@
 """The names of the collections and aliases one Knowledge index keeps in Qdrant."""
 
-from local_rag.index_names import IndexNames
+from nexus_rag.index_names import IndexNames
 
 
 def test_every_collection_an_index_makes_is_named_after_it():
