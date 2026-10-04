@@ -14,7 +14,8 @@
     [corpus.code]
     kind = "gitlab"                     # GITLAB_URL and GITLAB_TOKEN come from the environment
     cache = "/var/cache/nexus-rag/gitlab"   # optional: where the mirrors live; safe to delete
-                                        # (default: $HOME/.cache/nexus-rag/gitlab)
+                                        # (default: $HOME/.cache/nexus-rag/gitlab); Corpora
+                                        # may share one, on a local disk (it is file-locked)
     [[corpus.code.repositories]]        # one table per Repository
     path = "platform/payments"          # the project's full path in GitLab
     refs = ["main", {name = "release/1.2", primary = true, exclude = ["docs/**"]}]
