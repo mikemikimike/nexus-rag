@@ -315,6 +315,123 @@ def test_a_marker_never_stamped_goes_stale_by_the_same_clock(clock):
         pass
 
 
+def test_an_abandoned_unstamped_marker_is_taken_over_by_a_fresh_run_each_time(clock):
+    from qdrant_client import QdrantClient
+
+    from local_rag import SyncInProgress
+    from local_rag.exclusive import ExclusiveRun
+
+    client = QdrantClient(location=":memory:")
+    ExclusiveRun(client, "lock", now=clock)._try_create()  # its creator died before stamping
+
+    for _ in range(3):  # every CLI run and every Corpus lock builds a new ExclusiveRun
+        with pytest.raises(SyncInProgress):
+            with ExclusiveRun(client, "lock", now=clock).hold():
+                pytest.fail("an unstamped marker not yet stale must hold")
+        clock.advance(40)
+    clock.advance(1)
+
+    with ExclusiveRun(client, "lock", now=clock).hold():
+        pass
+
+
+def test_an_unstamped_marker_is_not_taken_over_before_stale_after(clock):
+    from qdrant_client import QdrantClient
+
+    from local_rag import SyncInProgress
+    from local_rag.exclusive import ExclusiveRun
+
+    client = QdrantClient(location=":memory:")
+    ExclusiveRun(client, "lock", now=clock)._try_create()
+    assert ExclusiveRun(client, "lock", now=clock).is_held()
+
+    clock.advance(119)
+
+    with pytest.raises(SyncInProgress):
+        with ExclusiveRun(client, "lock", now=clock).hold():
+            pytest.fail("a creator that is merely slow to stamp must keep its marker")
+    assert ExclusiveRun(client, "lock", now=clock).is_held()
+
+
+def test_a_creator_that_stamps_late_keeps_its_lock(clock):
+    from qdrant_client import QdrantClient
+
+    from local_rag import SyncInProgress
+    from local_rag.exclusive import ExclusiveRun
+
+    client = QdrantClient(location=":memory:")
+    slow = ExclusiveRun(client, "lock", heartbeat_every=3600, now=clock)
+    slow._try_create()
+    with pytest.raises(SyncInProgress):
+        with ExclusiveRun(client, "lock", now=clock).hold():  # sees it unstamped, starts timing
+            pytest.fail("held")
+    clock.advance(100)
+    slow._stamp("slow")  # the creator was alive after all
+
+    clock.advance(100)  # long past when the first observer saw it unstamped
+    with pytest.raises(SyncInProgress):
+        with ExclusiveRun(client, "lock", now=clock).hold():
+            pytest.fail("a stamped, live lock must hold")
+
+
+def test_a_rebuild_is_not_refused_forever_by_an_abandoned_unstamped_corpus_lock(clock):
+    from qdrant_client import QdrantClient
+
+    from local_rag import SyncInProgress
+    from local_rag.exclusive import ExclusiveRun
+
+    client = QdrantClient(location=":memory:")
+    settings = Settings()
+    index = KnowledgeIndex(settings, FakeModelGateway(), client=client, lock_clock=clock)
+    index.sync(named("confluence", DOCUMENTS))
+    ExclusiveRun(client, f"{settings.collection}.sync-lock.code", now=clock)._try_create()
+
+    with pytest.raises(SyncInProgress):
+        index.rebuild([named("confluence", DOCUMENTS)])
+    clock.advance(settings.sync_lock_stale_after + 1)
+
+    assert index.rebuild([named("confluence", DOCUMENTS)]).promoted
+
+
+def test_a_first_sync_takes_over_an_abandoned_unstamped_promote_lock(clock, monkeypatch):
+    from qdrant_client import QdrantClient
+
+    from local_rag.exclusive import ExclusiveRun
+
+    client = QdrantClient(location=":memory:")
+    settings = Settings()
+    index = KnowledgeIndex(settings, FakeModelGateway(), client=client, lock_clock=clock)
+    ExclusiveRun(client, f"{settings.collection}.promote-lock", now=clock)._try_create()
+    monkeypatch.setattr("local_rag.index.time.sleep", lambda _: clock.advance(10))
+
+    assert index.sync(named("code", DOCUMENTS)).added == 3
+
+
+def test_a_first_sync_gives_up_on_a_promote_lock_that_stays_held(
+    clock, crashed_holder, monkeypatch
+):
+    from qdrant_client import QdrantClient
+
+    from local_rag import SyncInProgress
+    from local_rag.exclusive import ExclusiveRun
+
+    client = QdrantClient(location=":memory:")
+    settings = Settings()
+    index = KnowledgeIndex(settings, FakeModelGateway(), client=client, lock_clock=clock)
+    name = f"{settings.collection}.promote-lock"
+    holder = ExclusiveRun(client, name, heartbeat_every=3600, now=clock)
+    crashed_holder(holder)
+
+    def wait(_):  # time passes, and the live holder keeps beating
+        clock.advance(10)
+        holder._stamp("holder")
+
+    monkeypatch.setattr("local_rag.index.time.sleep", wait)
+
+    with pytest.raises(SyncInProgress, match="promote lock"):
+        index.sync(named("code", DOCUMENTS))
+
+
 def test_a_holder_that_was_taken_over_neither_frees_nor_stamps_over_the_new_lock(clock):
     from qdrant_client import QdrantClient
 
