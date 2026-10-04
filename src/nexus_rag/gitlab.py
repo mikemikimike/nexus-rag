@@ -11,18 +11,28 @@ SHA, its Space the Repository's parent group (empty for a top-level project) and
 ``<repository name>/<file path>``. A Repository that cannot be read is a failure of its part
 of the listing, ``<repository path>@<ref>``, never an empty Repository.
 
+Several Corpora may share one cache, and their Syncs may run at once (ADR 0004), so the cache
+has several writers. Each mirror is made and fetched only while holding an exclusive
+``flock`` on its lock file, ``<repository path>.git.lock`` beside it (outside the mirror, so
+the half-made-mirror cleanup cannot remove it). The kernel releases a lock when its holder
+exits, however it exits, so a crashed Sync never leaves one behind. Reading a mirror takes no
+lock: git moves refs atomically and a fetch never removes the objects of a pinned commit.
+The verdicts file has its own lock, described at ``_verdicts_lock``.
+
 A Repository may have several Tracked refs, one of them its Primary ref: the same file at two
 of them is two Documents. A Tracked ref that no longer exists (a merged and deleted branch)
 fails alone. Each ref may add exclude globs to the defaults.
 """
 
 import base64
+import fcntl
 import fnmatch
 import os
 import re
 import shutil
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path, PurePosixPath
@@ -40,6 +50,7 @@ from nexus_rag.corpus import (
 DEFAULT_MAX_SIZE = 200_000  # bytes; a larger file is data or generated, not something to read
 _MAX_ERROR_LENGTH = 500
 _VERDICTS_FILE = ".verdicts-1"  # in the cache; its suffix changes with the rules of a verdict
+_VERDICTS_LOCK = ".verdicts.lock"  # in the cache; guards the verdicts file, see _verdicts_lock
 _GENERATED_HEAD = 1024
 _BATCH = 200
 
@@ -341,16 +352,18 @@ class GitLabCorpus:
                     verdicts[blob, as_code] = _is_worth_indexing(content, code=as_code)
                     learned.append(f"{blob} {int(as_code)} {int(verdicts[blob, as_code])}\n")
         if learned:
-            self._cache.mkdir(parents=True, exist_ok=True)
-            with open(self._cache / _VERDICTS_FILE, "a", encoding="ascii") as file:
-                file.writelines(learned)
+            with self._verdicts_lock(exclusive=True):
+                with open(self._cache / _VERDICTS_FILE, "a", encoding="ascii") as file:
+                    file.write("".join(learned))
         return {key: verdicts[key] for key in wanted}
 
     def _remembered(self) -> dict[tuple[str, bool], bool]:
         if self._verdicts is None:
             self._verdicts = {}
             try:
-                lines = (self._cache / _VERDICTS_FILE).read_text(encoding="ascii").splitlines()
+                with self._verdicts_lock(exclusive=False):
+                    text = (self._cache / _VERDICTS_FILE).read_text(encoding="ascii")
+                lines = text.splitlines()
             except (OSError, UnicodeDecodeError):
                 lines = []  # no memory yet, or a damaged one: blobs are read again
             for line in lines:
@@ -359,11 +372,30 @@ class GitLabCorpus:
                     self._verdicts[fields[0], fields[1] == "1"] = fields[2] == "1"
         return self._verdicts
 
+    @contextmanager
+    def _verdicts_lock(self, *, exclusive: bool) -> Iterator[None]:
+        """Holds the cache's verdicts lock: shared to read the verdicts file, exclusive to
+        change it. Every Corpus using the cache appends to the one file, so an append must
+        never interleave with another's, nor a reader see one half-written.
+
+        The lock is a file of its own, never the verdicts file, so that a holder of the
+        exclusive lock may also replace the verdicts file whole (write a new one, then rename
+        it over the old): a lock taken on the old file would not cover the new one."""
+        with _flock(self._cache / _VERDICTS_LOCK, exclusive=exclusive):
+            yield
+
     def _mirror(self, repository: str) -> Path:
         return self._cache / f"{repository}.git"
 
     def _update(self, repository: str) -> None:
+        """Makes the mirror if it is missing or half-made, then fetches into it, holding the
+        mirror's lock throughout: another Corpus sharing the cache may be updating the same
+        Repository, and must neither fetch alongside nor remove a mirror being made."""
         mirror = self._mirror(repository)
+        with _flock(mirror.with_name(f"{mirror.name}.lock"), exclusive=True):
+            self._make_and_fetch(repository, mirror)
+
+    def _make_and_fetch(self, repository: str, mirror: Path) -> None:
         if not (mirror / "HEAD").is_file():
             shutil.rmtree(mirror, ignore_errors=True)  # a half-made mirror is made again
             mirror.parent.mkdir(parents=True, exist_ok=True)
@@ -439,6 +471,17 @@ class GitLabCorpus:
             for secret in (self._token, basic):
                 message = message.replace(secret, "***")
         return message
+
+
+@contextmanager
+def _flock(path: Path, *, exclusive: bool) -> Iterator[None]:
+    """Holds an ``flock`` on ``path`` (made if missing) until the ``with`` body ends, waiting
+    for it. The kernel releases it when the file is closed or its process ends, so it never
+    outlives a crashed holder."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a") as file:
+        fcntl.flock(file, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        yield
 
 
 def _media_type(path: str) -> str:

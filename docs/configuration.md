@@ -48,6 +48,8 @@ refs = ["main", {name = "release/1.2", exclude = ["docs/**"]}]   # Tracked refs;
 
 A GitLab Corpus indexes the files of each listed Repository at each Tracked ref, split along functions and classes for Python and C, by lines for other code.
 
+Several GitLab Corpora may share one `cache`, the default included: a Repository that two of them list (say one Corpus for `main`, another for feature branches) is mirrored once and fetched by one Sync at a time, even when their timers overlap. Keep the cache on a local disk: the Syncs coordinate through file locks (`*.lock` in the cache), which a network filesystem may not honour. Deleting the cache is safe, but not while a Sync runs.
+
 > **GitLab permissions are not enforced: every MCP token can read every listed Repository**, whoever the GitLab token belongs to. List only Repositories suitable for everyone who holds a token. Per-token Space allow-lists and discovering a group's Repositories with the `glab` CLI are later work.
 
 ## Settings
