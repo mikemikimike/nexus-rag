@@ -10,6 +10,10 @@
 #
 # The two image tags are the versions the repository records (src/local_rag/binary_drop.py);
 # `local_rag.container start` refuses images that are not those.
+#
+# The system image can also be built by compose itself, from a checkout of this repository
+# (a clone from the network's own git mirror): `docker compose ... up -d --build` run on this
+# file in the checkout.
 name: local-rag
 
 services:
@@ -26,6 +30,9 @@ services:
 
   mcp:
     image: local-rag:0.1.0
+    build: &build
+      context: ../..  # the repository root, relative to this file
+      dockerfile: deploy/container/Dockerfile
     restart: always
     command: ["local-rag-mcp"]
     depends_on: [qdrant]
@@ -61,12 +68,12 @@ services:
       LIT_BIN: ${LIT_BIN:-}
       RAG_SYNC_LOCK_STALE_AFTER: ${RAG_SYNC_LOCK_STALE_AFTER:-}
       RAG_REBUILD_FAILURE_THRESHOLD: ${RAG_REBUILD_FAILURE_THRESHOLD:-}
-      CONFLUENCE_DOMAIN: ${CONFLUENCE_DOMAIN:-}
+      CONFLUENCE_DOMAIN: ${CONFLUENCE_DOMAIN:-confluence}
       CONFLUENCE_API_PATH: ${CONFLUENCE_API_PATH:-}
       CONFLUENCE_AUTH_TYPE: ${CONFLUENCE_AUTH_TYPE:-}
       CONFLUENCE_API_TOKEN: ${CONFLUENCE_API_TOKEN:-}
       CONFLUENCE_READ_ONLY: ${CONFLUENCE_READ_ONLY:-true}
-      GITLAB_URL: ${GITLAB_URL:-}
+      GITLAB_URL: ${GITLAB_URL:-https://gitlab.org}
       GITLAB_TOKEN: ${GITLAB_TOKEN:-}
     ports:
       - "${MCP_PORT:-8765}:${MCP_PORT:-8765}"
@@ -81,6 +88,7 @@ services:
   # Not part of `up`: it is in a profile, which `run` enables for the service it names.
   sync:
     image: local-rag:0.1.0
+    build: *build
     profiles: [sync]
     command: ["local-rag", "sync", "confluence"]
     depends_on: [qdrant]

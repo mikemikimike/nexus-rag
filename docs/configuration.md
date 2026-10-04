@@ -90,8 +90,8 @@ The env file; unset means the default. The authoritative list is `src/local_rag/
 | `RAG_COLLECTION` | `knowledge` | the Qdrant collection name |
 | `RAG_OCR` | off | `1` to OCR scanned PDFs (needs the language data offline) |
 | `LIT_BIN`, `CONFLUENCE_BIN` | the venv's `lit`, `confluence` on `PATH` | the `lit` and `confluence` commands |
-| `CONFLUENCE_DOMAIN` and the other `CONFLUENCE_*` | | the Confluence CLI's profile |
-| `GITLAB_URL`, `GITLAB_TOKEN` | | the GitLab Corpus: base URL and a read-only token, scope `read_repository` |
+| `CONFLUENCE_DOMAIN` and the other `CONFLUENCE_*` | `confluence` (the domain, a host name without `https://`) | the Confluence CLI's profile |
+| `GITLAB_URL`, `GITLAB_TOKEN` | URL `https://gitlab.org`, no token | the GitLab Corpus: base URL and a read-only token, scope `read_repository` |
 | `MCP_TOKENS` | one generated | comma-separated, one per user or team |
 | `MCP_HOST`, `MCP_PORT` | `127.0.0.1`, 8765 | where the MCP server listens (the Installer's env file sets `0.0.0.0`) |
 | `MCP_TLS_CERT`, `MCP_TLS_KEY` | | systemd route only: TLS served by the MCP server |

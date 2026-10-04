@@ -29,7 +29,7 @@ Search is hybrid (meaning and exact terms such as `ORA-00942`), or keyword-only 
 
 ## Choose a route
 
-Both routes install from a hand-carried **Binary drop**, refuse a drop that does not match before changing anything, and never touch an existing env file or Knowledge index. What has to be carried in: [what crosses the air gap](docs/air-gap.md).
+Both routes install from a hand-carried **Binary drop** (except compose, below), refuse a drop that does not match before changing anything, and never touch an existing env file or Knowledge index. What has to be carried in: [what crosses the air gap](docs/air-gap.md).
 
 | | systemd route | container route |
 |---|---|---|
@@ -39,6 +39,10 @@ Both routes install from a hand-carried **Binary drop**, refuse a drop that does
 | Env file | `/etc/local-rag/local-rag.env` | `/etc/local-rag/container.env` |
 | TLS | built in, or behind a proxy | proxy required |
 | **Guide** | **[docs/install-systemd.md](docs/install-systemd.md)** | **[docs/install-container.md](docs/install-container.md)** |
+
+The container route also runs **straight from compose**, with no drop: clone the mirrored repository on the host and `docker compose up -d --build` builds the image there, with the host's own apt, pip and npm configuration. You write the env file and `corpora.toml` yourself; [the steps](docs/install-container.md#straight-from-compose).
+
+Both routes ship with the same defaults: `CONFLUENCE_DOMAIN=confluence` and `GITLAB_URL=https://gitlab.org` (the compose file applies them when the env file leaves them out), and a commented Confluence, GitLab and folder Corpus in `corpora.toml`. Set the two tokens, declare the Corpora you want and change the domain and URL to your own.
 
 Each guide walks the same steps, with the commands for its route:
 
