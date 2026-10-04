@@ -19,3 +19,4 @@ The Knowledge index used to hold one Corpus: a Sync removed every Document its C
 
 - Corpora are declared in one file rather than by per-run `--folder` and `--roots-file` flags, so that `sync <corpus>` and `rebuild` read the same definitions.
 - A change that needs a Rebuild for one kind of content (code chunking, the embedding model) re-embeds every Corpus.
+- The record of index generations is no longer written only under the index-wide lock: the first Syncs of different Corpora into an empty index each create a generation, and one of them promotes it. Every change to that record therefore holds a short lock of its own, a first promotion never prunes (the other first Syncs are still writing theirs, and each discards its own), and the next Rebuild cleans up after any that crashed.

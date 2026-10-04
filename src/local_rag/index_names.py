@@ -2,9 +2,10 @@
 
 ``<name>`` is the plain collection earlier versions kept as the whole index. Since then each
 generation is a collection ``<name>.gen-<12 hex digits>``, the Live and previous index are the
-aliases ``<name>.live`` and ``<name>.previous``, and four kinds of small record collections sit
-beside them: the generation registry, the last Sync, the index-wide lock with one lock per
-Corpus, and the lock that guards a first promotion.
+aliases ``<name>.live`` and ``<name>.previous``, and small record collections sit beside
+them: the generation registry, the last Sync, the index-wide lock with one lock per Corpus,
+the lock that guards a first promotion, and the lock that guards each change to the
+registry.
 """
 
 import re
@@ -23,6 +24,7 @@ class IndexNames:
         self.last_sync = f"{name}.last-sync"
         self.lock = f"{name}.sync-lock"  # held by a Rebuild, a switch-back or a Forget
         self.promote_lock = f"{name}.promote-lock"
+        self.registry_lock = f"{name}.registry-lock"
         self._generation = re.compile(re.escape(f"{name}.gen-") + "[0-9a-f]{12}")
 
     def corpus_lock(self, corpus: str) -> str:
@@ -52,7 +54,15 @@ class IndexNames:
         """Whether ``collection`` has a name this index gives its collections. A collection
         named like a generation may still be another's: only the registry says it is ours."""
         return (
-            collection in (self.plain, self.registry, self.last_sync, self.lock, self.promote_lock)
+            collection
+            in (
+                self.plain,
+                self.registry,
+                self.last_sync,
+                self.lock,
+                self.promote_lock,
+                self.registry_lock,
+            )
             or self.corpus_of_lock(collection) is not None
             or self.is_generation(collection)
         )

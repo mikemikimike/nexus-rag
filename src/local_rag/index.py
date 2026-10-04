@@ -140,7 +140,9 @@ class KnowledgeIndex:
         self._embedding_failure: str | None = None
         self._names = IndexNames(settings.collection)
         self._journal = Journal(self._client, self._names.last_sync)
-        self._generations = Generations(self._client, self._names)
+        self._generations = Generations(
+            self._client, self._names, self._lock(self._names.registry_lock)
+        )
         # Held by a Rebuild or switch-back; a Sync holds only its own Corpus's lock.
         self._exclusive = self._lock(self._names.lock)
 
@@ -226,7 +228,11 @@ class KnowledgeIndex:
                         self._discard(target)
                         self._require_writable(live)
                         target = live
-                        self._add(document, target)
+                        try:
+                            self._add(document, target)
+                        except Exception as error:
+                            failures[stored] = describe(error)
+                            continue
                 if stored_as is None:
                     added += 1
                 else:
@@ -259,30 +265,15 @@ class KnowledgeIndex:
         """Make the generation live unless another Sync's first generation already is.
 
         Returns the Live index. The check and the promotion are one short critical section,
-        so two first Syncs of different Corpora cannot both promote.
+        so two first Syncs of different Corpora cannot both promote. Nothing is pruned: the
+        other first Syncs' generations are still being written, and each discards its own.
         """
-        guard = self._lock(self._names.promote_lock)
-        clock = self._lock_clock or time.monotonic
-        patience = (
-            2 * self._settings.sync_lock_stale_after
-        )  # room for one abandoned lock to go stale
-        give_up_at = clock() + patience
-        while True:
-            try:
-                with guard.hold("promotion"):
-                    live = self._generations.live()
-                    if live is None:
-                        self._generations.promote(generation)
-                        return generation
-                    return live
-            except SyncInProgress:
-                if clock() >= give_up_at:
-                    raise SyncInProgress(
-                        f"cannot promote the first index: the promote lock "
-                        f"{self._names.promote_lock} has been held for over "
-                        f"{patience:g} seconds"
-                    ) from None
-                time.sleep(0.01)
+        with self._lock(self._names.promote_lock).wait("the first promotion"):
+            live = self._generations.live()
+            if live is None:
+                self._generations.promote(generation, prune=False)
+                return generation
+            return live
 
     def rebuild(self, corpora: Sequence[Corpus]) -> RebuildReport:
         """Re-embed every Document of every Corpus into a fresh index and make it live if
