@@ -17,7 +17,8 @@ has several writers. Each mirror is made and fetched only while holding an exclu
 the half-made-mirror cleanup cannot remove it). The kernel releases a lock when its holder
 exits, however it exits, so a crashed Sync never leaves one behind. Reading a mirror takes no
 lock: git moves refs atomically and a fetch never removes the objects of a pinned commit.
-The verdicts file has its own lock, described at ``_verdicts_lock``.
+The verdicts file has its own lock, described at ``_verdicts_lock``, and is pruned after each
+complete listing, as described at ``_forget``.
 
 A Repository may have several Tracked refs, one of them its Primary ref: the same file at two
 of them is two Documents. A Tracked ref that no longer exists (a merged and deleted branch)
@@ -35,6 +36,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -57,6 +59,7 @@ DEFAULT_MAX_SIZE = 200_000  # bytes; a larger file is data or generated, not som
 _MAX_ERROR_LENGTH = 500
 _VERDICTS_FILE = ".verdicts-1"  # in the cache; its suffix changes with the rules of a verdict
 _VERDICTS_LOCK = ".verdicts.lock"  # in the cache; guards the verdicts file, see _verdicts_lock
+_LISTED_DIR = ".listed-blobs"  # in the cache; the blobs each Corpus last listed, see _forget
 _GENERATED_HEAD = 1024
 _BATCH = 200
 _SHOWN_UNREADABLE = 10  # paths named in the log line about paths that are not UTF-8
@@ -253,9 +256,11 @@ class GitLabCorpus:
         self._timeout = timeout
         self._pinned: dict[str, str] = {}  # part -> the commit its listing was taken at
         self._verdicts: dict[tuple[str, bool], bool] | None = None  # loaded when first needed
+        self._listed: set[str] = set()  # the blobs judged by the listing under way
 
     def list(self) -> Listing:
         refs, failures = [], {}
+        self._listed = set()
         fetched: dict[str, str | None] = {}  # repository path -> why it could not be fetched
         for repository in self._repositories:
             if repository.path not in fetched:
@@ -275,6 +280,8 @@ class GitLabCorpus:
                     DocumentRef(code.document_id, blob, (tracked.part,), code.placement(self._url))
                     for code, blob in files
                 ]
+        if not failures:
+            self._forget()
         return Listing(refs, failures)
 
     def _fetched(self, repository: Repository) -> str | None:
@@ -359,6 +366,7 @@ class GitLabCorpus:
         is only ever read once."""
         verdicts = self._remembered()
         wanted = {(f.blob, is_code(f.media_type)) for f in files}
+        self._listed.update(f.blob for f in files)
         unknown = sorted({blob for blob, as_code in wanted if (blob, as_code) not in verdicts})
         learned = []
         for start in range(0, len(unknown), _BATCH):
@@ -387,18 +395,47 @@ class GitLabCorpus:
 
     def _remembered(self) -> dict[tuple[str, bool], bool]:
         if self._verdicts is None:
-            self._verdicts = {}
-            try:
-                with self._verdicts_lock(exclusive=False):
-                    text = (self._cache / _VERDICTS_FILE).read_text(encoding="ascii")
-                lines = text.splitlines()
-            except (OSError, UnicodeDecodeError):
-                lines = []  # no memory yet, or a damaged one: blobs are read again
-            for line in lines:
-                fields = line.split()
-                if len(fields) == 3 and fields[1] in ("0", "1") and fields[2] in ("0", "1"):
-                    self._verdicts[fields[0], fields[1] == "1"] = fields[2] == "1"
+            with self._verdicts_lock(exclusive=False):
+                self._verdicts = _parse_verdicts(_read(self._cache / _VERDICTS_FILE))
         return self._verdicts
+
+    def _forget(self) -> None:
+        """After a complete listing, drops from the verdicts file every blob that no Corpus
+        sharing the cache had in its last complete listing, so that the file does not grow with
+        every commit. A listing with a failed part forgets nothing: the part may come back.
+
+        Each Corpus keeps the blobs of its last complete listing in a file of its own under
+        ``_LISTED_DIR``; a blob is kept while any of those files names it. A Corpus that is no
+        longer declared leaves its file behind, and its blobs' verdicts with it, until the
+        cache is deleted. Everything happens under the exclusive verdicts lock, reading the
+        file again under it, and the file is replaced whole (written beside it, then renamed
+        over it), so a reader or a crash never sees it half-written; it is not rewritten when
+        nothing is to be dropped. A forgotten blob that comes back is simply read again.
+
+        The verdicts this Corpus learned are written back if they are missing: another
+        Corpus may have dropped them before this Corpus's listed blobs were written."""
+        listed = "".join(f"{blob}\n" for blob in sorted(self._listed))
+        mine = self._cache / _LISTED_DIR / self.name
+        memory = self._cache / _VERDICTS_FILE
+        try:
+            with self._verdicts_lock(exclusive=True):
+                mine.parent.mkdir(exist_ok=True)
+                if _read(mine) != listed:
+                    _replace(mine, listed)
+                kept = set()
+                for corpus in mine.parent.iterdir():
+                    if not corpus.name.endswith(".tmp"):
+                        kept.update(_read(corpus).split())
+                text = _read(memory)
+                # not _remembered: its shared lock would wait for this exclusive one forever
+                verdicts = {**_parse_verdicts(text), **(self._verdicts or {})}
+                verdicts = {key: v for key, v in verdicts.items() if key[0] in kept}
+                lines = [f"{blob} {int(code)} {int(v)}\n" for (blob, code), v in verdicts.items()]
+                if sorted(lines) != sorted(text.splitlines(keepends=True)):
+                    _replace(memory, "".join(lines))
+                self._verdicts = verdicts
+        except OSError:
+            pass  # the memory only saves reading blobs again; failing to prune it fails nothing
 
     @contextmanager
     def _verdicts_lock(self, *, exclusive: bool) -> Iterator[None]:
@@ -510,6 +547,40 @@ def _flock(path: Path, *, exclusive: bool) -> Iterator[None]:
     with open(path, "a") as file:
         fcntl.flock(file, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
         yield
+
+
+def _read(path: Path) -> str:
+    """The text of a file of the cache; empty if it is missing or damaged."""
+    try:
+        return path.read_text(encoding="ascii")
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def _parse_verdicts(text: str) -> dict[tuple[str, bool], bool]:
+    """The verdicts of a verdicts file's lines, skipping damaged ones (their blobs are read
+    again)."""
+    verdicts = {}
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) == 3 and fields[1] in ("0", "1") and fields[2] in ("0", "1"):
+            verdicts[fields[0], fields[1] == "1"] = fields[2] == "1"
+    return verdicts
+
+
+def _replace(path: Path, text: str) -> None:
+    """Replaces a file whole: writes ``text`` to a new file beside it, then renames that over
+    it, so the file is always either all old or all new."""
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "w", encoding="ascii") as file:
+            file.write(text)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def _media_type(path: str) -> str:
