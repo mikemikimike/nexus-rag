@@ -262,6 +262,11 @@ class KnowledgeIndex:
         so two first Syncs of different Corpora cannot both promote.
         """
         guard = self._lock(self._names.promote_lock)
+        clock = self._lock_clock or time.monotonic
+        patience = (
+            2 * self._settings.sync_lock_stale_after
+        )  # room for one abandoned lock to go stale
+        give_up_at = clock() + patience
         while True:
             try:
                 with guard.hold("promotion"):
@@ -271,6 +276,12 @@ class KnowledgeIndex:
                         return generation
                     return live
             except SyncInProgress:
+                if clock() >= give_up_at:
+                    raise SyncInProgress(
+                        f"cannot promote the first index: the promote lock "
+                        f"{self._names.promote_lock} has been held for over "
+                        f"{patience:g} seconds"
+                    ) from None
                 time.sleep(0.01)
 
     def rebuild(self, corpora: Sequence[Corpus]) -> RebuildReport:

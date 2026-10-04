@@ -3,7 +3,7 @@
 Before the restructuring, the exporter, ingest scripts, shell glue and MCP server each held part of the picture: sidecar files recorded what had been indexed, `flock` in the systemd units prevented overlap, and the MCP server read exported files from a data directory. These had to agree through an undocumented on-disk layout. The **Knowledge index** now owns all three.
 
 - **Change detection.** A **Corpus** supplies an opaque version per **Document**. The index stores it and replaces a Document only when it differs. Corpora hold no state about what has been indexed.
-- **Locking.** The index allows one **Sync** or **Rebuild** at a time and enforces it itself, so overlapping timers or an operator's manual run cannot corrupt it. The units contain no `flock`.
+- **Locking.** The index allows one **Sync** or **Rebuild** at a time and enforces it itself, so overlapping timers or an operator's manual run cannot corrupt it. The units contain no `flock`. A lock whose holder died is taken over once its heartbeat is older than the stale time (`sync_lock_stale_after`, two minutes by default); a lock marker that was created but never stamped counts from when a run first found it, so it too is taken over after the same time, by any run or process. A first Sync waits at most twice that time for the promote lock, then fails with an error naming it.
 - **Document text and Spaces.** The index stores each Document's full text and its **Space**. `get_page` and `list_spaces` read from the index, so the MCP server needs no data directory and `list_spaces` cannot disagree with what search can return.
 
 ## Consequences

@@ -7,6 +7,13 @@ The lock lives in Qdrant, as a tiny marker collection, so that it also holds acr
 processes (overlapping timers) that share one Qdrant server. The holder refreshes a
 heartbeat while it runs; a marker whose heartbeat has stopped (the holder crashed) is
 taken over once it is older than ``stale_after`` seconds.
+
+A marker is created before it is stamped, so its creator may die in between. Whoever first
+finds a marker unstamped records that moment in the marker itself (a "witness" point), so
+every run and process judges its age against the same start, and an abandoned marker is
+taken over ``stale_after`` seconds after it was first seen. A creator that is merely slow
+to stamp is therefore never taken over early. This uses only ordinary points, so it works
+on any Qdrant server the project supports.
 """
 
 import threading
@@ -18,6 +25,7 @@ from contextlib import contextmanager
 from qdrant_client import QdrantClient, models
 
 _HEARTBEAT_POINT = 1
+_WITNESS_POINT = 2
 
 
 class SyncInProgress(RuntimeError):
@@ -52,17 +60,15 @@ class ExclusiveRun:
     ):
         """``now`` replaces the clock every age decision reads, for tests.
 
-        By default a stamped heartbeat is compared against the wall clock, which other
-        processes share, and a marker never stamped against a monotonic reading.
+        By default the wall clock is read, which other processes share: heartbeats and
+        witness points are stamped with it.
         """
         self._client = client
         self._name = name
         self._stale_after = stale_after
         self._heartbeat_every = stale_after / 4 if heartbeat_every is None else heartbeat_every
-        self._wall_clock = now or time.time
-        self._elapsed_clock = now or time.monotonic
+        self._clock = now or time.time
         self._local = threading.Lock()
-        self._unstamped_since: float | None = None
 
     @contextmanager
     def hold(self, what: str = "Sync") -> Iterator[Lease]:
@@ -127,21 +133,40 @@ class ExclusiveRun:
                 models.PointStruct(
                     id=_HEARTBEAT_POINT,
                     vector=[1.0],
-                    payload={"owner": owner, "heartbeat": self._wall_clock()},
+                    payload={"owner": owner, "heartbeat": self._clock()},
                 )
             ],
             wait=True,
         )
 
     def _age(self) -> float:
-        points = self._client.retrieve(self._name, ids=[_HEARTBEAT_POINT])
-        if points:
-            self._unstamped_since = None
-            return self._wall_clock() - (points[0].payload or {})["heartbeat"]
+        points = {
+            point.id: point.payload or {}
+            for point in self._client.retrieve(self._name, ids=[_HEARTBEAT_POINT, _WITNESS_POINT])
+        }
+        if _HEARTBEAT_POINT in points:
+            return self._clock() - points[_HEARTBEAT_POINT]["heartbeat"]
         # Created but not yet stamped: the creator is starting up, or died in between.
-        if self._unstamped_since is None:
-            self._unstamped_since = self._elapsed_clock()
-        return self._elapsed_clock() - self._unstamped_since
+        if _WITNESS_POINT in points:
+            return self._clock() - points[_WITNESS_POINT]["first_seen"]
+        try:
+            self._witness()
+        except Exception:
+            if self._client.collection_exists(self._name):
+                raise
+            # Taken over and deleted meanwhile: report it held, the caller retries.
+        return 0.0
+
+    def _witness(self) -> None:
+        self._client.upsert(
+            self._name,
+            points=[
+                models.PointStruct(
+                    id=_WITNESS_POINT, vector=[1.0], payload={"first_seen": self._clock()}
+                )
+            ],
+            wait=True,
+        )
 
     def _beat(self, owner: str, stop: threading.Event) -> None:
         while not stop.wait(self._heartbeat_every):
