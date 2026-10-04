@@ -339,8 +339,6 @@ def test_an_install_that_failed_part_way_is_retried_by_the_next_run(machine):
 
 
 UNITS = [
-    "local-rag-full.service",
-    "local-rag-full.timer",
     "local-rag-mcp.service",
     "local-rag-sync.service",
     "local-rag-sync.timer",
@@ -366,15 +364,36 @@ def test_plain_services_and_timers_call_the_command_line(machine):
     assert directives(unit(machine, "local-rag-sync.service"), "ExecStart") == [
         "/opt/local-rag/venv/bin/local-rag sync confluence"
     ]
-    assert directives(unit(machine, "local-rag-full.service"), "ExecStart") == [
-        "/opt/local-rag/venv/bin/local-rag sync confluence"
-    ]
     assert directives(unit(machine, "local-rag-mcp.service"), "ExecStart") == [
         "/opt/local-rag/venv/bin/local-rag-mcp"
     ]
     assert directives(unit(machine, "qdrant.service"), "ExecStart") == ["/opt/qdrant/qdrant"]
     assert directives(unit(machine, "local-rag-sync.timer"), "OnCalendar") == ["hourly"]
-    assert directives(unit(machine, "local-rag-full.timer"), "OnCalendar") == ["Sun 03:00"]
+
+
+def test_a_sync_that_finds_another_run_going_is_not_a_failed_unit(machine):
+    machine.install()
+
+    for name in ("local-rag-sync", "local-rag-sync@"):
+        assert directives(unit(machine, f"{name}.service"), "SuccessExitStatus") == ["75"], name
+
+
+def test_an_upgrade_retires_the_weekly_units_an_earlier_release_installed(machine):
+    machine.install()
+    units = machine.path("/etc/systemd/system")
+    for name in ("local-rag-full.service", "local-rag-full.timer"):
+        (units / name).write_text("[Unit]\n")
+    ran = len(machine.host.ran)
+
+    machine.install()
+
+    after = machine.host.ran[ran:]
+    assert ["systemctl", "disable", "--now", "local-rag-full.timer"] in after
+    assert not (units / "local-rag-full.service").exists()
+    assert not (units / "local-rag-full.timer").exists()
+    assert after.index(["systemctl", "disable", "--now", "local-rag-full.timer"]) < after.index(
+        ["systemctl", "daemon-reload"]
+    )
 
 
 def test_a_templated_unit_pair_syncs_any_corpus_by_name_on_its_own_timer(machine):
@@ -394,7 +413,7 @@ def test_a_templated_unit_pair_syncs_any_corpus_by_name_on_its_own_timer(machine
 def test_every_service_loads_the_one_env_file_the_installer_creates(machine):
     machine.install()
 
-    for name in ("qdrant", "local-rag-mcp", "local-rag-sync", "local-rag-sync@", "local-rag-full"):
+    for name in ("qdrant", "local-rag-mcp", "local-rag-sync", "local-rag-sync@"):
         assert directives(unit(machine, f"{name}.service"), "EnvironmentFile") == [
             "/etc/local-rag/local-rag.env"
         ], name
@@ -414,7 +433,6 @@ def test_the_units_are_registered_and_started(machine):
         "--now",
         "local-rag-mcp.service",
         "local-rag-sync.timer",
-        "local-rag-full.timer",
     ] in ran
     assert ran.index(["systemctl", "daemon-reload"]) < ran.index(
         ["systemctl", "enable", "--now", "qdrant.service"]

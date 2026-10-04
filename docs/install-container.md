@@ -87,7 +87,7 @@ compose run --rm -T sync
 sudo grep '^MCP_TOKENS=' /etc/local-rag/container.env
 ```
 
-From now on the container timers sync the `confluence` Corpus hourly and weekly. Any other Corpus syncs on its own templated timer, every 15 minutes, once you enable it. For a Corpus named `gitlab`:
+From now on the container timers sync the `confluence` Corpus hourly. Any other Corpus syncs on its own templated timer, every 15 minutes, once you enable it. For a Corpus named `gitlab`:
 
 ```bash
 sudo systemctl enable --now local-rag-container-sync@gitlab.timer

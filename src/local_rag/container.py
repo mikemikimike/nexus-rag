@@ -56,6 +56,7 @@ from local_rag.installer import (
     Layout,
     SystemHost,
     create_text,
+    retire_units,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -84,6 +85,7 @@ def system_tarball(version: str = SYSTEM_VERSION) -> str:
 
 COMPOSE_FILE = "deploy/container/compose.yaml"
 UNITS_DIRECTORY = "deploy/container"
+RETIRED_UNITS = ("local-rag-container-full.timer", "local-rag-container-full.service")
 PREREQUISITE_COMMANDS = {"docker": "Docker Engine", "systemctl": "systemd"}
 
 
@@ -267,8 +269,11 @@ class _Stack:
             if path.suffix in (".service", ".timer")
         )
         changed = [
-            _replace_if_different(unit, layout.units_directory / unit.name, self.done)
-            for unit in units
+            retire_units(self.host, layout.units_directory, RETIRED_UNITS, self.done),
+            *(
+                _replace_if_different(unit, layout.units_directory / unit.name, self.done)
+                for unit in units
+            ),
         ]
         self.host.run(
             [

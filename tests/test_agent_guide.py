@@ -227,7 +227,7 @@ def test_the_helpers_are_the_install_guides(name, route):
 def test_the_guide_states_what_it_must_not_contradict():
     flat = " ".join(GUIDE.split())
 
-    assert "runs the same `local-rag sync` as the hourly one" in flat
+    assert "the hourly timer is the only scheduled Sync of the Confluence Corpus" in flat
     assert "plain HTTP, no TLS pass-through" in flat
     assert "builds from the working tree but archives `HEAD`" in flat
     assert "one Passage per Document" not in flat and "issue #29" not in flat
