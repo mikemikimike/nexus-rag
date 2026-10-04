@@ -191,7 +191,7 @@ def run_gitlab(ctx: Context) -> None:
     check = ctx.report.check
     declared: list = []
     check("gitlab.git", lambda: _tool_runs(ctx, declared))
-    check("gitlab.repositories", lambda: _repositories(declared), needs=["gitlab.git"])
+    check("gitlab.repositories", lambda: _repositories(ctx, declared), needs=["gitlab.git"])
 
 
 def _declared(ctx: Context, read):
@@ -230,10 +230,36 @@ def _tool_runs(ctx: Context, declared: list) -> str:
         ) from None
 
 
-def _repositories(declared: list) -> str:
+def _nearest_existing(path: Path) -> Path:
+    while not path.exists() and path != path.parent:
+        path = path.parent
+    return path
+
+
+def _same_owner(ctx: Context, declared: list) -> None:
+    """Refuse to list as another user than the one owning a Corpus's cache: a mirror or verdict
+    file made there would belong to this user, and the service user's next Sync could not
+    update it."""
+    me = ctx.current_user()
+    for corpus in declared:
+        directory = _nearest_existing(Path(corpus._cache).absolute())
+        owner = ctx.owner_of(directory)
+        if owner != me:
+            raise Failure(
+                f"running as {me}, but {directory} (the cache of Corpus {corpus.name}) "
+                f"belongs to {owner}",
+                cause="this group fetches mirrors into the cache, and what it writes there as "
+                f"{me} the Syncs cannot update: run the suite as the service user, with "
+                "`run_rag` (systemd route) or `compose run --rm -T sync` (container route)",
+                see="section 7 (Verify)",
+            )
+
+
+def _repositories(ctx: Context, declared: list) -> str:
+    _same_owner(ctx, declared)
     unread, files = {}, 0
     for corpus in declared:
-        listing = corpus.list()  # fetches each mirror; read-only
+        listing = corpus.list()  # fetches each mirror into the Corpus's cache
         files += len(listing)
         unread.update({f"{corpus.name}: {part}": why for part, why in listing.failures.items()})
     if unread:

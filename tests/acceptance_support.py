@@ -83,10 +83,13 @@ class Host:
         return ""
 
 
-def run_suite(*argv, environ=None, gateway=None, qdrant=None, host=None, no_gateway=False):
+def run_suite(
+    *argv, environ=None, gateway=None, qdrant=None, host=None, no_gateway=False, users=None
+):
     """Run the suite offline; returns (exit code, stdout, stderr).
 
-    ``no_gateway`` leaves the suite to build the Model gateway itself, as a real run does."""
+    ``no_gateway`` leaves the suite to build the Model gateway itself, as a real run does.
+    ``users`` replaces (the user the suite runs as, the owner of a path) lookups."""
     out, err = io.StringIO(), io.StringIO()
     qdrant = qdrant or Qdrant()
     code = acceptance.main(
@@ -95,6 +98,7 @@ def run_suite(*argv, environ=None, gateway=None, qdrant=None, host=None, no_gate
         gateway=None if no_gateway else gateway or good_gateway(),
         connect=qdrant.connect,
         run=host or Host(),
+        users=users,
         stdout=out,
         stderr=err,
     )
