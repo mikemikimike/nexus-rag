@@ -4,10 +4,10 @@ Two files, both created once by the Installer or `container start` and never ove
 
 | File | Holds |
 |---|---|
-| Env file: `/etc/local-rag/local-rag.env` (systemd route) or `/etc/local-rag/container.env` (container route) | settings and secrets |
-| `/etc/local-rag/corpora.toml` (override with `RAG_CORPORA_FILE` or `--corpora FILE`) | the Corpora to index |
+| Env file: `/etc/nexus-rag/nexus-rag.env` (systemd route) or `/etc/nexus-rag/container.env` (container route) | settings and secrets |
+| `/etc/nexus-rag/corpora.toml` (override with `RAG_CORPORA_FILE` or `--corpora FILE`) | the Corpora to index |
 
-Settings are read at start: after an edit, restart the MCP server (`sudo systemctl restart local-rag-mcp`, or `compose up -d` on the container route).
+Settings are read at start: after an edit, restart the MCP server (`sudo systemctl restart nexus-rag-mcp`, or `compose up -d` on the container route).
 
 ## Declaring Corpora
 
@@ -39,7 +39,7 @@ path = "/srv/docs"                  # relative paths are relative to the file; t
 ```toml
 [corpus.gitlab]                     # GITLAB_URL and GITLAB_TOKEN (env file): a read-only service account, scope read_repository
 kind = "gitlab"
-cache = "/var/cache/local-rag/gitlab"   # optional: bare git mirrors, safe to delete (default: $HOME/.cache/local-rag/gitlab)
+cache = "/var/cache/nexus-rag/gitlab"   # optional: bare git mirrors, safe to delete (default: $HOME/.cache/nexus-rag/gitlab)
 
 [[corpus.gitlab.repositories]]
 path = "platform/payments"          # the project's full path; the Space is its group, platform
@@ -52,7 +52,7 @@ A GitLab Corpus indexes the files of each listed Repository at each Tracked ref,
 
 ## Settings
 
-The env file; unset means the default. The authoritative list is `src/local_rag/environment.py`.
+The env file; unset means the default. The authoritative list is `src/nexus_rag/environment.py`.
 
 ### Model gateway
 

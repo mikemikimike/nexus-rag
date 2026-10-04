@@ -7,9 +7,9 @@ import fake_confluence
 from conftest import SYNONYMS
 from fake_litellm_server import FakeLiteLLM
 from index_states import NAMES
-from local_rag.cli import main
-from local_rag.exclusive import ExclusiveRun
-from local_rag.fakes import FakeModelGateway
+from nexus_rag.cli import main
+from nexus_rag.exclusive import ExclusiveRun
+from nexus_rag.fakes import FakeModelGateway
 
 EMBEDDING = {
     "RAG_EMBED_MODEL": "embed",  # Hybrid retrieval, the default, needs these named

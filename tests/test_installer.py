@@ -8,8 +8,8 @@ import pytest
 
 import fake_drop
 from fake_host import FakeHost
-from local_rag.binary_drop import Artifact
-from local_rag.installer import main
+from nexus_rag.binary_drop import Artifact
+from nexus_rag.installer import main
 
 
 class Machine:
@@ -37,7 +37,7 @@ class Machine:
         return self.root / absolute.lstrip("/")
 
     def env(self) -> dict[str, str]:
-        text = self.path("/etc/local-rag/local-rag.env").read_text()
+        text = self.path("/etc/nexus-rag/nexus-rag.env").read_text()
         pairs = (
             line.split("=", 1)
             for line in text.splitlines()
@@ -61,7 +61,7 @@ def test_first_install_generates_the_secrets_once_into_one_env_file(machine):
     assert len(env["MCP_TOKENS"]) >= 32 and "," not in env["MCP_TOKENS"]
     assert env["QDRANT_API_KEY"] != env["MCP_TOKENS"]
     assert env["QDRANT_URL"] == "http://127.0.0.1:6333"
-    assert oct(machine.path("/etc/local-rag/local-rag.env").stat().st_mode & 0o777) == "0o640"
+    assert oct(machine.path("/etc/nexus-rag/nexus-rag.env").stat().st_mode & 0o777) == "0o640"
 
 
 def test_the_installer_runs_on_a_machine_with_only_the_standard_library():
@@ -71,7 +71,7 @@ def test_the_installer_runs_on_a_machine_with_only_the_standard_library():
         "import sys\n"
         "for blocked in ('qdrant_client', 'mcp', 'llama_index', 'bs4'):\n"
         "    sys.modules[blocked] = None\n"  # makes importing it raise ImportError
-        "import local_rag.installer\n"
+        "import nexus_rag.installer\n"
     )
     result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
 
@@ -79,13 +79,13 @@ def test_the_installer_runs_on_a_machine_with_only_the_standard_library():
 
 
 def test_the_package_still_offers_its_public_names():
-    import local_rag
+    import nexus_rag
 
-    assert local_rag.KnowledgeIndex.__name__ == "KnowledgeIndex"
-    assert local_rag.Settings.__name__ == "Settings"
-    assert "KnowledgeIndex" in dir(local_rag)
+    assert nexus_rag.KnowledgeIndex.__name__ == "KnowledgeIndex"
+    assert nexus_rag.Settings.__name__ == "Settings"
+    assert "KnowledgeIndex" in dir(nexus_rag)
     with pytest.raises(AttributeError):
-        _ = local_rag.NoSuchName
+        _ = nexus_rag.NoSuchName
 
 
 def snapshot(root):
@@ -97,7 +97,7 @@ def snapshot(root):
 
 
 def test_an_existing_env_file_is_never_overwritten(machine):
-    env_file = machine.path("/etc/local-rag/local-rag.env")
+    env_file = machine.path("/etc/nexus-rag/nexus-rag.env")
     env_file.parent.mkdir(parents=True)
     env_file.write_text("MCP_TOKENS=alice,bob\nQDRANT_API_KEY=mine\n")
 
@@ -143,7 +143,7 @@ def test_a_qdrant_binary_of_the_wrong_version_is_refused_before_anything_is_inst
 
 
 def test_a_code_archive_that_does_not_match_the_drops_checksums_is_refused(machine):
-    archive = machine.drop / "local-rag-0.1.0.tar.gz"
+    archive = machine.drop / "nexus-rag-0.1.0.tar.gz"
     archive.write_bytes(archive.read_bytes() + b"tampered")
 
     code, _, err = machine.install()
@@ -154,7 +154,7 @@ def test_a_code_archive_that_does_not_match_the_drops_checksums_is_refused(machi
 
 
 def test_a_drop_without_a_code_archive_is_refused(machine):
-    (machine.drop / "local-rag-0.1.0.tar.gz").unlink()
+    (machine.drop / "nexus-rag-0.1.0.tar.gz").unlink()
 
     code, _, err = machine.install()
 
@@ -163,7 +163,7 @@ def test_a_drop_without_a_code_archive_is_refused(machine):
 
 
 def main_default_record():
-    from local_rag.binary_drop import QDRANT
+    from nexus_rag.binary_drop import QDRANT
 
     return QDRANT
 
@@ -236,7 +236,7 @@ def test_data_directories_and_the_env_file_are_given_to_the_service(machine):
         assert machine.path(directory).is_dir()
         assert chowned(machine, "ragsvc:ragsvc", directory)
     # root owns the file (systemd reads it as root); the service group may read it
-    assert chowned(machine, "root:ragsvc", "/etc/local-rag/local-rag.env")
+    assert chowned(machine, "root:ragsvc", "/etc/nexus-rag/nexus-rag.env")
     assert not any("-R" in c for c in machine.host.ran)  # never a sweep over existing data
 
 
@@ -244,7 +244,7 @@ def test_existing_data_and_documents_are_left_exactly_as_they_are(machine):
     index_file = machine.path("/var/lib/qdrant/storage/collections/live/segment.dat")
     index_file.parent.mkdir(parents=True)
     index_file.write_bytes(b"the index")
-    roots = machine.path("/etc/local-rag/corpora.toml")
+    roots = machine.path("/etc/nexus-rag/corpora.toml")
     roots.parent.mkdir(parents=True)
     roots.write_text("# my space\n")
     before = snapshot(machine.path("/var/lib/qdrant/storage"))
@@ -260,7 +260,7 @@ def test_existing_data_and_documents_are_left_exactly_as_they_are(machine):
 def test_a_corpora_file_is_provided_for_the_unit_to_read_when_there_is_none(machine):
     machine.install()
 
-    roots = machine.path("/etc/local-rag/corpora.toml")
+    roots = machine.path("/etc/nexus-rag/corpora.toml")
     assert roots.is_file()
     assert all(line.startswith("#") or not line.strip() for line in roots.read_text().splitlines())
 
@@ -279,7 +279,7 @@ def test_the_python_environment_is_built_from_the_pinned_lockfile_and_the_code_a
     code, _, err = machine.install()
 
     assert code == 0, err
-    venv = str(machine.path("/opt/local-rag/venv"))
+    venv = str(machine.path("/opt/nexus-rag/venv"))
     assert machine.host.ran_matching("-m", "venv", venv)
     (requested,) = lock_installs(machine.host)
     assert machine.host.lockfiles == ["alpha==1.0\nbeta==2.0\n"]  # the drop's lockfile, as carried
@@ -311,15 +311,15 @@ def test_an_upgrade_reinstalls_the_code_and_requests_packages_only_when_the_lock
     machine.install()
 
     fake_drop.code_archive(
-        machine.drop / "local-rag-0.1.0.tar.gz",
+        machine.drop / "nexus-rag-0.1.0.tar.gz",
         lock="alpha==1.0\n",
-        extra={"src/local_rag/new.py": b"# changed code\n"},
+        extra={"src/nexus_rag/new.py": b"# changed code\n"},
     )
     fake_drop.write_sums(machine.drop)
     machine.install()
     assert len(code_installs(machine.host)) == 2 and len(lock_installs(machine.host)) == 1
 
-    fake_drop.code_archive(machine.drop / "local-rag-0.1.0.tar.gz", lock="alpha==1.1\n")
+    fake_drop.code_archive(machine.drop / "nexus-rag-0.1.0.tar.gz", lock="alpha==1.1\n")
     fake_drop.write_sums(machine.drop)
     machine.install()
     assert len(code_installs(machine.host)) == 3 and len(lock_installs(machine.host)) == 2
@@ -339,11 +339,11 @@ def test_an_install_that_failed_part_way_is_retried_by_the_next_run(machine):
 
 
 UNITS = [
-    "local-rag-mcp.service",
-    "local-rag-sync.service",
-    "local-rag-sync.timer",
-    "local-rag-sync@.service",
-    "local-rag-sync@.timer",
+    "nexus-rag-mcp.service",
+    "nexus-rag-sync.service",
+    "nexus-rag-sync.timer",
+    "nexus-rag-sync@.service",
+    "nexus-rag-sync@.timer",
     "qdrant.service",
 ]
 
@@ -361,37 +361,37 @@ def test_plain_services_and_timers_call_the_command_line(machine):
 
     for name in UNITS:
         assert machine.path(f"/etc/systemd/system/{name}").is_file(), name
-    assert directives(unit(machine, "local-rag-sync.service"), "ExecStart") == [
-        "/opt/local-rag/venv/bin/local-rag sync confluence"
+    assert directives(unit(machine, "nexus-rag-sync.service"), "ExecStart") == [
+        "/opt/nexus-rag/venv/bin/nexus-rag sync confluence"
     ]
-    assert directives(unit(machine, "local-rag-mcp.service"), "ExecStart") == [
-        "/opt/local-rag/venv/bin/local-rag-mcp"
+    assert directives(unit(machine, "nexus-rag-mcp.service"), "ExecStart") == [
+        "/opt/nexus-rag/venv/bin/nexus-rag-mcp"
     ]
     assert directives(unit(machine, "qdrant.service"), "ExecStart") == ["/opt/qdrant/qdrant"]
-    assert directives(unit(machine, "local-rag-sync.timer"), "OnCalendar") == ["hourly"]
+    assert directives(unit(machine, "nexus-rag-sync.timer"), "OnCalendar") == ["hourly"]
 
 
 def test_a_sync_that_finds_another_run_going_is_not_a_failed_unit(machine):
     machine.install()
 
-    for name in ("local-rag-sync", "local-rag-sync@"):
+    for name in ("nexus-rag-sync", "nexus-rag-sync@"):
         assert directives(unit(machine, f"{name}.service"), "SuccessExitStatus") == ["75"], name
 
 
 def test_an_upgrade_retires_the_weekly_units_an_earlier_release_installed(machine):
     machine.install()
     units = machine.path("/etc/systemd/system")
-    for name in ("local-rag-full.service", "local-rag-full.timer"):
+    for name in ("nexus-rag-full.service", "nexus-rag-full.timer"):
         (units / name).write_text("[Unit]\n")
     ran = len(machine.host.ran)
 
     machine.install()
 
     after = machine.host.ran[ran:]
-    assert ["systemctl", "disable", "--now", "local-rag-full.timer"] in after
-    assert not (units / "local-rag-full.service").exists()
-    assert not (units / "local-rag-full.timer").exists()
-    assert after.index(["systemctl", "disable", "--now", "local-rag-full.timer"]) < after.index(
+    assert ["systemctl", "disable", "--now", "nexus-rag-full.timer"] in after
+    assert not (units / "nexus-rag-full.service").exists()
+    assert not (units / "nexus-rag-full.timer").exists()
+    assert after.index(["systemctl", "disable", "--now", "nexus-rag-full.timer"]) < after.index(
         ["systemctl", "daemon-reload"]
     )
 
@@ -399,13 +399,13 @@ def test_an_upgrade_retires_the_weekly_units_an_earlier_release_installed(machin
 def test_a_templated_unit_pair_syncs_any_corpus_by_name_on_its_own_timer(machine):
     machine.install()
 
-    assert directives(unit(machine, "local-rag-sync@.service"), "ExecStart") == [
-        "/opt/local-rag/venv/bin/local-rag sync %i"
+    assert directives(unit(machine, "nexus-rag-sync@.service"), "ExecStart") == [
+        "/opt/nexus-rag/venv/bin/nexus-rag sync %i"
     ]
-    assert directives(unit(machine, "local-rag-sync@.service"), "EnvironmentFile") == [
-        "/etc/local-rag/local-rag.env"
+    assert directives(unit(machine, "nexus-rag-sync@.service"), "EnvironmentFile") == [
+        "/etc/nexus-rag/nexus-rag.env"
     ]
-    assert directives(unit(machine, "local-rag-sync@.timer"), "OnCalendar") == ["*:0/15"]
+    assert directives(unit(machine, "nexus-rag-sync@.timer"), "OnCalendar") == ["*:0/15"]
     enabled = [command for command in machine.host.ran if command[:2] == ["systemctl", "enable"]]
     assert not [name for command in enabled for name in command if "@" in name]  # opt in per Corpus
 
@@ -413,9 +413,9 @@ def test_a_templated_unit_pair_syncs_any_corpus_by_name_on_its_own_timer(machine
 def test_every_service_loads_the_one_env_file_the_installer_creates(machine):
     machine.install()
 
-    for name in ("qdrant", "local-rag-mcp", "local-rag-sync", "local-rag-sync@"):
+    for name in ("qdrant", "nexus-rag-mcp", "nexus-rag-sync", "nexus-rag-sync@"):
         assert directives(unit(machine, f"{name}.service"), "EnvironmentFile") == [
-            "/etc/local-rag/local-rag.env"
+            "/etc/nexus-rag/nexus-rag.env"
         ], name
     assert machine.env()["QDRANT__STORAGE__STORAGE_PATH"] == "/var/lib/qdrant/storage"
     assert directives(unit(machine, "qdrant.service"), "WorkingDirectory") == ["/var/lib/qdrant"]
@@ -431,8 +431,8 @@ def test_the_units_are_registered_and_started(machine):
         "systemctl",
         "enable",
         "--now",
-        "local-rag-mcp.service",
-        "local-rag-sync.timer",
+        "nexus-rag-mcp.service",
+        "nexus-rag-sync.timer",
     ] in ran
     assert ran.index(["systemctl", "daemon-reload"]) < ran.index(
         ["systemctl", "enable", "--now", "qdrant.service"]
@@ -453,7 +453,7 @@ def test_rerunning_leaves_the_units_and_systemd_alone(machine):
 def test_an_upgrade_replaces_the_units_and_restarts_what_changed(tmp_path):
     machine = Machine(tmp_path)
     machine.install()
-    unit_path = machine.path("/etc/systemd/system/local-rag-sync.timer")
+    unit_path = machine.path("/etc/systemd/system/nexus-rag-sync.timer")
     unit_path.write_text("an older unit\n")
     ran = len(machine.host.ran)
 
@@ -465,7 +465,7 @@ def test_an_upgrade_replaces_the_units_and_restarts_what_changed(tmp_path):
     assert [
         "systemctl",
         "try-restart",
-        "local-rag-mcp.service",
+        "nexus-rag-mcp.service",
     ] not in after  # same code: no restart
 
 
@@ -474,14 +474,14 @@ def test_an_upgrade_restarts_the_services_whose_files_changed(tmp_path):
     machine.install()
     ran = len(machine.host.ran)
 
-    fake_drop.code_archive(machine.drop / "local-rag-0.1.0.tar.gz", extra={"x": b"new code"})
+    fake_drop.code_archive(machine.drop / "nexus-rag-0.1.0.tar.gz", extra={"x": b"new code"})
     fake_drop.write_sums(machine.drop)
     new_qdrant = fake_drop.qdrant_tarball(machine.drop / fake_drop.QDRANT_TARBALL, "1.20.0")
     machine.qdrant_record = new_qdrant
     machine.install()
 
     after = machine.host.ran[ran:]
-    assert ["systemctl", "try-restart", "local-rag-mcp.service"] in after
+    assert ["systemctl", "try-restart", "nexus-rag-mcp.service"] in after
     assert ["systemctl", "try-restart", "qdrant.service"] in after
 
 
@@ -499,9 +499,9 @@ def test_a_failed_registration_with_systemd_is_retried_by_the_next_run(machine):
 def test_a_code_archive_without_the_units_or_the_lockfile_is_refused_before_anything_changes(
     machine,
 ):
-    archive = machine.drop / "local-rag-0.1.0.tar.gz"
+    archive = machine.drop / "nexus-rag-0.1.0.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
-        info = tarfile.TarInfo("local-rag/requirements.lock")
+        info = tarfile.TarInfo("nexus-rag/requirements.lock")
         tar.addfile(info, io.BytesIO(b""))
     fake_drop.write_sums(machine.drop)
 
@@ -517,13 +517,13 @@ def test_an_interrupted_chown_cannot_leave_an_env_file_or_directory_the_next_run
     machine.host.fail_on = "chown"
     assert machine.install()[0] == 1
     # whatever the failed run left, it is not the real env file nor the real data directory
-    assert not machine.path("/etc/local-rag/local-rag.env").exists()
+    assert not machine.path("/etc/nexus-rag/nexus-rag.env").exists()
     assert not machine.path("/var/lib/qdrant").exists()
 
     machine.host.fail_on = None
     assert machine.install()[0] == 0
     assert len(machine.env()["QDRANT_API_KEY"]) >= 32
-    assert chowned(machine, "root:ragsvc", "/etc/local-rag/local-rag.env")
+    assert chowned(machine, "root:ragsvc", "/etc/nexus-rag/nexus-rag.env")
     assert chowned(machine, "ragsvc:ragsvc", "/var/lib/qdrant/storage")
     leftovers = [p for p in machine.root.rglob("*") if p.name.endswith(".new") or ".tmp" in p.name]
     assert leftovers == []

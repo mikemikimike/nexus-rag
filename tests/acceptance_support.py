@@ -5,8 +5,8 @@ import io
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 
-from local_rag import acceptance, acceptance_corpus
-from local_rag.fakes import FakeModelGateway
+from nexus_rag import acceptance, acceptance_corpus
+from nexus_rag.fakes import FakeModelGateway
 
 QDRANT_KEY = "qdrant-secret-key"
 MCP_TOKEN = "mcp-secret-token"
@@ -115,7 +115,7 @@ def systemd_host(**kwargs) -> Host:
     return Host(
         {
             "stat -c %a": "640\n",
-            "list-timers": TIMERS.format(sync="local-rag-sync"),
+            "list-timers": TIMERS.format(sync="nexus-rag-sync"),
         },
         **kwargs,
     )
@@ -126,7 +126,7 @@ def container_host(**kwargs) -> Host:
         {
             "stat -c %a": "600\n",
             "docker ps": "mcp Up 3 hours (healthy)\nqdrant Up 3 hours\n",
-            "list-timers": TIMERS.format(sync="local-rag-container-sync"),
+            "list-timers": TIMERS.format(sync="nexus-rag-container-sync"),
         },
         **kwargs,
     )

@@ -1,0 +1,10 @@
+[Unit]
+Description=nexus-rag (container): incremental Sync of the Confluence Corpus
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker compose --project-name nexus-rag --env-file /etc/nexus-rag/container.env -f /opt/nexus-rag/container/compose.yaml run --rm -T sync
+TimeoutStartSec=6h
+SuccessExitStatus=75

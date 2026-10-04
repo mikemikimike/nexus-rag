@@ -13,7 +13,7 @@ import pytest
 
 from fake_drop import REPO
 
-SKILL = REPO / "skills/local-rag-admin"
+SKILL = REPO / "skills/nexus-rag-admin"
 SCRIPT = SKILL / "scripts/rag_admin.py"
 TOKEN = "a" * 48
 
@@ -25,9 +25,9 @@ def fingerprint(token: str) -> str:
 @pytest.fixture
 def host(tmp_path: Path) -> Path:
     """A systemd-route host: an env file with one token, a GitLab Corpus declared."""
-    etc = tmp_path / "root/etc/local-rag"
+    etc = tmp_path / "root/etc/nexus-rag"
     etc.mkdir(parents=True)
-    (etc / "local-rag.env").write_text(
+    (etc / "nexus-rag.env").write_text(
         "QDRANT_API_KEY=q1\n"
         f"MCP_TOKENS={TOKEN}\n"
         "# GITLAB_URL=https://gitlab.example.test\n"
@@ -60,7 +60,7 @@ def admin(host: Path, *args: str, stdin: str = "") -> subprocess.CompletedProces
 
 
 def env_file(host: Path) -> str:
-    return (host / "root/etc/local-rag/local-rag.env").read_text()
+    return (host / "root/etc/nexus-rag/nexus-rag.env").read_text()
 
 
 def test_env_show_hides_every_secret(host):
@@ -92,10 +92,10 @@ def test_settings_the_helper_manages_otherwise_are_refused(host):
 def test_tokens_are_added_named_and_revoked_by_label(host):
     added = admin(host, "token", "add", "dana")
     assert added.returncode == 0, added.stderr
-    new = (host / "home/local-rag-tokens/dana.token").read_text().strip()
+    new = (host / "home/nexus-rag-tokens/dana.token").read_text().strip()
     assert new not in added.stdout and new in env_file(host)
-    assert oct((host / "home/local-rag-tokens/dana.token").stat().st_mode)[-3:] == "600"
-    ledger = (host / "root/etc/local-rag/mcp-tokens.labels").read_text()
+    assert oct((host / "home/nexus-rag-tokens/dana.token").stat().st_mode)[-3:] == "600"
+    ledger = (host / "root/etc/nexus-rag/mcp-tokens.labels").read_text()
     assert new not in ledger and fingerprint(new) in ledger
 
     assert admin(host, "token", "name", fingerprint(TOKEN)[:8], "ops").returncode == 0
@@ -126,10 +126,10 @@ def test_add_repo_stages_and_apply_installs_keeping_comments(host):
     applied = admin(host, "corpora", "apply")
     assert applied.returncode == 0, applied.stderr
     assert "added     gitlab: tools/cli@develop" in applied.stdout
-    live = (host / "root/etc/local-rag/corpora.toml").read_text()
+    live = (host / "root/etc/nexus-rag/corpora.toml").read_text()
     assert "# the operator's comment" in live and 'refs = ["develop", "v1.0"]' in live
-    assert list((host / "root/etc/local-rag/backups").glob("corpora.toml.*"))
-    assert not (host / "home/local-rag-staging/corpora.toml").exists()
+    assert list((host / "root/etc/nexus-rag/backups").glob("corpora.toml.*"))
+    assert not (host / "home/nexus-rag-staging/corpora.toml").exists()
 
 
 def test_add_repo_refuses_what_is_not_a_project_path_or_corpus(host):
@@ -140,7 +140,7 @@ def test_add_repo_refuses_what_is_not_a_project_path_or_corpus(host):
 
 def test_apply_reports_a_removed_corpus_needs_forget(host):
     admin(host, "corpora", "stage")
-    (host / "home/local-rag-staging/corpora.toml").write_text(
+    (host / "home/nexus-rag-staging/corpora.toml").write_text(
         '[corpus.docs]\nkind = "folder"\npath = "/srv/docs"\n'
     )
     applied = admin(host, "corpora", "apply").stdout
@@ -148,23 +148,23 @@ def test_apply_reports_a_removed_corpus_needs_forget(host):
 
 
 def test_commands_run_the_way_the_route_runs_them(host):
-    systemd = admin(host, "run", "local-rag", "status").stdout
-    assert "User=ragsvc" in systemd and "/opt/local-rag/venv/bin/local-rag status" in systemd
-    assert "local-rag-sync@gitlab.service" in admin(host, "sync", "gitlab", "--detach").stdout
-    etc = host / "root/etc/local-rag"
-    (etc / "local-rag.env").rename(etc / "container.env")
-    container = admin(host, "run", "local-rag", "status").stdout
-    assert "run --rm -T sync local-rag status" in container
+    systemd = admin(host, "run", "nexus-rag", "status").stdout
+    assert "User=ragsvc" in systemd and "/opt/nexus-rag/venv/bin/nexus-rag status" in systemd
+    assert "nexus-rag-sync@gitlab.service" in admin(host, "sync", "gitlab", "--detach").stdout
+    etc = host / "root/etc/nexus-rag"
+    (etc / "nexus-rag.env").rename(etc / "container.env")
+    container = admin(host, "run", "nexus-rag", "status").stdout
+    assert "run --rm -T sync nexus-rag status" in container
     assert (
-        "local-rag-container-sync@gitlab.timer" in admin(host, "timer", "enable", "gitlab").stdout
+        "nexus-rag-container-sync@gitlab.timer" in admin(host, "timer", "enable", "gitlab").stdout
     )
 
 
 def test_acceptance_and_run_pass_their_options_through(host):
     accepted = admin(host, "acceptance", "--only", "gitlab").stdout
-    assert "local_rag.acceptance --systemd --only gitlab" in accepted
-    searched = admin(host, "run", "local-rag", "search", "x", "--repository", "a/b").stdout
-    assert "local-rag search x --repository a/b" in searched
+    assert "nexus_rag.acceptance --systemd --only gitlab" in accepted
+    searched = admin(host, "run", "nexus-rag", "search", "x", "--repository", "a/b").stdout
+    assert "nexus-rag search x --repository a/b" in searched
 
 
 def test_the_validator_builds_every_corpus_as_a_sync_would(tmp_path):
@@ -204,8 +204,8 @@ def test_the_skill_carries_the_docs_it_points_at(reference):
 
 
 def test_the_research_skill_names_only_tools_and_arguments_the_server_has():
-    text = (REPO / "skills/local-rag-research/SKILL.md").read_text()
-    server = (REPO / "src/local_rag/mcp_server.py").read_text()
+    text = (REPO / "skills/nexus-rag-research/SKILL.md").read_text()
+    server = (REPO / "src/nexus_rag/mcp_server.py").read_text()
     tools = set(re.findall(r"`(search_docs|list_spaces|get_page|\w+_\w+)\(", text))
     assert tools == {"search_docs", "list_spaces", "get_page"}
     for tool in tools:

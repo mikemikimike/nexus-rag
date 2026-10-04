@@ -3,11 +3,11 @@
 import pytest
 from qdrant_client import QdrantClient, models
 
-from local_rag import CorruptIndex
-from local_rag.chunker import Piece
-from local_rag.corpus import CodeFile, Document, TrackedRef
-from local_rag.passage_store import Narrowing, Passage, PassageStore, Written
-from local_rag.sparse import SparseVector
+from nexus_rag import CorruptIndex
+from nexus_rag.chunker import Piece
+from nexus_rag.corpus import CodeFile, Document, TrackedRef
+from nexus_rag.passage_store import Narrowing, Passage, PassageStore, Written
+from nexus_rag.sparse import SparseVector
 
 COLLECTION = "knowledge.gen-0123456789ab"
 DOCUMENT = Document(

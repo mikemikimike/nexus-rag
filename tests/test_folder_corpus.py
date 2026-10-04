@@ -4,10 +4,10 @@ import shutil
 import pytest
 
 import fake_lit
-from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import InMemoryCorpus, RawDocument
-from local_rag.fakes import FakeModelGateway
-from local_rag.folder import FolderCorpus
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.corpus import InMemoryCorpus, RawDocument
+from nexus_rag.fakes import FakeModelGateway
+from nexus_rag.folder import FolderCorpus
 
 
 @pytest.fixture

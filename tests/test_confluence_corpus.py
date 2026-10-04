@@ -3,10 +3,10 @@ import pytest
 import fake_confluence
 import fake_lit
 from conftest import DOCUMENTS
-from local_rag import KnowledgeIndex, Settings
-from local_rag.confluence import ConfluenceCorpus, read_roots
-from local_rag.corpus import InMemoryCorpus
-from local_rag.fakes import FakeModelGateway
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.confluence import ConfluenceCorpus, read_roots
+from nexus_rag.corpus import InMemoryCorpus
+from nexus_rag.fakes import FakeModelGateway
 from test_sync import CountingGateway
 
 ROOT = "100"

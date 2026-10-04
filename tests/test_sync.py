@@ -3,9 +3,9 @@ import dataclasses
 import pytest
 
 from conftest import DOCUMENTS
-from local_rag import KnowledgeIndex, Settings
-from local_rag.corpus import Document, DocumentRef, InMemoryCorpus, Listing
-from local_rag.fakes import FakeModelGateway
+from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.corpus import Document, DocumentRef, InMemoryCorpus, Listing
+from nexus_rag.fakes import FakeModelGateway
 
 
 class CountingGateway(FakeModelGateway):
@@ -182,7 +182,7 @@ def test_search_keeps_returning_results_while_a_sync_runs(index):
 
 
 def test_a_second_sync_while_one_is_running_is_refused(index):
-    from local_rag import SyncInProgress
+    from nexus_rag import SyncInProgress
 
     outcome = []
 
@@ -261,8 +261,8 @@ def crashed_holder():
 def test_exclusive_run_is_shared_by_holders_of_the_same_qdrant():
     from qdrant_client import QdrantClient
 
-    from local_rag import SyncInProgress
-    from local_rag.exclusive import ExclusiveRun
+    from nexus_rag import SyncInProgress
+    from nexus_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
     first, second = ExclusiveRun(client, "lock"), ExclusiveRun(client, "lock")
@@ -279,8 +279,8 @@ def test_exclusive_run_is_shared_by_holders_of_the_same_qdrant():
 def test_exclusive_run_takes_over_the_lock_of_a_crashed_holder(clock, crashed_holder):
     from qdrant_client import QdrantClient
 
-    from local_rag import SyncInProgress
-    from local_rag.exclusive import ExclusiveRun
+    from nexus_rag import SyncInProgress
+    from nexus_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
     crashed = ExclusiveRun(client, "lock", heartbeat_every=3600, now=clock)
@@ -300,8 +300,8 @@ def test_exclusive_run_takes_over_the_lock_of_a_crashed_holder(clock, crashed_ho
 def test_a_marker_never_stamped_goes_stale_by_the_same_clock(clock):
     from qdrant_client import QdrantClient
 
-    from local_rag import SyncInProgress
-    from local_rag.exclusive import ExclusiveRun
+    from nexus_rag import SyncInProgress
+    from nexus_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
     ExclusiveRun(client, "lock", now=clock)._try_create()  # its creator died before stamping
@@ -318,8 +318,8 @@ def test_a_marker_never_stamped_goes_stale_by_the_same_clock(clock):
 def test_an_abandoned_unstamped_marker_is_taken_over_by_a_fresh_run_each_time(clock):
     from qdrant_client import QdrantClient
 
-    from local_rag import SyncInProgress
-    from local_rag.exclusive import ExclusiveRun
+    from nexus_rag import SyncInProgress
+    from nexus_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
     ExclusiveRun(client, "lock", now=clock)._try_create()  # its creator died before stamping
@@ -338,8 +338,8 @@ def test_an_abandoned_unstamped_marker_is_taken_over_by_a_fresh_run_each_time(cl
 def test_an_unstamped_marker_is_not_taken_over_before_stale_after(clock):
     from qdrant_client import QdrantClient
 
-    from local_rag import SyncInProgress
-    from local_rag.exclusive import ExclusiveRun
+    from nexus_rag import SyncInProgress
+    from nexus_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
     ExclusiveRun(client, "lock", now=clock)._try_create()
@@ -356,8 +356,8 @@ def test_an_unstamped_marker_is_not_taken_over_before_stale_after(clock):
 def test_a_creator_that_stamps_late_keeps_its_lock(clock):
     from qdrant_client import QdrantClient
 
-    from local_rag import SyncInProgress
-    from local_rag.exclusive import ExclusiveRun
+    from nexus_rag import SyncInProgress
+    from nexus_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
     slow = ExclusiveRun(client, "lock", heartbeat_every=3600, now=clock)
@@ -377,8 +377,8 @@ def test_a_creator_that_stamps_late_keeps_its_lock(clock):
 def test_a_rebuild_is_not_refused_forever_by_an_abandoned_unstamped_corpus_lock(clock):
     from qdrant_client import QdrantClient
 
-    from local_rag import SyncInProgress
-    from local_rag.exclusive import ExclusiveRun
+    from nexus_rag import SyncInProgress
+    from nexus_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
     settings = Settings()
@@ -396,13 +396,13 @@ def test_a_rebuild_is_not_refused_forever_by_an_abandoned_unstamped_corpus_lock(
 def test_a_first_sync_takes_over_an_abandoned_unstamped_promote_lock(clock, monkeypatch):
     from qdrant_client import QdrantClient
 
-    from local_rag.exclusive import ExclusiveRun
+    from nexus_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
     settings = Settings()
     index = KnowledgeIndex(settings, FakeModelGateway(), client=client, lock_clock=clock)
     ExclusiveRun(client, f"{settings.collection}.promote-lock", now=clock)._try_create()
-    monkeypatch.setattr("local_rag.index.time.sleep", lambda _: clock.advance(10))
+    monkeypatch.setattr("nexus_rag.index.time.sleep", lambda _: clock.advance(10))
 
     assert index.sync(named("code", DOCUMENTS)).added == 3
 
@@ -412,8 +412,8 @@ def test_a_first_sync_gives_up_on_a_promote_lock_that_stays_held(
 ):
     from qdrant_client import QdrantClient
 
-    from local_rag import SyncInProgress
-    from local_rag.exclusive import ExclusiveRun
+    from nexus_rag import SyncInProgress
+    from nexus_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
     settings = Settings()
@@ -426,7 +426,7 @@ def test_a_first_sync_gives_up_on_a_promote_lock_that_stays_held(
         clock.advance(10)
         holder._stamp("holder")
 
-    monkeypatch.setattr("local_rag.index.time.sleep", wait)
+    monkeypatch.setattr("nexus_rag.index.time.sleep", wait)
 
     with pytest.raises(SyncInProgress, match="promote lock"):
         index.sync(named("code", DOCUMENTS))
@@ -435,8 +435,8 @@ def test_a_first_sync_gives_up_on_a_promote_lock_that_stays_held(
 def test_a_holder_that_was_taken_over_neither_frees_nor_stamps_over_the_new_lock(clock):
     from qdrant_client import QdrantClient
 
-    from local_rag import SyncInProgress
-    from local_rag.exclusive import ExclusiveRun, LockLost
+    from nexus_rag import SyncInProgress
+    from nexus_rag.exclusive import ExclusiveRun, LockLost
 
     client = QdrantClient(location=":memory:")
     stalled = ExclusiveRun(client, "lock", heartbeat_every=3600, now=clock)
@@ -536,7 +536,7 @@ def test_a_sync_of_one_corpus_runs_to_completion_while_another_corpus_syncs(inde
 
 
 def test_a_second_sync_of_the_same_corpus_is_refused_while_other_corpora_sync_freely(index):
-    from local_rag import SyncInProgress
+    from nexus_rag import SyncInProgress
 
     outcome = []
 
@@ -555,8 +555,8 @@ def test_a_second_sync_of_the_same_corpus_is_refused_while_other_corpora_sync_fr
 def test_a_corpus_whose_sync_crashed_can_be_synced_once_its_lock_is_stale(clock, crashed_holder):
     from qdrant_client import QdrantClient
 
-    from local_rag import SyncInProgress
-    from local_rag.exclusive import ExclusiveRun
+    from nexus_rag import SyncInProgress
+    from nexus_rag.exclusive import ExclusiveRun
 
     client = QdrantClient(location=":memory:")
     settings = Settings()

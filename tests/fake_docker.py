@@ -8,7 +8,7 @@ from pathlib import Path
 
 import fake_drop
 from fake_host import FakeHost
-from local_rag.installer import CommandFailed
+from nexus_rag.installer import CommandFailed
 
 
 def image_tarball(path: Path, ref: str, content: str = "") -> None:

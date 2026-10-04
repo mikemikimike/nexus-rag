@@ -9,13 +9,13 @@ import pytest
 import fake_docker
 import fake_drop
 from fake_docker import FakeDocker
-from local_rag.binary_drop import QDRANT, SYSTEM_VERSION, sha256_of
-from local_rag.container import BuildOptions, main
+from nexus_rag.binary_drop import QDRANT, SYSTEM_VERSION, sha256_of
+from nexus_rag.container import BuildOptions, main
 
 QDRANT_IMAGE = f"qdrant/qdrant:v{QDRANT.version}"
-SYSTEM_IMAGE = f"local-rag:{SYSTEM_VERSION}"
+SYSTEM_IMAGE = f"nexus-rag:{SYSTEM_VERSION}"
 QDRANT_TAR = f"qdrant-image-{QDRANT.version}.tar"
-SYSTEM_TAR = f"local-rag-image-{SYSTEM_VERSION}.tar"
+SYSTEM_TAR = f"nexus-rag-image-{SYSTEM_VERSION}.tar"
 
 
 def run(*argv, host, **options):
@@ -36,10 +36,10 @@ def test_save_writes_both_images_and_the_code_with_versions_and_checksums(tmp_pa
 
     assert code == 0, err
     assert sorted(path.name for path in drop.iterdir()) == sorted(
-        [QDRANT_TAR, SYSTEM_TAR, f"local-rag-{SYSTEM_VERSION}.tar.gz", "SHA256SUMS"]
+        [QDRANT_TAR, SYSTEM_TAR, f"nexus-rag-{SYSTEM_VERSION}.tar.gz", "SHA256SUMS"]
     )
     listed = checksums(drop)
-    for name in (QDRANT_TAR, SYSTEM_TAR, f"local-rag-{SYSTEM_VERSION}.tar.gz"):
+    for name in (QDRANT_TAR, SYSTEM_TAR, f"nexus-rag-{SYSTEM_VERSION}.tar.gz"):
         assert listed[name] == sha256_of(drop / name)
 
 
@@ -78,7 +78,7 @@ class Host:
         (self.drop / "SHA256SUMS").write_text("".join(lines))
 
     def env(self) -> dict[str, str]:
-        text = self.path("/etc/local-rag/container.env").read_text()
+        text = self.path("/etc/nexus-rag/container.env").read_text()
         pairs = (
             line.split("=", 1)
             for line in text.splitlines()
@@ -99,8 +99,8 @@ def test_start_loads_the_images_and_brings_the_stack_up_from_the_env_file(host):
     assert host.docker.images == {QDRANT_IMAGE, SYSTEM_IMAGE}
     (up,) = host.docker.ran_matching("compose", "up")
     assert up[:2] == ["docker", "compose"]
-    assert up[up.index("--env-file") + 1] == str(host.path("/etc/local-rag/container.env"))
-    assert up[up.index("-f") + 1] == str(host.path("/opt/local-rag/container/compose.yaml"))
+    assert up[up.index("--env-file") + 1] == str(host.path("/etc/nexus-rag/container.env"))
+    assert up[up.index("-f") + 1] == str(host.path("/opt/nexus-rag/container/compose.yaml"))
     assert up[-2:] == ["up", "-d"]
 
 
@@ -165,7 +165,7 @@ def test_save_code_only_writes_the_code_archive_and_its_checksum_and_needs_no_do
     code, out, err = run("save", "--code-only", "--out", drop, host=docker)
 
     assert code == 0, err
-    archive = f"local-rag-{SYSTEM_VERSION}.tar.gz"
+    archive = f"nexus-rag-{SYSTEM_VERSION}.tar.gz"
     assert sorted(path.name for path in drop.iterdir()) == sorted([archive, "SHA256SUMS"])
     assert checksums(drop) == {archive: sha256_of(drop / archive)}
     assert [command for command in docker.ran if command[0] == "docker"] == []
@@ -185,7 +185,7 @@ def test_start_build_builds_the_system_image_from_the_verified_code_and_pulls_qd
     assert Path(build[build.index("-f") + 1]).name == "Dockerfile"
     assert not [arg for arg in build if arg.startswith("--build-arg")]  # the public defaults
     assert host.docker.ran_matching("compose", "up")
-    assert (host.root / "etc/local-rag/container.env").is_file()
+    assert (host.root / "etc/nexus-rag/container.env").is_file()
 
 
 def test_start_build_points_the_build_at_the_mirrors_and_tags_qdrant_as_the_compose_file_names_it(
@@ -218,7 +218,7 @@ def test_start_build_refuses_a_code_archive_that_is_not_the_listed_one_before_to
     tmp_path,
 ):
     host = ClosedNetworkHost(tmp_path)
-    archive = next(host.drop.glob("local-rag-*.tar.gz"))
+    archive = next(host.drop.glob("nexus-rag-*.tar.gz"))
     archive.write_bytes(archive.read_bytes() + b"\0")
 
     code, out, err = host.start()
@@ -275,7 +275,7 @@ def test_the_dockerfile_declares_every_build_argument_the_start_command_passes()
 
 
 def test_start_refuses_a_code_archive_that_is_not_the_listed_one(host):
-    archive = next(host.drop.glob("local-rag-*.tar.gz"))
+    archive = next(host.drop.glob("nexus-rag-*.tar.gz"))
     archive.write_bytes(archive.read_bytes() + b"\0")
 
     code, out, err = host.start()
@@ -291,13 +291,13 @@ def test_first_start_generates_the_secrets_once_into_one_env_file(host):
     env = host.env()
     assert len(env["QDRANT_API_KEY"]) >= 32 and len(env["MCP_TOKENS"]) >= 32
     assert env["QDRANT_API_KEY"] != env["MCP_TOKENS"] and "," not in env["MCP_TOKENS"]
-    assert oct(host.path("/etc/local-rag/container.env").stat().st_mode & 0o777) == "0o600"
+    assert oct(host.path("/etc/nexus-rag/container.env").stat().st_mode & 0o777) == "0o600"
 
 
 def test_a_second_start_never_overwrites_settings_or_the_corpora_file(host):
     host.start()
-    env_file = host.path("/etc/local-rag/container.env")
-    roots_file = host.path("/etc/local-rag/corpora.toml")
+    env_file = host.path("/etc/nexus-rag/container.env")
+    roots_file = host.path("/etc/nexus-rag/corpora.toml")
     env_file.write_text(env_file.read_text() + "LITELLM_BASE_URL=http://gateway.example.test/v1\n")
     roots_file.write_text("# mine\n")
     before = env_file.read_text()
@@ -324,27 +324,27 @@ def test_start_installs_the_timers_that_run_sync_through_docker_compose(host):
     code, out, err = host.start()
 
     assert code == 0, err
-    service = host.path("/etc/systemd/system/local-rag-container-sync.service").read_text()
+    service = host.path("/etc/systemd/system/nexus-rag-container-sync.service").read_text()
     assert "docker compose" in service and " run " in service and "sync" in service
-    assert host.path("/etc/systemd/system/local-rag-container-sync.timer").exists()
+    assert host.path("/etc/systemd/system/nexus-rag-container-sync.timer").exists()
     (enable,) = host.docker.ran_matching("systemctl", "enable")
-    assert "local-rag-container-sync.timer" in enable and "container-full" not in " ".join(enable)
+    assert "nexus-rag-container-sync.timer" in enable and "container-full" not in " ".join(enable)
 
 
 def test_start_retires_the_weekly_timer_an_earlier_release_installed(host):
     host.start()
     units = host.path("/etc/systemd/system")
-    for name in ("local-rag-container-full.service", "local-rag-container-full.timer"):
+    for name in ("nexus-rag-container-full.service", "nexus-rag-container-full.timer"):
         (units / name).write_text("[Unit]\n")
 
     code, _, err = host.start()
 
     assert code == 0, err
     assert host.docker.ran_matching(
-        "systemctl", "disable", "--now", "local-rag-container-full.timer"
+        "systemctl", "disable", "--now", "nexus-rag-container-full.timer"
     )
-    assert not (units / "local-rag-container-full.service").exists()
-    assert not (units / "local-rag-container-full.timer").exists()
+    assert not (units / "nexus-rag-container-full.service").exists()
+    assert not (units / "nexus-rag-container-full.timer").exists()
 
 
 def test_start_installs_the_templated_timer_but_enables_no_instance(host):
@@ -352,7 +352,7 @@ def test_start_installs_the_templated_timer_but_enables_no_instance(host):
 
     assert code == 0, err
     for suffix in ("service", "timer"):
-        assert host.path(f"/etc/systemd/system/local-rag-container-sync@.{suffix}").exists()
+        assert host.path(f"/etc/systemd/system/nexus-rag-container-sync@.{suffix}").exists()
     (enable,) = host.docker.ran_matching("systemctl", "enable")
     assert (
         "@" not in enable
@@ -379,12 +379,12 @@ def test_the_sync_can_trust_an_internal_ca_put_in_the_certs_directory(host):
 
     sync = compose()["services"]["sync"]
     assert code == 0, err
-    assert host.path("/etc/local-rag/certs").is_dir()
-    assert "/etc/local-rag/certs:/etc/local-rag/certs:ro" in sync["volumes"]
+    assert host.path("/etc/nexus-rag/certs").is_dir()
+    assert "/etc/nexus-rag/certs:/etc/nexus-rag/certs:ro" in sync["volumes"]
     assert "NODE_EXTRA_CA_CERTS" in sync["environment"]
     assert (
-        "NODE_EXTRA_CA_CERTS=/etc/local-rag/certs/"
-        in host.path("/etc/local-rag/container.env").read_text()
+        "NODE_EXTRA_CA_CERTS=/etc/nexus-rag/certs/"
+        in host.path("/etc/nexus-rag/container.env").read_text()
     )
 
 
@@ -458,7 +458,7 @@ def test_the_compose_file_names_no_variable_twice():
 def test_every_setting_the_programs_read_can_be_set_from_the_env_file():
     # Compose passes a container only the variables it names, so a setting that is not named
     # here could never be changed in the env file (the Rebuild threshold, chunking, ...).
-    import local_rag.environment as environment
+    import nexus_rag.environment as environment
 
     read = set(
         re.findall(
@@ -485,7 +485,7 @@ def test_the_image_is_single_purpose_and_does_not_run_as_root():
     dockerfile = (fake_drop.REPO / "deploy/container/Dockerfile").read_text()
     lines = [line.strip() for line in dockerfile.splitlines()]
 
-    assert [line for line in lines if line.startswith("CMD")] == ['CMD ["local-rag-mcp"]']
+    assert [line for line in lines if line.startswith("CMD")] == ['CMD ["nexus-rag-mcp"]']
     assert not [line for line in lines if line.startswith("ENTRYPOINT")]
     assert "USER ragsvc" in lines
     assert "requirements.lock" in dockerfile  # the pinned packages, not a fresh resolution
@@ -494,30 +494,30 @@ def test_the_image_is_single_purpose_and_does_not_run_as_root():
 def test_the_timer_units_call_compose_run_with_the_files_the_start_command_places():
     units = fake_drop.REPO / "deploy/container"
 
-    service = (units / "local-rag-container-sync.service").read_text()
+    service = (units / "nexus-rag-container-sync.service").read_text()
     (command,) = [line for line in service.splitlines() if line.startswith("ExecStart=")]
     assert command.split()[0] == "ExecStart=/usr/bin/docker"
     assert command.split()[1:3] == ["compose", "--project-name"]
-    assert "--env-file /etc/local-rag/container.env" in command
-    assert "-f /opt/local-rag/container/compose.yaml" in command
+    assert "--env-file /etc/nexus-rag/container.env" in command
+    assert "-f /opt/nexus-rag/container/compose.yaml" in command
     assert command.endswith(" run --rm -T sync")
-    assert "OnCalendar=" in (units / "local-rag-container-sync.timer").read_text()
+    assert "OnCalendar=" in (units / "nexus-rag-container-sync.timer").read_text()
 
 
 def test_the_templated_unit_syncs_the_corpus_named_by_its_instance():
     units = fake_drop.REPO / "deploy/container"
-    service = (units / "local-rag-container-sync@.service").read_text()
+    service = (units / "nexus-rag-container-sync@.service").read_text()
 
     (command,) = [line for line in service.splitlines() if line.startswith("ExecStart=")]
-    assert "--env-file /etc/local-rag/container.env" in command
-    assert command.endswith(" run --rm -T sync local-rag sync %i")
-    assert "OnCalendar=*:0/15" in (units / "local-rag-container-sync@.timer").read_text()
+    assert "--env-file /etc/nexus-rag/container.env" in command
+    assert command.endswith(" run --rm -T sync nexus-rag sync %i")
+    assert "OnCalendar=*:0/15" in (units / "nexus-rag-container-sync@.timer").read_text()
 
 
 def test_the_container_sync_units_accept_the_exit_code_of_a_run_that_was_skipped():
     units = fake_drop.REPO / "deploy/container"
 
-    for name in ("local-rag-container-sync", "local-rag-container-sync@"):
+    for name in ("nexus-rag-container-sync", "nexus-rag-container-sync@"):
         assert "SuccessExitStatus=75" in (units / f"{name}.service").read_text().splitlines()
 
 
@@ -526,7 +526,7 @@ def test_the_command_runs_on_a_machine_with_only_the_standard_library():
         "import sys\n"
         "for blocked in ('qdrant_client', 'mcp', 'llama_index', 'bs4'):\n"
         "    sys.modules[blocked] = None\n"
-        "import local_rag.container\n"
+        "import nexus_rag.container\n"
     )
     result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
 
@@ -544,6 +544,6 @@ def test_both_routes_offer_the_same_settings_after_their_own_qdrant_and_mcp_part
     def shared(text: str) -> str:
         return text[text.index("# Retrieval mode") :]
 
-    container = shared(host.path("/etc/local-rag/container.env").read_text())
-    assert container == shared(machine.path("/etc/local-rag/local-rag.env").read_text())
+    container = shared(host.path("/etc/nexus-rag/container.env").read_text())
+    assert container == shared(machine.path("/etc/nexus-rag/nexus-rag.env").read_text())
     assert "RAG_REBUILD_FAILURE_THRESHOLD" in container and "GITLAB_TOKEN" in container
