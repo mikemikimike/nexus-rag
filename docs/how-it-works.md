@@ -27,6 +27,8 @@ A **Rebuild** re-embeds every Document into a fresh index and makes it the **Liv
 
 `nexus-rag sync NAME` syncs one **Corpus** and touches only its Documents, so Corpora share one Knowledge index. `nexus-rag rebuild` re-embeds every declared Corpus. A Document's id is its Corpus's name and its own id (`confluence:12345`), and Status shows the last Sync of each Corpus.
 
+On an empty index, the first Syncs of several Corpora may start at once. Each builds an index of its own until its first Document is in; the first to finish makes its index live, and the others discard theirs and carry on in the Live index. Each change to the record of index generations holds a short lock of its own (`<collection>.registry-lock`), so these Syncs cannot lose one another's changes. A Sync waits for that lock, and for the one around the first promotion (`<collection>.promote-lock`), only while another run makes such a change, never for the length of a Sync.
+
 Removing a Corpus from the declaration does not remove its Documents: they stay searchable and Status warns about them until `nexus-rag forget NAME` removes them (a Rebuild leaves them out too). A Corpus named that is not declared is a usage error (exit 2). See [ADR 0004](adr/0004-each-corpus-owns-its-documents-and-syncs-on-its-own.md).
 
 ## Index format

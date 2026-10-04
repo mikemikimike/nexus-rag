@@ -428,7 +428,7 @@ def test_a_first_sync_gives_up_on_a_promote_lock_that_stays_held(
 
     monkeypatch.setattr("nexus_rag.index.time.sleep", wait)
 
-    with pytest.raises(SyncInProgress, match="promote lock"):
+    with pytest.raises(SyncInProgress, match="promote-lock"):
         index.sync(named("code", DOCUMENTS))
 
 
@@ -572,3 +572,136 @@ def test_a_corpus_whose_sync_crashed_can_be_synced_once_its_lock_is_stale(clock,
     clock.advance(settings.sync_lock_stale_after + 1)
 
     assert index.sync(named("code", DOCUMENTS)).added == 3
+
+
+def test_concurrent_first_syncs_of_two_corpora_lose_no_registry_change(client, monkeypatch):
+    import threading
+
+    from nexus_rag.generations import Generations
+    from nexus_rag.index_format import Access
+    from nexus_rag.index_names import IndexNames
+
+    # Each thread's first registry write waits, after reading the registry, until the other
+    # has read it too: without a guard both then write, and one write is lost. With one,
+    # the other cannot read until the first has written, so the barrier gives up instead.
+    barrier = threading.Barrier(2, timeout=1)
+    waited = threading.local()
+    save = Generations._save
+
+    def interleaved_save(self, registry):
+        if not getattr(waited, "once", False):
+            waited.once = True
+            try:
+                barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+        save(self, registry)
+
+    monkeypatch.setattr(Generations, "_save", interleaved_save)
+    corpora = [named("confluence", DOCUMENTS[:2]), named("code", DOCUMENTS[2:])]
+    indexes = [KnowledgeIndex(Settings(), FakeModelGateway(), client=client) for _ in corpora]
+    reports, errors = {}, []
+
+    def sync(index, corpus):
+        try:
+            reports[corpus.name] = index.sync(corpus)
+        except Exception as error:
+            errors.append(error)
+
+    threads = [
+        threading.Thread(target=sync, args=pair) for pair in zip(indexes, corpora, strict=True)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    index = KnowledgeIndex(Settings(), FakeModelGateway(), client=client)
+    status = index.status()
+    assert status.access is Access.READ_WRITE and status.documents == 3
+    generations = Generations(client, IndexNames(Settings().collection))
+    generations.validate_records()  # the registry names the Live index
+    assert generations.format_of(status.generation) is not None
+    assert {name: report.added for name, report in reports.items()} == {"confluence": 2, "code": 1}
+    for document in DOCUMENTS:
+        assert any(p.document_id.endswith(document.id) for p in index.search(document.title))
+
+
+def test_promoting_a_first_index_spares_another_first_syncs_index_while_it_is_written(client):
+    from nexus_rag.passage_store import PassageStore
+
+    first = KnowledgeIndex(Settings(), FakeModelGateway(), client=client)
+    second = KnowledgeIndex(Settings(), FakeModelGateway(), client=client)
+    write = PassageStore.write
+    ran = []
+
+    def write_after_another_first_sync(collection, document, written):
+        if not ran:  # its generation is recorded and created, but not yet written
+            ran.append(first.sync(named("code", DOCUMENTS[2:])))
+        write(second._store, collection, document, written)
+
+    second._store.write = write_after_another_first_sync
+
+    report = second.sync(named("confluence", DOCUMENTS[:2]))
+
+    assert (report.added, report.failed) == (2, 0)
+    assert [r.added for r in ran] == [1]
+    for document in DOCUMENTS:
+        assert any(p.document_id.endswith(document.id) for p in first.search(document.title))
+
+
+class FailingOnce(FakeModelGateway):
+    """Fails the embedding call with the given number, counting from 1."""
+
+    def __init__(self, failing: int):
+        super().__init__()
+        self.calls = 0
+        self.failing = failing
+
+    def embed(self, texts):
+        self.calls += 1
+        if self.calls == self.failing:
+            raise RuntimeError("the embedding model is down")
+        return super().embed(texts)
+
+
+def lose_the_first_promotion(index, other, corpus):
+    """Make ``index`` lose its first promotion to a Sync of ``corpus`` by ``other``."""
+
+    def promote_elsewhere(generation):
+        other.sync(corpus)
+        return other._generations.live()
+
+    index._promote_first = promote_elsewhere
+
+
+def test_a_failed_re_add_after_losing_the_first_promotion_fails_only_that_document(client):
+    index = KnowledgeIndex(Settings(), FailingOnce(failing=2), client=client)  # 2: the re-add
+    other = KnowledgeIndex(Settings(), FakeModelGateway(), client=client)
+    lose_the_first_promotion(index, other, named("code", DOCUMENTS[2:]))
+
+    report = index.sync(named("confluence", DOCUMENTS[:2]))
+
+    assert (report.added, report.replaced, report.failed) == (1, 0, 1)
+    assert list(report.failures) == ["confluence:dba/ora-00942"]
+    assert "the embedding model is down" in report.failures["confluence:dba/ora-00942"]
+    assert index.search("ORA-12154")[0].document_id == "confluence:dba/ora-12154"
+    assert index.search("battery")[0].document_id == "code:garage/battery"
+    assert index.status().corpora["confluence"].outcome == "completed with failures"
+
+    later = index.sync(named("confluence", DOCUMENTS[:2]))
+
+    assert (later.added, later.unchanged, later.failed) == (1, 1, 0)
+    assert index.search("ORA-00942")[0].document_id == "confluence:dba/ora-00942"
+
+
+def test_a_successful_re_add_after_losing_the_first_promotion_counts_as_added(client):
+    index = KnowledgeIndex(Settings(), FakeModelGateway(), client=client)
+    other = KnowledgeIndex(Settings(), FakeModelGateway(), client=client)
+    lose_the_first_promotion(index, other, named("code", DOCUMENTS[2:]))
+
+    report = index.sync(named("confluence", DOCUMENTS[:2]))
+
+    assert (report.added, report.replaced, report.failed) == (2, 0, 0)
+    assert index.status().documents == 3

@@ -14,13 +14,19 @@ it exists, together with its format, and cleanup deletes only recorded names tha
 alias points at. Other collections in the same Qdrant, however their names start, are
 never touched. The registry also notes which generation was last made live, so that a
 Live index lost from Qdrant is reported as corrupt rather than read as a new, empty one.
+
+The registry is one record that every change reads and writes back whole. First Syncs of
+different Corpora change it at the same time, so each change holds a lock of its own for
+just that read and write.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from qdrant_client import QdrantClient, models
 
+from nexus_rag.exclusive import ExclusiveRun
 from nexus_rag.index_format import IndexFormat
 from nexus_rag.index_names import IndexNames
 
@@ -46,8 +52,11 @@ class _Registry:
 
 
 class Generations:
-    def __init__(self, client: QdrantClient, names: IndexNames):
+    def __init__(self, client: QdrantClient, names: IndexNames, guard: ExclusiveRun | None = None):
+        """``guard`` is the lock each change to the registry holds, named
+        ``names.registry_lock``; by default one with the default timings."""
         self._client = client
+        self._guard = guard or ExclusiveRun(client, names.registry_lock)
         self._name = names.plain
         self._live_alias = names.live
         self._previous_alias = names.previous
@@ -80,12 +89,11 @@ class Generations:
 
         The format is kept with the name, so it exists before the collection does.
         """
-        registry = self._load()
-        if generation not in registry.generations:
-            registry.generations.append(generation)
-        if index_format is not None:
-            registry.formats[generation] = index_format.to_payload()
-        self._save(registry)
+        with self._changing() as registry:
+            if generation not in registry.generations:
+                registry.generations.append(generation)
+            if index_format is not None:
+                registry.formats[generation] = index_format.to_payload()
 
     def create(self, generation: str, index_format: IndexFormat, make: Callable[[], None]) -> None:
         """Record the generation with its format, then ``make`` its collection. Recorded first,
@@ -108,8 +116,12 @@ class Generations:
         except ValueError as error:
             raise CorruptIndex(f"the recorded format of {generation} is unreadable") from error
 
-    def promote(self, generation: str) -> None:
-        """Make the generation the Live index, keep the one it replaces as previous."""
+    def promote(self, generation: str, *, prune: bool = True) -> None:
+        """Make the generation the Live index, keep the one it replaces as previous.
+
+        Without ``prune``, generations that are neither are left in place: a first Sync's
+        promotion must not delete another first Sync's generation while it is written.
+        """
         aliases = self._aliases()
         live, previous = self._resolve(aliases, strict=False)
         changes: list[models.AliasOperations] = []
@@ -123,44 +135,44 @@ class Generations:
                 changes.append(_drop_alias(self._live_alias))
         changes.append(_create_alias(self._live_alias, generation))
         self._client.update_collection_aliases(change_aliases_operations=changes)
-        self._set_live(generation)
-        self.prune()
+        with self._changing() as registry:
+            registry.live = generation
+        if prune:
+            self.prune()
 
     def switch_back(self) -> None:
         """Swap the Live index and the previous generation."""
         live, previous = self._live_and_previous()
         if live is None or previous is None:
             raise NoPreviousIndex("there is no previous index to switch back to")
-        registry = self._load()  # before the swap: an unreadable record is reported untouched
-        self._client.update_collection_aliases(
-            change_aliases_operations=[
-                _drop_alias(self._live_alias),
-                _drop_alias(self._previous_alias),
-                _create_alias(self._live_alias, previous),
-                _create_alias(self._previous_alias, live),
-            ]
-        )
-        registry.live = previous
-        self._save(registry)
+        # Read before the swap: an unreadable record is reported untouched.
+        with self._changing() as registry:
+            self._client.update_collection_aliases(
+                change_aliases_operations=[
+                    _drop_alias(self._live_alias),
+                    _drop_alias(self._previous_alias),
+                    _create_alias(self._live_alias, previous),
+                    _create_alias(self._previous_alias, live),
+                ]
+            )
+            registry.live = previous
 
     def discard(self, generation: str) -> None:
         """Delete a generation that was never promoted."""
         self._drop_collection(generation)
-        registry = self._load()
-        registry.generations = [n for n in registry.generations if n != generation]
-        registry.formats.pop(generation, None)
-        self._save(registry)
+        with self._changing() as registry:
+            registry.generations = [n for n in registry.generations if n != generation]
+            registry.formats.pop(generation, None)
 
     def prune(self) -> None:
         """Delete recorded generations that are neither live nor previous."""
         keep = set(self._resolve(self._aliases(), strict=False))
-        registry = self._load()
-        for generation in registry.generations:
-            if generation not in keep:
-                self._drop_collection(generation)
-        registry.generations = [g for g in registry.generations if g in keep]
-        registry.formats = {g: f for g, f in registry.formats.items() if g in keep}
-        self._save(registry)
+        with self._changing() as registry:
+            for generation in registry.generations:
+                if generation not in keep:
+                    self._drop_collection(generation)
+            registry.generations = [g for g in registry.generations if g in keep]
+            registry.formats = {g: f for g, f in registry.formats.items() if g in keep}
 
     def previous(self) -> str | None:
         """The collection kept for switching back to, if any."""
@@ -187,11 +199,16 @@ class Generations:
         any others it named can no longer be told from collections that are not ours, so
         they are left in place.
         """
-        if self._client.collection_exists(self._registry):
-            self._client.delete_collection(self._registry)
-        for generation in self._resolve(self._aliases(), strict=False):
-            if generation is not None and generation != self._name:
-                self.record(generation)
+        adopted = [
+            generation
+            for generation in self._resolve(self._aliases(), strict=False)
+            if generation is not None and generation != self._name
+        ]
+        with self._guard.wait("a change to the record of index generations"):
+            if self._client.collection_exists(self._registry):
+                self._client.delete_collection(self._registry)
+            if adopted:
+                self._save(_Registry(adopted))
 
     def _live_and_previous(self) -> tuple[str | None, str | None]:
         return self._resolve(self._aliases())
@@ -221,10 +238,17 @@ class Generations:
     def _aliases(self) -> dict[str, str]:
         return {a.alias_name: a.collection_name for a in self._client.get_aliases().aliases}
 
-    def _set_live(self, generation: str) -> None:
-        registry = self._load()
-        registry.live = generation
-        self._save(registry)
+    @contextmanager
+    def _changing(self) -> Iterator[_Registry]:
+        """The registry, for the ``with`` body to change; written back when it ends.
+
+        Holds the registry lock from the read to the write, so changes made at once by
+        several runs cannot overwrite one another.
+        """
+        with self._guard.wait("a change to the record of index generations"):
+            registry = self._load()
+            yield registry
+            self._save(registry)
 
     def _load(self) -> _Registry:
         if not self._client.collection_exists(self._registry):

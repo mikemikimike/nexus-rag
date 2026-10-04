@@ -20,7 +20,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 
 from qdrant_client import QdrantClient, models
 
@@ -95,6 +95,31 @@ class ExclusiveRun:
                 self._release(owner)
         finally:
             self._local.release()
+
+    @contextmanager
+    def wait(self, what: str) -> Iterator[Lease]:
+        """Hold the lock for the ``with`` body, waiting while another run holds it.
+
+        For a lock held only briefly. Raises SyncInProgress if it stays held for twice
+        ``stale_after``, room for one abandoned marker to go stale and be taken over.
+        """
+        patience = 2 * self._stale_after
+        give_up_at = self._clock() + patience
+        while True:
+            held = ExitStack()
+            try:
+                lease = held.enter_context(self.hold(what))
+            except SyncInProgress:
+                if self._clock() >= give_up_at:
+                    raise SyncInProgress(
+                        f"cannot start {what}: the lock {self._name} has been held "
+                        f"for over {patience:g} seconds"
+                    ) from None
+                time.sleep(0.01)
+                continue
+            with held:
+                yield lease
+            return
 
     def is_held(self) -> bool:
         """Whether some run holds the lock now (a marker gone stale does not count)."""

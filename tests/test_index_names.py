@@ -12,6 +12,7 @@ def test_every_collection_an_index_makes_is_named_after_it():
         names.last_sync,
         names.lock,
         names.promote_lock,
+        names.registry_lock,
         names.corpus_lock("docs"),
         names.fresh_generation(),
     ]
