@@ -339,8 +339,8 @@ SHARED_SETTINGS = """\
 # names in src/local_rag/environment.py (on the container route, listed in the compose file);
 # unset means the default.
 
-# Confluence (read by confluence-cli during a Sync)
-# CONFLUENCE_DOMAIN=confluence.example.test
+# Confluence (read by confluence-cli during a Sync). The domain is a host name, without https://
+CONFLUENCE_DOMAIN=confluence
 # CONFLUENCE_API_PATH=/rest/api
 # CONFLUENCE_AUTH_TYPE=bearer
 # CONFLUENCE_API_TOKEN=
@@ -348,7 +348,7 @@ SHARED_SETTINGS = """\
 
 # GitLab (read by a `kind = "gitlab"` Corpus; a read-only token that can see only code
 # suitable for every user of this server; the URL is the base, without a project path)
-# GITLAB_URL=https://gitlab.example.test
+GITLAB_URL=https://gitlab.org
 # GITLAB_TOKEN=
 """
 
@@ -391,6 +391,13 @@ CORPORA_FILE = """\
 # roots = ["12345", "https://wiki.example.test/pages/viewpage.action?pageId=67890"]
 # # A Space's home page as a Root covers the whole Space.
 # # Optional: max_depth = 0, attachments = true, exclude_attachments = ["*.png"]
+#
+# [corpus.gitlab]
+# kind = "gitlab"
+# # GITLAB_URL and GITLAB_TOKEN come from the env file. Name it gitlab: its timer syncs it.
+# [[corpus.gitlab.repositories]]
+# path = "platform/payments"
+# refs = ["main", {name = "release/1.2", exclude = ["docs/**"]}]   # the first is the Primary ref
 #
 # [corpus.docs]
 # kind = "folder"

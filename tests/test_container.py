@@ -10,7 +10,7 @@ import fake_docker
 import fake_drop
 from fake_docker import FakeDocker
 from local_rag.binary_drop import QDRANT, SYSTEM_VERSION, sha256_of
-from local_rag.container import main
+from local_rag.container import BuildOptions, main
 
 QDRANT_IMAGE = f"qdrant/qdrant:v{QDRANT.version}"
 SYSTEM_IMAGE = f"local-rag:{SYSTEM_VERSION}"
@@ -139,6 +139,141 @@ def test_start_refuses_a_loaded_image_that_reports_another_version_than_recorded
     assert not host.root.exists()
 
 
+def docker_commands(docker: FakeDocker, subcommand: str) -> list[list[str]]:
+    return [c for c in docker.ran if c[:2] == ["docker", subcommand]]
+
+
+class ClosedNetworkHost:
+    """A drop that holds only the code, and a host that builds its own image from mirrors."""
+
+    def __init__(self, tmp_path, **docker_options):
+        self.root = tmp_path / "root"
+        self.drop = tmp_path / "drop"
+        run("save", "--code-only", "--out", self.drop, host=FakeDocker(docker=False))
+        self.docker = FakeDocker(**docker_options)
+
+    def start(self, *options):
+        return run(
+            "start", "--drop", self.drop, "--root", self.root, "--build", *options, host=self.docker
+        )
+
+
+def test_save_code_only_writes_the_code_archive_and_its_checksum_and_needs_no_docker(tmp_path):
+    drop = tmp_path / "drop"
+    docker = FakeDocker(docker=False)
+
+    code, out, err = run("save", "--code-only", "--out", drop, host=docker)
+
+    assert code == 0, err
+    archive = f"local-rag-{SYSTEM_VERSION}.tar.gz"
+    assert sorted(path.name for path in drop.iterdir()) == sorted([archive, "SHA256SUMS"])
+    assert checksums(drop) == {archive: sha256_of(drop / archive)}
+    assert [command for command in docker.ran if command[0] == "docker"] == []
+
+
+def test_start_build_builds_the_system_image_from_the_verified_code_and_pulls_qdrants(tmp_path):
+    host = ClosedNetworkHost(tmp_path)
+
+    code, out, err = host.start()
+
+    assert code == 0, err
+    assert host.docker.images == {QDRANT_IMAGE, SYSTEM_IMAGE}
+    assert docker_commands(host.docker, "load") == []
+    assert docker_commands(host.docker, "pull") == [["docker", "pull", QDRANT_IMAGE]]
+    (build,) = docker_commands(host.docker, "build")
+    assert build[build.index("-t") + 1] == SYSTEM_IMAGE
+    assert Path(build[build.index("-f") + 1]).name == "Dockerfile"
+    assert not [arg for arg in build if arg.startswith("--build-arg")]  # the public defaults
+    assert host.docker.ran_matching("compose", "up")
+    assert (host.root / "etc/local-rag/container.env").is_file()
+
+
+def test_start_build_points_the_build_at_the_mirrors_and_tags_qdrant_as_the_compose_file_names_it(
+    tmp_path,
+):
+    host = ClosedNetworkHost(tmp_path)
+    mirrored = f"registry.internal/mirror/qdrant:v{QDRANT.version}"
+
+    code, out, err = host.start(
+        "--base-image=registry.internal/python:3.12-slim",
+        f"--qdrant-image={mirrored}",
+        "--apt-mirror=http://apt.internal",
+        "--pip-index-url=http://pypi.internal/simple",
+        "--npm-registry=http://npm.internal/",
+    )
+
+    assert code == 0, err
+    assert docker_commands(host.docker, "pull") == [["docker", "pull", mirrored]]
+    assert docker_commands(host.docker, "tag") == [["docker", "tag", mirrored, QDRANT_IMAGE]]
+    (build,) = docker_commands(host.docker, "build")
+    assert {arg for arg in build if arg.startswith("--build-arg")} == {
+        "--build-arg=BASE_IMAGE=registry.internal/python:3.12-slim",
+        "--build-arg=APT_MIRROR=http://apt.internal",
+        "--build-arg=PIP_INDEX_URL=http://pypi.internal/simple",
+        "--build-arg=NPM_CONFIG_REGISTRY=http://npm.internal/",
+    }
+
+
+def test_start_build_refuses_a_code_archive_that_is_not_the_listed_one_before_touching_docker(
+    tmp_path,
+):
+    host = ClosedNetworkHost(tmp_path)
+    archive = next(host.drop.glob("local-rag-*.tar.gz"))
+    archive.write_bytes(archive.read_bytes() + b"\0")
+
+    code, out, err = host.start()
+
+    assert code == 1 and "checksum" in err
+    assert host.docker.ran == []
+    assert not host.root.exists()
+
+
+def test_start_build_refuses_images_that_report_another_version_than_recorded(tmp_path):
+    host = ClosedNetworkHost(tmp_path, reports={SYSTEM_IMAGE: "0.0.9"})
+
+    code, out, err = host.start()
+
+    assert code == 1
+    assert "version" in err and SYSTEM_VERSION in err
+    assert host.docker.ran_matching("compose") == []
+    assert not host.root.exists()
+
+
+def test_start_build_fails_when_the_build_fails_and_leaves_the_machine_alone(tmp_path):
+    host = ClosedNetworkHost(tmp_path, fail_on="docker build")
+
+    code, out, err = host.start()
+
+    assert code == 1 and "docker build" in err
+    assert not host.root.exists()
+
+
+def test_the_mirror_flags_mean_nothing_without_build(tmp_path):
+    host = Host(tmp_path)
+
+    with pytest.raises(SystemExit):
+        run(
+            "start",
+            "--drop",
+            host.drop,
+            "--root",
+            host.root,
+            "--apt-mirror=http://x",
+            host=host.docker,
+        )
+    assert host.docker.ran == []
+
+
+def test_the_dockerfile_declares_every_build_argument_the_start_command_passes():
+    dockerfile = (fake_drop.REPO / "deploy/container/Dockerfile").read_text()
+    passed = [arg.split("=")[1] for arg in BuildOptions(*["x"] * 5).build_args()]
+
+    assert len(passed) == 4
+    for name in passed:
+        assert re.search(rf"^ARG {name}=", dockerfile, re.MULTILINE)
+    assert re.search(r"^FROM \$\{BASE_IMAGE\}$", dockerfile, re.MULTILINE)
+
+
 def test_start_refuses_a_code_archive_that_is_not_the_listed_one(host):
     archive = next(host.drop.glob("local-rag-*.tar.gz"))
     archive.write_bytes(archive.read_bytes() + b"\0")
@@ -261,6 +396,16 @@ def test_the_compose_file_runs_the_recorded_versions_of_both_images():
     assert services["sync"]["image"] == SYSTEM_IMAGE  # one image, run with another command
 
 
+def test_compose_can_build_the_system_image_from_a_checkout():
+    services = compose()["services"]
+
+    for name in ("mcp", "sync"):  # either may be the first to need the image
+        build = services[name]["build"]
+        assert build["dockerfile"] == "deploy/container/Dockerfile"
+        assert (fake_drop.REPO / build["dockerfile"]).is_file()
+    assert "build" not in services["qdrant"]
+
+
 def test_the_compose_file_keeps_data_and_the_index_in_named_volumes():
     stack = compose()
     mounted = {
@@ -288,8 +433,8 @@ def test_the_compose_file_holds_no_secret_and_takes_every_one_from_the_env_file(
 def test_the_stack_passes_the_gitlab_settings_to_the_sync_and_keeps_the_mirror_cache():
     services = compose()["services"]
 
-    for key in ("GITLAB_URL", "GITLAB_TOKEN"):
-        assert services["sync"]["environment"][key] == "${" + key + ":-}"
+    assert services["sync"]["environment"]["GITLAB_URL"] == "${GITLAB_URL:-https://gitlab.org}"
+    assert services["sync"]["environment"]["GITLAB_TOKEN"] == "${GITLAB_TOKEN:-}"
     assert "rag-data:/data" in services["sync"]["volumes"]  # HOME=/data: the default mirror cache
 
 

@@ -62,10 +62,16 @@ class FakeDocker(FakeHost):
             image_tarball(Path(command[3]), command[4])
         elif command[:2] == ["docker", "build"]:
             self.ran.append(list(command))
+            if self.fail_on and self.fail_on in " ".join(command[:2]):
+                raise CommandFailed(" ".join(command))
             self.images.add(command[command.index("-t") + 1])
         elif command[:2] == ["docker", "pull"]:
             self.ran.append(list(command))
             self.images.add(command[2])
+        elif command[:2] == ["docker", "tag"]:
+            self.ran.append(list(command))
+            assert command[2] in self.images, f"no such image {command[2]}"
+            self.images.add(command[3])
         elif "archive" in command and command[0] == "git":
             self.ran.append(list(command))
             fake_drop.code_archive(Path(command[command.index("-o") + 1]))

@@ -122,6 +122,7 @@ PYTHONPATH=/tmp/local-rag/src python3.12 -c 'from local_rag.binary_drop import Q
 
 - systemd route: `local-rag-$VERSION.tar.gz`, `SHA256SUMS` (lists the code archive) and `qdrant-x86_64-unknown-linux-gnu.tar.gz`, whose `sha256sum` must equal the `QDRANT.sha256` printed above (the Installer also runs the unpacked binary and requires `qdrant --version` to report `QDRANT.version`).
 - container route: `local-rag-$VERSION.tar.gz`, `local-rag-image-$VERSION.tar`, `qdrant-image-<QDRANT.version>.tar` and `SHA256SUMS` listing all three. `container start` also checks the image tags and the versions the images report.
+- container route, building on the network (only when the operator has a registry, a Debian mirror, a PyPI index and an npm registry and chose it): `local-rag-$VERSION.tar.gz` and `SHA256SUMS` alone. Ask for the five sources (`--base-image`, `--qdrant-image`, `--apt-mirror`, `--pip-index-url`, `--npm-registry`; `docs/install-container.md`, "Build on the closed network") and add `--build` with them to the `container start` command of section 4. `container start` then checks the versions the built images report.
 
 **The Mirror** (systemd route; the container route's images carry their packages). Request from the Mirror every package in `requirements.lock` (it is the list to request). Prove they are all there, in a throwaway venv, before the Installer starts changing the machine:
 

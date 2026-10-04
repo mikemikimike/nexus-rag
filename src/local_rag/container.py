@@ -17,6 +17,15 @@ records before it loads or starts anything, and is idempotent (it is also the up
 
     sudo PYTHONPATH=<unpacked>/src python3.12 -m local_rag.container start --drop DIR
 
+A closed network that has mirrors can build the system image itself instead of receiving it.
+The drop then holds only the code archive and SHA256SUMS (``save --code-only`` writes exactly
+that), and ``start --build`` builds the image on the host from the Debian, PyPI and npm
+mirrors and pulls Qdrant's image from a registry the network has:
+
+    sudo PYTHONPATH=<unpacked>/src python3.12 -m local_rag.container start --drop DIR --build \\
+        --base-image REGISTRY/python:3.12-slim --qdrant-image REGISTRY/qdrant/qdrant:v<version> \\
+        --apt-mirror URL --pip-index-url URL --npm-registry URL
+
 The settings and secrets are an env file outside the images, written once and never
 replaced; data and the index live in Docker volumes, which an upgrade does not touch.
 
@@ -34,6 +43,7 @@ import sys
 import tarfile
 import tempfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
@@ -84,8 +94,17 @@ def system_tarball(version: str = SYSTEM_VERSION) -> str:
 
 
 COMPOSE_FILE = "deploy/container/compose.yaml"
+DOCKERFILE = "deploy/container/Dockerfile"
 UNITS_DIRECTORY = "deploy/container"
 RETIRED_UNITS = ("local-rag-container-full.timer", "local-rag-container-full.service")
+# The flags that only apply with ``start --build``, and what each is for.
+BUILD_FLAGS = {
+    "--base-image": "the Python base image to build on (default python:3.12-slim)",
+    "--qdrant-image": "where to pull Qdrant's image from (tagged as the compose file names it)",
+    "--apt-mirror": "base URL of a Debian mirror serving /debian and /debian-security",
+    "--pip-index-url": "the PyPI index to install requirements.lock from",
+    "--npm-registry": "the npm registry to install confluence-cli from",
+}
 PREREQUISITE_COMMANDS = {"docker": "Docker Engine", "systemctl": "systemd"}
 
 
@@ -105,6 +124,29 @@ def qdrant_image(record: Artifact = QDRANT) -> str:
     return f"{QDRANT_REPOSITORY}:v{record.version}"
 
 
+@dataclass(frozen=True)
+class BuildOptions:
+    """Where ``start --build`` gets what the images are made of; None keeps the public default.
+
+    The names are the Dockerfile's build arguments.
+    """
+
+    base_image: str | None = None
+    qdrant_image: str | None = None
+    apt_mirror: str | None = None
+    pip_index_url: str | None = None
+    npm_registry: str | None = None
+
+    def build_args(self) -> list[str]:
+        named = {
+            "BASE_IMAGE": self.base_image,
+            "APT_MIRROR": self.apt_mirror,
+            "PIP_INDEX_URL": self.pip_index_url,
+            "NPM_CONFIG_REGISTRY": self.npm_registry,
+        }
+        return [f"--build-arg={name}={value}" for name, value in named.items() if value]
+
+
 def main(
     argv: Sequence[str],
     *,
@@ -116,14 +158,30 @@ def main(
     """Run one command; returns the process exit code (0 done, 1 refused or failed)."""
     out, err = stdout or sys.stdout, stderr or sys.stderr
     host = host or ContainerHost()
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.command == "start" and not args.build:
+        given = [flag for flag in BUILD_FLAGS if getattr(args, flag[2:].replace("-", "_"))]
+        if given:
+            parser.error(f"{', '.join(given)} only apply with --build")
     try:
         if args.command == "save":
-            _need(host, ["docker", "git"], real_root=False)
-            _save(host, args.out, args.repo, qdrant, out)
+            _need(host, ["git"] if args.code_only else ["docker", "git"], real_root=False)
+            _save(host, args.out, args.repo, qdrant, out, code_only=args.code_only)
         else:
             _need(host, list(PREREQUISITE_COMMANDS), real_root=args.root == Path("/"))
-            _start(host, args.drop, ContainerLayout(args.root), qdrant, out)
+            build = (
+                BuildOptions(
+                    args.base_image,
+                    args.qdrant_image,
+                    args.apt_mirror,
+                    args.pip_index_url,
+                    args.npm_registry,
+                )
+                if args.build
+                else None
+            )
+            _start(host, args.drop, ContainerLayout(args.root), qdrant, out, build)
     except DropRefused as error:
         print(f"refused: {error}", file=err)
         return 1
@@ -133,34 +191,36 @@ def main(
     return 0
 
 
-def _save(host, out_directory: Path, repository: Path, qdrant: Artifact, out: TextIO) -> None:
-    """Build the system image, pull Qdrant's, check what each says it is, and save them."""
+def _save(
+    host, out_directory: Path, repository: Path, qdrant: Artifact, out: TextIO, *, code_only: bool
+) -> None:
+    """Build the system image, pull Qdrant's, check what each says it is, and save them
+    (``code_only``: save just the code archive, for a network that builds its own image)."""
     system, official = system_image(), qdrant_image(qdrant)
     if out_directory.exists():
         raise DropRefused(f"{out_directory} exists already; save into a new directory")
-    host.run(
-        [
-            "docker",
-            "build",
-            "-f",
-            str(repository / "deploy/container/Dockerfile"),
-            "-t",
-            system,
-            str(repository),
-        ]
-    )
-    host.run(["docker", "pull", official])
-    _check_versions(host, qdrant)
+    if not code_only:
+        host.run(
+            [
+                "docker",
+                "build",
+                "-f",
+                str(repository / DOCKERFILE),
+                "-t",
+                system,
+                str(repository),
+            ]
+        )
+        host.run(["docker", "pull", official])
+        _check_versions(host, qdrant)
     out_directory.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{out_directory.name}.", dir=out_directory.parent))
     try:
-        files = [
-            staging / qdrant_tarball(qdrant),
-            staging / system_tarball(),
-            staging / f"local-rag-{SYSTEM_VERSION}.tar.gz",
-        ]
-        host.run(["docker", "save", "-o", str(files[0]), official])
-        host.run(["docker", "save", "-o", str(files[1]), system])
+        files = [staging / f"local-rag-{SYSTEM_VERSION}.tar.gz"]
+        if not code_only:
+            files = [staging / qdrant_tarball(qdrant), staging / system_tarball(), *files]
+            host.run(["docker", "save", "-o", str(files[0]), official])
+            host.run(["docker", "save", "-o", str(files[1]), system])
         host.run(
             [
                 "git",
@@ -169,7 +229,7 @@ def _save(host, out_directory: Path, repository: Path, qdrant: Artifact, out: Te
                 "archive",
                 "--prefix=local-rag/",
                 "-o",
-                str(files[2]),
+                str(files[-1]),
                 "HEAD",
             ]
         )
@@ -192,24 +252,62 @@ def _need(host, commands: Sequence[str], *, real_root: bool) -> None:
         raise DropRefused("prerequisites are not met: " + "; ".join(missing))
 
 
-def _start(host, drop: Path, layout: ContainerLayout, qdrant: Artifact, out: TextIO) -> None:
-    """Verify the drop, load its images, and bring the stack up; touches the machine only once
-    everything the drop holds is known to be what the repository records."""
+def _start(
+    host,
+    drop: Path,
+    layout: ContainerLayout,
+    qdrant: Artifact,
+    out: TextIO,
+    build: BuildOptions | None = None,
+) -> None:
+    """Verify the drop, get the images (load them, or with ``build`` build them from the
+    mirrors), and bring the stack up; touches the machine only once everything the drop holds
+    is known to be what the repository records."""
     archive = verified_code_archive(drop)
     tarballs = {
         qdrant_image(qdrant): drop / qdrant_tarball(qdrant),
         system_image(): drop / system_tarball(),
     }
-    for ref, tarball in tarballs.items():
-        verify_against_sums(tarball, drop / "SHA256SUMS")
-        _require_tag(tarball, ref)
+    if build is None:
+        for ref, tarball in tarballs.items():
+            verify_against_sums(tarball, drop / "SHA256SUMS")
+            _require_tag(tarball, ref)
     with tempfile.TemporaryDirectory(prefix="local-rag-code-") as scratch:
-        source = unpack_code(archive, Path(scratch), requires=[COMPOSE_FILE, UNITS_DIRECTORY])
-        _require_images_in(source / COMPOSE_FILE, tarballs)
-        for tarball in tarballs.values():
-            host.run(["docker", "load", "-i", str(tarball)])
+        source = unpack_code(
+            archive,
+            Path(scratch),
+            requires=[COMPOSE_FILE, UNITS_DIRECTORY, *([DOCKERFILE] if build else [])],
+        )
+        _require_images_in(source / COMPOSE_FILE, set(tarballs))
+        if build is None:
+            for tarball in tarballs.values():
+                host.run(["docker", "load", "-i", str(tarball)])
+        else:
+            _build_images(host, source, qdrant, build)
         _check_versions(host, qdrant)
         _Stack(host, layout, out).bring_up(source)
+
+
+def _build_images(host, source: Path, qdrant: Artifact, options: BuildOptions) -> None:
+    """Pull Qdrant's image (from the registry the network has, tagged as the compose file names
+    it) and build the system image from the verified code, from the mirrors."""
+    official = qdrant_image(qdrant)
+    pulled = options.qdrant_image or official
+    host.run(["docker", "pull", pulled])
+    if pulled != official:
+        host.run(["docker", "tag", pulled, official])
+    host.run(
+        [
+            "docker",
+            "build",
+            "-f",
+            str(source / DOCKERFILE),
+            *options.build_args(),
+            "-t",
+            system_image(),
+            str(source),
+        ]
+    )
 
 
 def _require_tag(tarball: Path, ref: str) -> None:
@@ -227,9 +325,8 @@ def _require_tag(tarball: Path, ref: str) -> None:
         raise DropRefused(f"{tarball.name} holds {', '.join(tags) or 'no tag'}, not {ref}")
 
 
-def _require_images_in(compose_file: Path, tarballs: dict[str, Path]) -> None:
-    """Refuse a compose file that would run other images than the ones the drop carries."""
-    wanted = set(tarballs)
+def _require_images_in(compose_file: Path, wanted: set[str]) -> None:
+    """Refuse a compose file that would run other images than the ones the drop provides."""
     named = set(
         re.findall(
             r"^\s*image:\s*(\S+)\s*$", compose_file.read_text(encoding="utf-8"), re.MULTILINE
@@ -237,7 +334,7 @@ def _require_images_in(compose_file: Path, tarballs: dict[str, Path]) -> None:
     )
     if named != wanted:
         raise DropRefused(
-            f"the compose file runs {', '.join(sorted(named))}, the drop carries "
+            f"the compose file runs {', '.join(sorted(named))}, the drop provides "
             f"{', '.join(sorted(wanted))}"
         )
 
@@ -383,6 +480,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     save = commands.add_parser("save", help="build and save the images (connected machine)")
+    save.add_argument(
+        "--code-only",
+        action="store_true",
+        help="save only the code archive, for a network that builds the image itself",
+    )
     save.add_argument("--out", type=Path, required=True, help="the Binary drop directory to write")
     save.add_argument(
         "--repo", type=Path, default=REPOSITORY_ROOT, help="the repository to build from"
@@ -390,6 +492,14 @@ def _parser() -> argparse.ArgumentParser:
     start = commands.add_parser("start", help="verify the drop, load the images, start the stack")
     start.add_argument("--drop", type=Path, required=True, help="the Binary drop directory")
     start.add_argument("--root", type=Path, default=Path("/"), help="install below this directory")
+    start.add_argument(
+        "--build",
+        action="store_true",
+        help="build the system image from the code archive and the mirrors, and pull Qdrant's "
+        "image, instead of loading the drop's image tarballs",
+    )
+    for flag, what in BUILD_FLAGS.items():
+        start.add_argument(flag, help=f"with --build: {what}")
     return parser
 
 
