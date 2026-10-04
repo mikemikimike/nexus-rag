@@ -63,6 +63,7 @@ compose run --rm -T sync                   # one Sync (what the timers do)
    - `RAG_EMBED_MODEL`, the `model_name` registered in LiteLLM (see `examples/litellm_config.yaml`). If the network has no embedding model, set `RAG_RETRIEVAL=keyword` instead ([why](how-it-works.md#keyword-only-mode))
    - optionally `RAG_RERANK_MODEL`
    - the `CONFLUENCE_*` block: bearer token, `CONFLUENCE_READ_ONLY=true`
+   - if an internal CA signed Confluence's certificate (`unable to verify the first certificate`): copy its PEM, with any intermediate certificates, to `/etc/local-rag/certs/` and set `NODE_EXTRA_CA_CERTS=/etc/local-rag/certs/ca.pem`
 
    Other settings are in [configuration](configuration.md#settings).
 2. **Corpora.** Declare them in `/etc/local-rag/corpora.toml` ([format](configuration.md#declaring-corpora)). Name the Confluence Corpus `confluence`: the timers sync it by that name.

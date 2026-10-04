@@ -73,6 +73,7 @@ services:
       CONFLUENCE_AUTH_TYPE: ${CONFLUENCE_AUTH_TYPE:-}
       CONFLUENCE_API_TOKEN: ${CONFLUENCE_API_TOKEN:-}
       CONFLUENCE_READ_ONLY: ${CONFLUENCE_READ_ONLY:-true}
+      NODE_EXTRA_CA_CERTS: ${NODE_EXTRA_CA_CERTS:-}
       GITLAB_URL: ${GITLAB_URL:-https://gitlab.org}
       GITLAB_TOKEN: ${GITLAB_TOKEN:-}
     ports:
@@ -96,6 +97,9 @@ services:
     volumes:
       - rag-data:/data
       - /etc/local-rag/corpora.toml:/etc/local-rag/corpora.toml:ro
+      # An internal CA for Confluence's certificate: put the PEM here and set
+      # NODE_EXTRA_CA_CERTS=/etc/local-rag/certs/<file> in the env file.
+      - /etc/local-rag/certs:/etc/local-rag/certs:ro
 
 volumes:
   qdrant-storage:
