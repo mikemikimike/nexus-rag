@@ -63,7 +63,7 @@ Each check prints on its own line with a stable name. `--only GROUP` (repeatable
 | `mcp` | the running MCP server, over HTTP with a token from `MCP_TOKENS` (or `--token`): `search_docs`, `list_spaces`, `get_page` answer; no token and a wrong token get 401; `/healthz` answers 200 without a token. It listens where `MCP_HOST` and `MCP_PORT` say, or `--mcp-url` |
 | `install` | needs `--systemd` or `--container`. Units exist, are active and enabled, the env file is not world-readable, the sync timers are scheduled; container route: the stack's `qdrant` and `mcp` containers are up and healthy. On the container route run it on the host, not inside the stack |
 | `confluence` | only when `CONFLUENCE_DOMAIN` is set: the read-only `confluence spaces` call works and every Root of the Confluence Corpora in the declaration file (`--corpora`) resolves |
-| `gitlab` | only when the declaration file holds a GitLab Corpus: `git --version` runs and every Tracked ref of every GitLab Corpus can be read with `GITLAB_TOKEN` (it fetches the mirrors) |
+| `gitlab` | only when the declaration file holds a GitLab Corpus: `git --version` runs and every Tracked ref of every GitLab Corpus can be read with `GITLAB_TOKEN`. It fetches the mirrors into each Corpus's cache, so run it as the service user that owns the cache (the install guide's prefix: `run_rag` or `compose run --rm -T sync`); run as anyone else it fails before fetching anything, since a mirror it made would block the next Sync |
 
 ### Reading the output
 

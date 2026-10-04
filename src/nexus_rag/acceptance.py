@@ -11,7 +11,8 @@ refused), ``index`` (a round trip on a throwaway collection and temp folder), ``
 running MCP server over HTTP), ``install`` (units or containers, env file mode, timers; needs
 ``--systemd`` or ``--container``, else it fails, and ``--skip install`` leaves it out) and
 ``confluence`` (only when ``CONFLUENCE_DOMAIN`` is set) and ``gitlab`` (only when the
-declaration holds a GitLab Corpus: the tool runs and every Tracked ref can be read).
+declaration holds a GitLab Corpus: the tool runs and every Tracked ref can be read; it fetches
+the mirrors into the Corpus's cache, so it must run as the service user that owns the cache).
 
 It never touches the live index: the index group works in its own collection, named
 ``acceptance-<random>``, and removes it and its temp folder at the end, also after a failure.
@@ -26,6 +27,7 @@ import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, TextIO
 from urllib.parse import urlsplit, urlunsplit
 
@@ -51,11 +53,13 @@ def main(
     gateway: Any = None,
     connect: Connect | None = None,
     run: Callable[[Sequence[str]], str] | None = None,
+    users: tuple[Callable[[], str], Callable[[Path], str]] | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
     """Run the suite; returns the exit code. The keyword arguments replace the Model gateway,
-    the Qdrant connection and the host's commands, for callers (tests) that have stand-ins."""
+    the Qdrant connection, the host's commands and the (current user, owner of a path)
+    lookups, for callers (tests) that have stand-ins."""
     out, err = stdout or sys.stdout, stderr or sys.stderr
     try:
         args = _parser().parse_args(argv)
@@ -89,6 +93,8 @@ def main(
         args=args,
         run_id=run_id,
     )
+    if users:
+        context.current_user, context.owner_of = users
     _describe(report, live, environment, environ, run_id, groups)
     try:
         _prepare(context, groups)

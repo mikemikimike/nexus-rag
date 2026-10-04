@@ -995,9 +995,24 @@ def gitlab_declaration(tmp_path, *repositories):
     return str(path), {"GITLAB_URL": remote.url, "GITLAB_TOKEN": "glpat-secret"}
 
 
-def gitlab_only(tmp_path, *repositories, host=None):
+def gitlab_only(tmp_path, *repositories, host=None, users=None):
     path, environ = gitlab_declaration(tmp_path, *repositories)
-    return run_suite("--only", "gitlab", "--corpora", path, environ=environ, host=host)
+    return run_suite("--only", "gitlab", "--corpora", path, environ=environ, host=host, users=users)
+
+
+class Users:
+    """Stands in for who the suite runs as and who owns each path; records the paths asked."""
+
+    def __init__(self, running_as, owner):
+        self.running_as, self.owner = running_as, owner
+        self.asked: list = []
+
+    def current(self) -> str:
+        return self.running_as
+
+    def owner_of(self, path) -> str:
+        self.asked.append(path)
+        return self.owner
 
 
 def test_a_declared_gitlab_corpus_is_checked_for_its_tool_and_every_repository(tmp_path):
@@ -1034,6 +1049,32 @@ def test_a_repository_the_token_cannot_read_fails_naming_it(tmp_path):
     failed = line(out, "gitlab.repositories")
     assert code == 1 and failed.startswith("[FAIL]") and "platform/missing@main" in failed
     assert "read_repository" in failed
+
+
+def test_a_suite_run_as_another_user_than_the_cache_owner_fails_before_fetching(tmp_path):
+    users = Users(running_as="root", owner="ragsvc")
+    code, out, _ = gitlab_only(tmp_path, users=(users.current, users.owner_of))
+
+    failed = line(out, "gitlab.repositories")
+    assert code == 1 and failed.startswith("[FAIL]")
+    assert "root" in failed and "ragsvc" in failed and str(tmp_path) in failed
+    assert "run_rag" in failed and "section 7" in failed
+    assert not (tmp_path / "mirrors").exists()  # nothing was fetched into the cache
+
+
+def test_a_suite_run_as_the_cache_owner_reads_every_repository(tmp_path):
+    users = Users(running_as="ragsvc", owner="ragsvc")
+    code, out, _ = gitlab_only(tmp_path, users=(users.current, users.owner_of))
+
+    assert code == 0, out
+    assert "1 files" in line(out, "gitlab.repositories")
+
+
+def test_a_cache_that_does_not_exist_yet_is_judged_by_its_nearest_existing_parent(tmp_path):
+    users = Users(running_as="ragsvc", owner="ragsvc")
+    gitlab_only(tmp_path, users=(users.current, users.owner_of))
+
+    assert users.asked == [tmp_path]
 
 
 # --- the Retrieval mode ----------------------------------------------------------------
