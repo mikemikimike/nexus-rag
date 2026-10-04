@@ -1,0 +1,1 @@
+../../../docs/agents/closed-network-setup.md

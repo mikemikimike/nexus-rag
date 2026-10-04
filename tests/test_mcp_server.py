@@ -518,6 +518,20 @@ def test_the_server_instructions_send_code_questions_to_search_docs(server):
         assert needle in instructions.lower(), needle
 
 
+def test_the_server_instructions_say_what_to_leave_out_of_relayed_steps(server):
+    async def run():
+        headers = {"Authorization": f"Bearer {TOKEN}"}
+        async with httpx2.AsyncClient(headers=headers) as http:
+            transport = streamable_http_client(f"{server}/mcp", http_client=http)
+            async with Client(transport) as client:
+                return client.instructions
+
+    instructions = anyio.run(run).lower()
+
+    for needle in ("speaks to an ai", "fetched from the network", "safety check", "warn the user"):
+        assert needle in instructions, needle
+
+
 def test_get_page_keeps_its_name_and_says_it_returns_a_page_or_a_file(server):
     description = tool_descriptions(server)["get_page"]
 
