@@ -93,6 +93,7 @@ class ContainerLayout(Layout):
     """Where the container route puts things, below ``root`` ("/" on a real machine)."""
 
     env_file = property(lambda self: self.at("/etc/local-rag/container.env"))
+    certs_directory = property(lambda self: self.at("/etc/local-rag/certs"))
     compose_file = property(lambda self: self.at("/opt/local-rag/container/compose.yaml"))
 
 
@@ -260,6 +261,9 @@ class _Stack:
             self.done("created", f"{layout.env_file} (new secrets)")
         else:
             self.done("kept", layout.env_file)
+        layout.certs_directory.mkdir(
+            parents=True, exist_ok=True
+        )  # a missing mount source is made root-owned by Docker
         if create_text(layout.corpora_file, CORPORA_FILE):
             self.done("created", layout.corpora_file)
         _replace_if_different(source / COMPOSE_FILE, layout.compose_file, self.done)
@@ -322,6 +326,10 @@ QDRANT_API_KEY={qdrant_key}
 # MCP server
 MCP_TOKENS={mcp_token}
 MCP_PORT=8765
+
+# An internal CA signed Confluence's certificate ("unable to verify the first certificate"):
+# put its PEM (with any intermediate certificates) in /etc/local-rag/certs and name it here.
+# NODE_EXTRA_CA_CERTS=/etc/local-rag/certs/ca.pem
 
 """
     + SHARED_SETTINGS

@@ -239,6 +239,20 @@ def compose() -> dict:
     return yaml.safe_load((fake_drop.REPO / "deploy/container/compose.yaml").read_text())
 
 
+def test_the_sync_can_trust_an_internal_ca_put_in_the_certs_directory(host):
+    code, out, err = host.start()
+
+    sync = compose()["services"]["sync"]
+    assert code == 0, err
+    assert host.path("/etc/local-rag/certs").is_dir()
+    assert "/etc/local-rag/certs:/etc/local-rag/certs:ro" in sync["volumes"]
+    assert "NODE_EXTRA_CA_CERTS" in sync["environment"]
+    assert (
+        "NODE_EXTRA_CA_CERTS=/etc/local-rag/certs/"
+        in host.path("/etc/local-rag/container.env").read_text()
+    )
+
+
 def test_the_compose_file_runs_the_recorded_versions_of_both_images():
     services = compose()["services"]
 
