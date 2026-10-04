@@ -22,11 +22,15 @@ The verdicts file has its own lock, described at ``_verdicts_lock``.
 A Repository may have several Tracked refs, one of them its Primary ref: the same file at two
 of them is two Documents. A Tracked ref that no longer exists (a merged and deleted branch)
 fails alone. Each ref may add exclude globs to the defaults.
+
+A file whose path is not valid UTF-8 cannot be named by a Document id: it is left out and
+logged, never a failure, so it neither holds back removals nor refuses a Rebuild.
 """
 
 import base64
 import fcntl
 import fnmatch
+import logging
 import os
 import re
 import shutil
@@ -47,12 +51,15 @@ from nexus_rag.corpus import (
     is_code,
 )
 
+log = logging.getLogger(__name__)
+
 DEFAULT_MAX_SIZE = 200_000  # bytes; a larger file is data or generated, not something to read
 _MAX_ERROR_LENGTH = 500
 _VERDICTS_FILE = ".verdicts-1"  # in the cache; its suffix changes with the rules of a verdict
 _VERDICTS_LOCK = ".verdicts.lock"  # in the cache; guards the verdicts file, see _verdicts_lock
 _GENERATED_HEAD = 1024
 _BATCH = 200
+_SHOWN_UNREADABLE = 10  # paths named in the log line about paths that are not UTF-8
 
 # What the Corpus indexes, by file name and then by suffix, with the Media type each is given.
 # These are the Corpus's own: code types are not in the folder and Confluence suffix table.
@@ -311,17 +318,38 @@ class GitLabCorpus:
         commit = self._commit(tracked)
         self._pinned[tracked.part] = commit
         listed = self._git("ls-tree", "-r", "-l", "-z", commit, cwd=mirror, binary=True)
-        candidates = []
-        for entry in listed.decode("utf-8", errors="replace").split("\0"):
-            meta, _, path = entry.partition("\t")
-            fields = meta.split()
+        candidates, unreadable = [], []
+        for entry in listed.split(b"\0"):
+            raw_meta, _, raw_path = entry.partition(b"\t")
+            fields = raw_meta.decode("ascii", errors="replace").split()
             if len(fields) != 4 or fields[1] != "blob" or fields[0] == "120000":
                 continue  # not a regular file: a symlink or a submodule
             if int(fields[3]) > self._max_size or int(fields[3]) == 0:
                 continue
+            path = raw_path.decode("utf-8", errors="replace")
             media_type = _wanted(path)
-            if media_type and not _excluded(path, repository.excluded(tracked.ref)):
-                candidates.append(_File(fields[2], path, media_type))
+            if not media_type or _excluded(path, repository.excluded(tracked.ref)):
+                continue
+            try:
+                raw_path.decode("utf-8")
+            except UnicodeDecodeError:  # no Document id can name it: left out, not a failure
+                unreadable.append(path)
+                continue
+            candidates.append(_File(fields[2], path, media_type))
+        if unreadable:
+            shown = ", ".join(unreadable[:_SHOWN_UNREADABLE])
+            more = (
+                f" and {len(unreadable) - _SHOWN_UNREADABLE} more"
+                if len(unreadable) > _SHOWN_UNREADABLE
+                else ""
+            )
+            log.warning(
+                "%s: left out %d file(s) whose path is not valid UTF-8: %s%s",
+                tracked.part,
+                len(unreadable),
+                shown,
+                more,
+            )
         verdicts = self._sniff(candidates, mirror)
         return [(f.path, f.blob) for f in candidates if verdicts[f.blob, is_code(f.media_type)]]
 

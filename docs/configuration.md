@@ -46,7 +46,7 @@ path = "platform/payments"          # the project's full path; the Space is its 
 refs = ["main", {name = "release/1.2", exclude = ["docs/**"]}]   # Tracked refs; the first is the Primary ref
 ```
 
-A GitLab Corpus indexes the files of each listed Repository at each Tracked ref, split along functions and classes for Python and C, by lines for other code.
+A GitLab Corpus indexes the files of each listed Repository at each Tracked ref, split along functions and classes for Python and C, by lines for other code. It leaves out binary, empty, oversized, vendored, generated and lock files, and files whose path is not valid UTF-8 (a legacy Latin-1 name, say): no Document id can name those, so each Sync logs how many it skipped at each Tracked ref, with their names, and counts none of them as a failure.
 
 Several GitLab Corpora may share one `cache`, the default included: a Repository that two of them list (say one Corpus for `main`, another for feature branches) is mirrored once and fetched by one Sync at a time, even when their timers overlap. Keep the cache on a local disk: the Syncs coordinate through file locks (`*.lock` in the cache), which a network filesystem may not honour. Deleting the cache is safe, but not while a Sync runs.
 
