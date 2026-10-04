@@ -31,7 +31,7 @@ Removing a Corpus from the declaration does not remove its Documents: they stay 
 
 ## Index format
 
-The index records how it was built: schema version, Retrieval mode, sparse encoder parameters, chunk size and overlap, and for a hybrid index the embedding model name and dimension. After an upgrade, a model change, a change of `RAG_RETRIEVAL` or a change of `RAG_CHUNK_TOKENS` or `RAG_CHUNK_OVERLAP`, `local-rag status` tells whether it still matches.
+The index records how it was built: schema version, Retrieval mode, sparse encoder parameters, chunk size and overlap for prose and for code, the languages whose code is split by its syntax, the version of the token counter that sized the Passages, and for a hybrid index the embedding model name and dimension. After an upgrade, a model change, a change of `RAG_RETRIEVAL` or a change of `RAG_CHUNK_TOKENS` or `RAG_CHUNK_OVERLAP`, `local-rag status` tells whether it still matches.
 
 - A mismatching index that can still be searched is served as a **Read-only index** with a warning, and refuses Sync until you run a Rebuild.
 - An unusable one is refused.

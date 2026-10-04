@@ -40,6 +40,7 @@ def test_status_reports_the_live_generation_counts_and_format(index, client):
         code_chunk_tokens=800,
         code_splitting="lines",
         syntax_languages=("c", "python"),
+        token_counter=2,
     )
     assert status.access == "read-write" and status.warnings == ()
 

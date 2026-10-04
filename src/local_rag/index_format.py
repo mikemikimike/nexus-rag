@@ -24,6 +24,11 @@ IDENTIFIER_SPLITTING = True
 # index. A different splitting method changes it.
 CODE_SPLITTING = "lines"
 
+# Which token counter sized the Passages, recorded because it decides where they begin and end.
+# Bump when local_rag.tokens counts differently. 1 counted every run of word characters as one
+# token, so it was never recorded; an index with none recorded was built with it.
+TOKEN_COUNTER = 2
+
 
 class Access(StrEnum):
     READ_WRITE = "read-write"
@@ -65,6 +70,8 @@ class IndexFormat:
     code_splitting: str | None = None
     # The languages whose code is split along its syntax; None when not recorded.
     syntax_languages: tuple[str, ...] | None = None
+    # Which token counter sized the Passages; None when not recorded.
+    token_counter: int | None = None
 
     @classmethod
     def written_by(cls, settings: Settings, dimension: int | None) -> "IndexFormat":
@@ -83,6 +90,7 @@ class IndexFormat:
             code_chunk_tokens=settings.code_chunk_tokens,
             code_splitting=CODE_SPLITTING,
             syntax_languages=syntax_languages(),
+            token_counter=TOKEN_COUNTER,
         )
 
     def to_payload(self) -> dict:
@@ -99,6 +107,7 @@ class IndexFormat:
             "syntax_languages": None
             if self.syntax_languages is None
             else list(self.syntax_languages),
+            "token_counter": self.token_counter,
             "corpus_ownership": self.corpus_ownership,
             "sparse": {
                 "k1": self.sparse.k1,
@@ -136,6 +145,7 @@ class IndexFormat:
                 syntax_languages=None
                 if payload.get("syntax_languages") is None
                 else tuple(str(name) for name in payload["syntax_languages"]),
+                token_counter=_optional_int(payload.get("token_counter")),
                 corpus_ownership=bool(payload.get("corpus_ownership", False)),
             )
         except (KeyError, TypeError, ValueError, AttributeError) as error:
@@ -249,6 +259,17 @@ def assess(
             differences.append(
                 f"syntax-split languages differ: index built with "
                 f"{list(recorded.syntax_languages)}, running {list(syntax_languages())}"
+            )
+        if recorded.token_counter is None:
+            differences.append(
+                "its Passages were sized by a token counter that counted a run of word "
+                "characters as one token, so some may be too large to embed (built by an "
+                "earlier version)"
+            )
+        elif recorded.token_counter != TOKEN_COUNTER:
+            differences.append(
+                f"token counter differs: index built with version {recorded.token_counter}, "
+                f"running version {TOKEN_COUNTER}"
             )
         if recorded.identifier_splitting != IDENTIFIER_SPLITTING:
             differences.append(
