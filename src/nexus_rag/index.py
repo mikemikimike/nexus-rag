@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from collections.abc import Callable, Collection, Iterator, Sequence
 from contextlib import contextmanager
@@ -56,6 +57,7 @@ _NO_EMBEDDINGS_NOTICE = (
     "Results are keyword-only: this index was built without an embedding "
     "model; an operator must run a Rebuild to add one."
 )
+_ASSESSMENT_FAILURE_COOLDOWN = 30.0
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,9 @@ class KnowledgeIndex:
         )
         # By generation: a generation's format, once written, does not change.
         self._assessments: dict[str, Assessment] = {}
+        self._unreachable_assessments: dict[str, tuple[float, Assessment]] = {}
+        self._assessment_lock = threading.Lock()
+        self._assessment_clock = time.monotonic
         # Why the embedding model failed the last time it was used; None if it worked.
         self._embedding_failure: str | None = None
         self._names = IndexNames(settings.collection)
@@ -616,37 +621,52 @@ class KnowledgeIndex:
             raise IndexRefused(_explain("the index cannot be used", assessment))
 
     def _assessment(self, generation: str, *, verify_dimension: bool = True) -> Assessment:
-        cached = self._assessments.get(generation)
-        if cached is not None:
-            return cached
-        reachable = True
+        with self._assessment_lock:
+            cached = self._assessments.get(generation)
+            if cached is not None:
+                return cached
+            failed = self._unreachable_assessments.get(generation)
+            if failed is not None:
+                retry_after, assessment = failed
+                if self._assessment_clock() < retry_after:
+                    return assessment
+                del self._unreachable_assessments[generation]
+            reachable = True
 
-        def running_dimension() -> int | None:
-            nonlocal reachable
-            vector = self._embed_query("dimension probe")
-            if vector is None:
-                reachable = False
-                return None
-            return len(vector)
+            def running_dimension() -> int | None:
+                nonlocal reachable
+                vector = self._embed_query("dimension probe")
+                if vector is None:
+                    reachable = False
+                    return None
+                return len(vector)
 
-        dimension = self._store.dense_size(generation)  # a Keyword-only index has none
-        recorded = self._generations.format_of(generation)
-        dense = dimension is not None
-        if recorded is not None and (recorded.retrieval is RetrievalMode.HYBRID) != dense:
-            raise CorruptIndex(
-                f"{generation} records {recorded.retrieval.value} retrieval but its collection "
-                f"{'has' if dense else 'has no'} dense vectors"
-            )
-        assessment = assess(
-            recorded, dimension, self._settings, running_dimension if verify_dimension else None
-        )
-        if verify_dimension and reachable:  # an unverified answer is worth asking for again
-            self._assessments[generation] = assessment
-            if assessment.access is not Access.READ_WRITE:
-                log.warning(
-                    "%s", _explain(f"index {generation} is {assessment.access}", assessment)
+            dimension = self._store.dense_size(generation)  # a Keyword-only index has none
+            recorded = self._generations.format_of(generation)
+            dense = dimension is not None
+            if recorded is not None and (recorded.retrieval is RetrievalMode.HYBRID) != dense:
+                raise CorruptIndex(
+                    f"{generation} records {recorded.retrieval.value} retrieval but its "
+                    f"collection {'has' if dense else 'has no'} dense vectors"
                 )
-        return assessment
+            assessment = assess(
+                recorded,
+                dimension,
+                self._settings,
+                running_dimension if verify_dimension else None,
+            )
+            if verify_dimension and reachable:
+                self._assessments[generation] = assessment
+                if assessment.access is not Access.READ_WRITE:
+                    log.warning(
+                        "%s", _explain(f"index {generation} is {assessment.access}", assessment)
+                    )
+            elif verify_dimension:
+                self._unreachable_assessments[generation] = (
+                    self._assessment_clock() + _ASSESSMENT_FAILURE_COOLDOWN,
+                    assessment,
+                )
+            return assessment
 
     def _extract(self, corpus: Corpus, raw: RawDocument, ref: DocumentRef) -> Document:
         """The Document as the index stores it: owned by the Corpus, its ids namespaced."""

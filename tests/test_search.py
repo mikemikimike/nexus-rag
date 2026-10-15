@@ -1,6 +1,11 @@
+import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
 import pytest
 
 from nexus_rag import KnowledgeIndex, Settings
+from nexus_rag.fakes import FakeModelGateway
 from nexus_rag.sparse import tokenize
 
 
@@ -52,3 +57,61 @@ def test_settings_repr_hides_the_qdrant_api_key():
 def test_index_rejects_an_unsupported_qdrant_location(gateway):
     with pytest.raises(ValueError, match="qdrant_location"):
         KnowledgeIndex(Settings(qdrant_location="./qdrant_data"), gateway)
+
+
+class SlowUnavailableGateway(FakeModelGateway):
+    def __init__(self):
+        super().__init__()
+        self.unavailable = True
+        self.dimension_probes = 0
+
+    def embed_query(self, text):
+        if text == "dimension probe":
+            self.dimension_probes += 1
+            time.sleep(0.05)
+            if self.unavailable:
+                raise ConnectionError("gateway unavailable")
+        return super().embed_query(text)
+
+
+def test_unreachable_dimension_probe_is_cached_until_cooldown_expires(
+    index, corpus, client, monkeypatch
+):
+    index.sync(corpus)
+    gateway = SlowUnavailableGateway()
+    index = KnowledgeIndex(Settings(), gateway, client=client)
+    now = [0.0]
+    monkeypatch.setattr(index, "_assessment_clock", lambda: now[0])
+
+    first = index.search("vehicle refuses to ignite")
+    second = index.search("car battery")
+
+    assert first.notice and "keyword-only" in first.notice
+    assert second.notice == first.notice
+    assert gateway.dimension_probes == 1
+
+    now[0] = 31.0
+    gateway.unavailable = False
+    recovered = index.search("car battery")
+
+    assert gateway.dimension_probes == 2
+    assert recovered.notice is None
+    assert recovered[0].document_id == "default:garage/battery"
+
+
+def test_concurrent_searches_share_one_unreachable_dimension_probe(index, corpus, client):
+    index.sync(corpus)
+    gateway = SlowUnavailableGateway()
+    index = KnowledgeIndex(Settings(), gateway, client=client)
+    workers = 6
+    start = Barrier(workers)
+
+    def search():
+        start.wait()
+        return index.search("gateway search fallback")
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(lambda _: search(), range(workers)))
+
+    assert gateway.dimension_probes == 1
+    assert all(result.notice and "keyword-only" in result.notice for result in results)
